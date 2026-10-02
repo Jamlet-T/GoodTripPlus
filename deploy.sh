@@ -10,6 +10,7 @@ DST="$MODS_DIR/goodtripplus"
 mkdir -p "$DST"
 rm -rf "$DST/scripts" "$DST/resources"
 cp "$SRC/main.lua" "$SRC/metadata.xml" "$SRC/gtconfig.lua" "$DST/"
+cp "$SRC/LICENSE" "$SRC/THIRD_PARTY.md" "$DST/"
 cp -r "$SRC/scripts" "$DST/scripts"
 cp -r "$SRC/resources" "$DST/resources"
 

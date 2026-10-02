@@ -224,3 +224,19 @@ git add -A && git commit -m "..."
 ```
 
 调试时可在 `gtconfig.lua` 里打开 `gt.DebugMod = true`，修复模块会往控制台 / log.txt 输出命中信息。
+
+---
+
+## 七、授权与发布
+
+本仓库的内容来自三个来源，授权状况**互不相同**，详见 [`LICENSE`](LICENSE) 与 [`THIRD_PARTY.md`](THIRD_PARTY.md)。
+
+| 来源 | 授权 | 状态 |
+| --- | --- | --- |
+| 本项目自有代码（rewind 修复、隐藏房标记对接、构建脚本） | MIT | ✅ |
+| Lazy Delver（`scripts/delver/*`、`resources/gfx/goodtripplus/marker.*`，作者 dokee） | MIT | ✅ 已随包携带其许可证 |
+| **Goodtrip MLX's Tweak**（`scripts/gtrep.lua` 的基底）+ 其上游 **tarako 的 GoodTrip** | **无许可证文件 = 保留所有权利** | ⚠️ **未获授权** |
+| MinimapAPI | 仅运行时依赖，本仓库不含其任何代码/素材 | ✅ 无需许可 |
+
+**所以：在取得上游作者许可之前，不要把包含 `scripts/gtrep.lua` 的完整包公开上传**（包括 Steam 创意工坊）。
+两条可行路线（只发布自有模块作为附加组件 / 先取得许可）与发布检查清单写在 `THIRD_PARTY.md` 里。

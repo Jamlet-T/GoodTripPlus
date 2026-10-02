@@ -1,0 +1,50 @@
+GoodTripPlus —— 授权范围说明
+============================================================================
+
+本仓库的内容来自三个不同来源，授权状况**互不相同**，请先读这段再看下面的 MIT 正文。
+逐项来源与处理方式见同目录的 THIRD_PARTY.md。
+
+【1】自有代码 —— MIT（下方正文）
+    本项目新写的部分：rewind 掉落物图标修复、隐藏房候选标记的对接与渲染、
+    GoodTripPlus 的构建与部署脚本。版权归本项目的作者。
+
+【2】移植的第三方代码 —— MIT，版权归原作者 dokee
+    scripts/delver/ 下的 const / geometry / log / state / map / room，
+    以及 resources/gfx/goodtripplus/marker.anm2|marker.png，
+    移植自 Lazy Delver（https://github.com/dokee39/IsaacLazyDelver）。
+    这些文件受原作者的 MIT 许可证保护，原文见 scripts/delver/LICENSE-lazy-delver.txt。
+    分发时必须一并携带该文件；本 LICENSE 不能把它们重新声明为自有版权。
+
+【3】上游基底 —— **没有许可证，默认保留所有权利，不包含在本 MIT 授权内**
+    scripts/gtrep.lua 是 Goodtrip MLX's Tweak（Steam 创意工坊 3749565569）的二次修改，
+    而 MLX's Tweak 本身又是 tarako 的 GoodTrip 的二次开发。
+    这两个上游作品都没有附带任何许可证文件，因此在法律上默认「保留所有权利」：
+    本项目作者并未从上游取得复制、修改、再分发的许可。
+
+    ⇒ **在取得上游作者许可之前，包含 scripts/gtrep.lua 的完整包请勿公开发布**
+      （包括上传 Steam 创意工坊）。详细的处置建议见 THIRD_PARTY.md。
+
+下方 MIT 正文只覆盖【1】与【2】中属于本项目的部分，不覆盖【3】。
+
+----------------------------------------------------------------------------
+MIT License
+
+Copyright (c) 2026 GoodTripPlus contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

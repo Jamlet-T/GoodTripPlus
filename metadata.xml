@@ -15,7 +15,9 @@ Default settings can be changed in the MCM menu or config file.
 Please uninstall or disable goodtrip_mlxtweak (and the original Goodtrip) before use.
 Required: MinimapAPI
 
-Optional: Mod Config Menu (for in-game settings)</description>
+Optional: Mod Config Menu (for in-game settings)
+
+Credits: original GoodTrip by tarako; this build is based on Goodtrip MLX's Tweak; Secret Room candidate markers are ported from Lazy Delver by dokee (MIT). See LICENSE and THIRD_PARTY.md for details.</description>
     <version>1.1.0</version>
     <visibility>Public</visibility>
     <tag id="Lua"/>
