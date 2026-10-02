@@ -2,10 +2,11 @@
 
 《以撒的结合：忏悔+》的小地图传送模组，基于 **Goodtrip MLX's Tweak**（Steam 创意工坊 3749565569）二次开发。
 
-与上游相比只做两处改动：
+与上游相比只做三处改动：
 
 1. **修复**了使用控制台 `rewind` 指令后，小地图上所有掉落物图标全部消失的问题（见第一节）。
 2. **合并**了 Lazy Delver 的隐藏房候选标记，并把标记对齐到 MinimapAPI 的真实布局（见第二节）。
+3. **新增**了「传送到未探索的相邻房间」功能，默认关闭（见第三节）。
 
 ---
 
@@ -154,7 +155,32 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 
 ---
 
-## 三、安装 / 与上游共存
+## 三、传送到未探索的相邻房间（可选，默认关闭）
+
+开关：**Mod Config Menu → GoodTripPlus → 「允许传送到未探索的相邻房间」**，
+或 `gtconfig.lua` 里设 `gt.AllowUnexploredNeighbor = true`。
+
+上游的逻辑里，传送目标必须同时满足「已探索（`VisitedCount > 0`）」和「已清理（`Clear`）」，
+所以任何没进去过的房间都会被直接拦下。这个开关放宽「未探索」这一条，但**依然要求目标贴着你的探索边界**：
+
+- 目标房间 `VisitedCount == 0`（从未进入）；
+- 它上下左右四个相邻格子里，至少有一个 `VisitedCount > 0`（已探索）；
+- 若「禁用未连通房间传送」开着（默认开），那个已探索邻居还必须能**从当前房间沿已探索路径抵达**。
+
+所以它不会让你跳到地图另一头，只能扎进你已经探索到的边界外侧一格。
+
+实现上动的是 `gt:check_teleble()` 里的准入分支，新增判定 `gt:has_reachable_explored_neighbor()`
+（左右两侧按列号排除了跨行越界；直接紧邻当前房间时，路径判定自然通过）。
+
+两点注意：
+
+- 这类房间通常**还没清怪**，传送进去会直接落在敌群里，请自行判断风险——这正是它的用途。
+- 诅咒房（进出扣血的那种）依旧受「禁止传送进诅咒房」约束，未探索的诅咒房也照样被拦下。
+- 模组自带的调试模式（`gtconfig.lua` 里 `gt.DebugMod = true`）本来就能传送到任意房间，与本开关无关。
+
+---
+
+## 四、安装 / 与上游共存
 
 1. 把本仓库同步到游戏 mods 目录（mod 目录名必须是 `goodtripplus`）：
 
@@ -172,7 +198,7 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 
 ---
 
-## 四、目录结构
+## 五、目录结构
 
 ```
 issacMod/                       ← 本 git 仓库（源码唯一来源）
@@ -200,11 +226,11 @@ issacMod/                       ← 本 git 仓库（源码唯一来源）
 
 ---
 
-## 五、与上游 / 来源的差异清单
+## 六、与上游 / 来源的差异清单
 
 | 位置 | 改动 |
 | --- | --- |
-| `scripts/gtrep.lua` | `RegisterMod` 名、ModConfigMenu 配置键 / 标题全部改为 `GoodTripPlus`；新增 MCM 开关 `ShowSecretMarkers`；其余逻辑与 MLX's Tweak 完全一致 |
+| `scripts/gtrep.lua` | `RegisterMod` 名、ModConfigMenu 配置键 / 标题全部改为 `GoodTripPlus`；新增 MCM 开关 `ShowSecretMarkers`、`AllowUnexploredNeighbor`，并放宽 `check_teleble()` 的准入判定；其余逻辑与 MLX's Tweak 完全一致 |
 | `scripts/gtp_rewindfix.lua` | 新增文件，rewind 图标修复 |
 | `scripts/gtp_delver.lua` | 新增文件，隐藏房候选标记的回调接线 |
 | `scripts/delver/*` | 从 Lazy Delver 原样移植（仅改写 `require` 路径），`render.lua` 重写了定位部分 |
@@ -213,7 +239,7 @@ issacMod/                       ← 本 git 仓库（源码唯一来源）
 
 ---
 
-## 六、开发流程
+## 七、开发流程
 
 ```bash
 # 改完源码后
@@ -227,7 +253,7 @@ git add -A && git commit -m "..."
 
 ---
 
-## 七、授权与发布
+## 八、授权与发布
 
 本仓库的内容来自三个来源，授权状况**互不相同**，详见 [`LICENSE`](LICENSE) 与 [`THIRD_PARTY.md`](THIRD_PARTY.md)。
 

@@ -8,3 +8,6 @@ gt.HighlightCursorRoom = true
 
 -- 隐藏房候选标记（合并自 Lazy Delver）
 gt.ShowSecretMarkers = true
+
+-- 允许传送到未探索的相邻房间（默认关闭，想用改成 true；也可在 MCM 里开）
+gt.AllowUnexploredNeighbor = false

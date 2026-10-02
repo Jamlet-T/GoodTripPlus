@@ -39,6 +39,7 @@ gt.RequireExploredPath = true
 gt.HighlightStartingRoom = true
 gt.HighlightCursorRoom = true
 gt.ShowSecretMarkers = true
+gt.AllowUnexploredNeighbor = false
 local _, err = pcall(require, "gtconfig")
 ----
 local debug = gt.DebugMod
@@ -104,7 +105,7 @@ function gt:check_teleble(gid)
       return false
     else
       local trd = grid_room[gid]
-      if trd.ListIndex == crd.ListIndex or trd.VisitedCount == 0 or not trd.Clear then
+      if trd.ListIndex == crd.ListIndex then
         return false
       end
       local requireExploredPath = gt.RequireExploredPath
@@ -112,9 +113,23 @@ function gt:check_teleble(gid)
         local v = ModConfigMenu.Config["GoodTripPlus"]["RequireExploredPath"]
         if v ~= nil then requireExploredPath = v end
       end
-      if requireExploredPath and not gt:has_explored_path_to(gid) then
-        return false
+
+      if trd.VisitedCount == 0 then
+        -- 未探索的房间：默认不允许。开启 AllowUnexploredNeighbor 后，
+        -- 只要它紧挨着某个「已探索 + 从当前房间可达」的房间就放行。
+        if not gt:get_config_bool("AllowUnexploredNeighbor", false)
+        or not gt:has_reachable_explored_neighbor(gid, requireExploredPath) then
+          return false
+        end
+      else
+        if not trd.Clear then
+          return false
+        end
+        if requireExploredPath and not gt:has_explored_path_to(gid) then
+          return false
+        end
       end
+
       if trd.Data.Type == 10 then
         local blockCurse = gt.BlockCurseRoom
         if ModConfigMenu and ModConfigMenu.Config["GoodTripPlus"] then
@@ -125,6 +140,32 @@ function gt:check_teleble(gid)
       end
     end
     return true
+end
+--
+-- 「传送到未探索的相邻房间」用的判定。
+-- 目标房间还没进去过时，看它上下左右四个格子里有没有「已探索」的房间，
+-- 并且（在开启 RequireExploredPath 时）那个房间能从当前房间沿已探索路径抵达。
+-- 注意 ±1 会跨行，必须按列号把左右两侧的越界排除掉。
+--
+function gt:has_reachable_explored_neighbor(gid, requireExploredPath)
+    local column = gid % 13
+    local neighbors = {gid - 13, gid + 13}
+    if column > 0 then
+      neighbors[#neighbors + 1] = gid - 1
+    end
+    if column < 12 then
+      neighbors[#neighbors + 1] = gid + 1
+    end
+
+    for _, neighborGid in ipairs(neighbors) do
+      local neighbor = grid_room[neighborGid]
+      if neighbor and neighbor.VisitedCount > 0 then
+        if not requireExploredPath or gt:has_explored_path_to(neighborGid) then
+          return true
+        end
+      end
+    end
+    return false
 end
 --
 function gt:has_explored_path_to(targetGid)
@@ -938,6 +979,8 @@ local GT_STRINGS = {
     highlight_cursor_desc = "Highlights a teleportable room under the cursor. Default: enabled",
     secret_markers_name = "Secret Room Candidate Markers",
     secret_markers_desc = "Marks where Secret / Super Secret / Ultra Secret rooms could be while holding the map key. Merged from Lazy Delver (MIT). Disable Lazy Delver itself to avoid drawing two sets of markers. Default: enabled",
+    unexplored_name = "Teleport Into Unexplored Rooms",
+    unexplored_desc = "Allow teleporting into a room you have never entered, as long as it sits next to an explored room that is reachable from your current room (only when 'Disable Unconnected Teleport' is on does that reachability matter). Default: disabled",
   },
   zh_hans = {
     title = "GoodTripPlus",
@@ -953,6 +996,8 @@ local GT_STRINGS = {
     highlight_cursor_desc = "高亮显示光标下可传送的房间。默认开启。",
     secret_markers_name = "显示隐藏房候选标记",
     secret_markers_desc = "按住地图键时标出隐藏房 / 超级隐藏房 / 究极隐藏房的可能位置（合并自 Lazy Delver，MIT）。请同时禁用 Lazy Delver 本体，否则会画出两套标记。默认开启。",
+    unexplored_name = "允许传送到未探索的相邻房间",
+    unexplored_desc = "开启后可以传送到还没进去过、但紧邻某个已探索房间的位置；若同时开着「禁用未连通房间传送」，那个相邻的已探索房间还需要能从当前房间沿已探索路径抵达。默认关闭。",
   },
 }
 -- A few plausible spellings/casings for each supported language, since the
@@ -1024,6 +1069,13 @@ gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
       true,
       L.secret_markers_name,
       L.secret_markers_desc
+    )
+    ModConfigMenu.AddBooleanSetting(
+      "GoodTripPlus", nil,
+      "AllowUnexploredNeighbor",
+      false,
+      L.unexplored_name,
+      L.unexplored_desc
     )
   end
 end)
