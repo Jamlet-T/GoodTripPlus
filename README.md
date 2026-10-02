@@ -76,7 +76,16 @@ MinimapAPI 的房间表（几十个房间，远小于 MinimapAPI 自己每帧的
    贴回**当前为空**的房间——只填空房间，绝不覆盖 MinimapAPI 自己算出来的数据。
    层身份由 `stage / stageType / absoluteStage / startSeed / 房间数 / IsAscent` 组成，
    正常下楼换层时身份会变，地图依旧从干净状态开始。
-4. 关卡重建发生在 update 阶段，而 `MC_POST_UPDATE` 在 update 末尾、渲染之前执行，
+4. **只还原「已探索过」的房间**（`Descriptor.VisitedCount > 0`）。
+   `rewind` 会把「你刚离开的那个房间」回滚成没进去过的状态（`VisitedCount` 归 0），
+   它在地图上应当只是一块未探索的深色格子。但它此刻是当前房间的邻居，
+   MinimapAPI 会给它来一发 `adjroom.DisplayFlags |= AdjacentDisplayFlags`（通常 = 5，含 bit4 图标位），
+   于是 `IsIconVisible()` 为真——如果不加判断，就会把回滚前那一帧记下的掉落物图标贴回去，
+   出现「没探索过的房间却显示掉落物」。所以未探索的房间一律跳过。
+
+   判定刻意读**当前存活的** `room.Descriptor.VisitedCount`，而不是 MinimapAPI 房间对象上的
+   `Visited` 缓存：后者是重建那一刻写下的快照，存活描述符才是游戏此刻的真实状态。
+5. 关卡重建发生在 update 阶段，而 `MC_POST_UPDATE` 在 update 末尾、渲染之前执行，
    所以还原发生在这一帧被画出来之前，不会出现闪烁。
 
 可以在 **Mod Config Menu → GoodTripPlus → 修复 rewind 后掉落物图标消失** 里开关；
@@ -91,8 +100,10 @@ MinimapAPI 的房间表（几十个房间，远小于 MinimapAPI 自己每帧的
 命中修复时控制台会直接打印：
 
 ```
-[GoodTripPlus] rewind fix: 检测到整批图标丢失，已恢复 N 个房间的图标
+[GoodTripPlus] rewind fix: 检测到整批图标丢失，已恢复 N 个房间的图标（跳过 M 个未探索房间）
 ```
+
+`M` 里就包含「你刚 rewind 出来的那个房间」——它被回滚成未探索，所以不还原图标。
 
 ---
 

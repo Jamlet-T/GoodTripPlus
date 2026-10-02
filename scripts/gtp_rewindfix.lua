@@ -47,6 +47,18 @@
   只填空房间，绝不覆盖 MinimapAPI 已经算好的数据；一次合法的拾取最多只会让 1 个房间
   变空，因此不会被误判成「整批清空」。
 
+  另外一条规则：**只还原「已探索过」的房间**
+  ------------------------------------------
+  rewind 会把「你刚离开的那个房间」（下称 B）回滚成没进去过的状态：
+  B 的 RoomDescriptor.VisitedCount 归 0，地图上应该只显示一块未探索的深色格子。
+  但因为你退回到了 B 的邻居 A，MinimapAPI 会给 B 来一发
+  `adjroom.DisplayFlags |= AdjacentDisplayFlags`（通常 = 5，含 bit4 图标位），
+  于是 IsIconVisible() 为真 —— 如果照搬回滚前那一帧的图标，B 就会显示它不该有的掉落物。
+
+  所以还原时用当前存活的 `room.Descriptor.VisitedCount > 0` 做过滤：
+  未探索的房间一律跳过、不贴图标。判定刻意不读 MinimapAPI 房间对象上的 `Visited` 缓存，
+  那是重建那一刻的快照，而存活的描述符才是游戏此刻的真实状态。
+
   关掉这个修复：Mod Config Menu 里的 "修复 rewind 后掉落物图标消失"，或 gtconfig.lua
   里设置 gt.FixRewindPickupIcons = false。
   诊断：控制台输入 gtpdiag。
@@ -107,6 +119,48 @@ local function copy_icons(icons)
   return copy
 end
 
+-- 这个房间是否「已探索过」（= 玩家进去过）。
+-- 用**当前存活**的 RoomDescriptor.VisitedCount 判定，而不是 MinimapAPI 房间对象上的
+-- Visited 缓存：rewind 会把「你刚离开的那个房间」回滚成未进入过的状态（VisitedCount = 0），
+-- 此时它在地图上只是一块未探索的深色格子（因为它是当前房间的邻居，被 MinimapAPI 用
+-- DisplayFlags |= 5 亮了格子，所以 bit4 也在，图标本来会被画出来），
+-- 但它此刻确实没有任何已知的掉落物，不应该贴回任何图标。
+local function is_room_explored(room)
+  local descriptor = room.Descriptor
+  if descriptor then
+    return descriptor.VisitedCount > 0
+  end
+  return room:IsVisited()
+end
+
+-- 把快照贴回当前为空的房间，返回 (被填充的房间数, 因未探索而跳过的房间数)。
+local function restore_item_icons(icons_by_dimension)
+  if not MinimapAPI or not MinimapAPI.Levels then
+    return 0, 0
+  end
+  local restored_rooms = 0
+  local skipped_unexplored = 0
+  for dimension, rooms in pairs(MinimapAPI.Levels) do
+    local dimension_icons = icons_by_dimension[dimension]
+    if dimension_icons then
+      for _, room in ipairs(rooms) do
+        local descriptor = room.Descriptor
+        local list_index = descriptor and descriptor.ListIndex
+        local icons = list_index and dimension_icons[list_index]
+        if icons and (not room.ItemIcons or #room.ItemIcons == 0) then
+          if is_room_explored(room) then
+            room.ItemIcons = copy_icons(icons)
+            restored_rooms = restored_rooms + 1
+          else
+            skipped_unexplored = skipped_unexplored + 1
+          end
+        end
+      end
+    end
+  end
+  return restored_rooms, skipped_unexplored
+end
+
 -- 读取当前帧的地图状态：
 --   identity 层身份
 --   arrays   各维度的房间数组本身（用来识别 MinimapAPI 是否重建过地图）
@@ -133,29 +187,6 @@ local function read_state()
     end
   end
   return state
-end
-
--- 把快照贴回当前为空的房间，返回被填充的房间数。
-local function restore_item_icons(icons_by_dimension)
-  if not MinimapAPI or not MinimapAPI.Levels then
-    return 0
-  end
-  local restored_rooms = 0
-  for dimension, rooms in pairs(MinimapAPI.Levels) do
-    local dimension_icons = icons_by_dimension[dimension]
-    if dimension_icons then
-      for _, room in ipairs(rooms) do
-        local descriptor = room.Descriptor
-        local list_index = descriptor and descriptor.ListIndex
-        local icons = list_index and dimension_icons[list_index]
-        if icons and (not room.ItemIcons or #room.ItemIcons == 0) then
-          room.ItemIcons = copy_icons(icons)
-          restored_rooms = restored_rooms + 1
-        end
-      end
-    end
-  end
-  return restored_rooms
 end
 
 -- 统计「上一帧有图标、这一帧变空」的房间数，以及被整个换掉的房间数组数量。
@@ -199,13 +230,15 @@ gt:AddCallback(ModCallbacks.MC_POST_UPDATE, function()
       end
 
       if same_floor and fix_enabled() then
-        local restored_rooms = restore_item_icons(prev_state.icons)
+        local restored_rooms, skipped_unexplored = restore_item_icons(prev_state.icons)
         stats.wipes = stats.wipes + 1
         stats.restored_rooms = stats.restored_rooms + restored_rooms
         stats.last_result = "frame=" .. Game():GetFrameCount() ..
-          " 恢复 " .. restored_rooms .. " 个房间"
-        push_event("RESTORE " .. restored_rooms .. " rooms")
-        out("rewind fix: 检测到整批图标丢失，已恢复 " .. restored_rooms .. " 个房间的图标")
+          " 恢复 " .. restored_rooms .. " 个房间，跳过 " .. skipped_unexplored .. " 个未探索房间"
+        push_event("RESTORE " .. restored_rooms .. " rooms, skip " ..
+          skipped_unexplored .. " unexplored")
+        out("rewind fix: 检测到整批图标丢失，已恢复 " .. restored_rooms ..
+          " 个房间的图标（跳过 " .. skipped_unexplored .. " 个未探索房间）")
         current = read_state() -- 重新读，避免下一帧拿恢复前的数据做比较
       else
         stats.last_result = "检测到清空，但判定为换层/首次载入，未恢复"
