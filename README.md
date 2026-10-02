@@ -29,46 +29,64 @@ rewind
 （`MinimapAPI:GetCurrentRoomPickupIDs()` 内部用的是 `Isaac.GetRoomEntities()`，只能拿到当前房间的实体）。
 其余房间的 `ItemIcons` 一直保留着「玩家当时待在那个房间里」看到的那一份。
 
-`rewind` 本质上是一次**关卡状态回滚**（和发光沙漏同一套机制），它会让关卡被重建，
-于是 `MC_POST_NEW_LEVEL` 被触发。而 MinimapAPI 在 `MC_POST_NEW_LEVEL` 里的处理是：
+`rewind` 本质上是一次**关卡状态回滚**（和发光沙漏同一套机制），它会让 MinimapAPI 把整张地图的数据
+重建一遍。MinimapAPI 里负责重建的代码是：
 
 ```lua
 -- minimapi/scripts/minimapapi/main.lua
-MinimapAPI:AddCallbackFunc(ModCallbacks.MC_POST_NEW_LEVEL, CALLBACK_PRIORITY, function(_)
-    MinimapAPI:ClearLevels()      -- 丢掉所有房间对象
-    MinimapAPI:LoadDefaultMap()   -- 按 RoomDescriptor 重建，ItemIcons = {}
+function MinimapAPI:LoadDefaultMap(dimension)
     ...
-end)
+    MinimapAPI.Levels[dimension] = {}
+    ...
+        ItemIcons = {},   -- 所有房间对象重新生成，图标一律为空
+    ...
+end
 ```
 
 所有房间对象被丢弃重建，新对象一律 `ItemIcons = {}`。而图标只在「玩家待在房间里」时才会产生，
 所以回滚之后整张地图的掉落物图标都是空的，只能一个个重新进房间刷出来——与现象完全吻合。
+`MC_POST_NEW_LEVEL`、`MC_POST_NEW_ROOM` 与 `MC_POST_GAME_STARTED` 三条路径里都调用了它，
+具体是哪一条被 `rewind` 触发在不同环境下并不一致（实测 `MC_POST_NEW_LEVEL` 并没有触发），
+因此修复不依赖具体触发点。
 
 （发光沙漏为什么没这个问题：MinimapAPI 为它单独留了一条 `CopyLevels` / `RewindLevels` 通路，
-由 `MC_USE_ITEM` 触发。`rewind` 是控制台指令，不会设置那个标记，所以走不到这条恢复路径。）
+由 `MC_USE_ITEM` 触发，会在重建后用备份把图标贴回来。`rewind` 是控制台指令，不会设置那个标记，
+所以走不到这条恢复路径。）
 
 ### 修复方式
 
-`scripts/gtp_rewindfix.lua`：
+`scripts/gtp_rewindfix.lua`。第一版曾试图把触发点押在 `MC_POST_NEW_LEVEL` 上（按 EARLY/LATE 优先级包夹
+MinimapAPI 的处理），**实测失败**：游戏内 `gtpdiag` 显示该回调在 rewind 时根本没触发，
+所以改成不依赖任何具体触发点、只在帧末做监视与还原：
 
-1. 每帧记录「层身份」（`stage / stageType / absoluteStage / startSeed / 房间数 / IsAscent` 的组合），
-   并记录玩家最后一次所在房间的状态。
-2. 以 **EARLY 优先级**注册 `MC_POST_NEW_LEVEL`——在 MinimapAPI 把自己的地图推平之前，
-   先把所有维度、所有房间的 `ItemIcons` 抓一份快照。
-3. 以 **LATE 优先级**注册 `MC_POST_NEW_LEVEL`——等 MinimapAPI 重建完之后，把快照贴回**当前为空**的房间
-   （只填空房间，绝不覆盖 MinimapAPI 自己算出来的数据）。
-4. **同层判断**：只有当「重建前」和「重建后」的层身份完全一致时才贴回。
-   正常下楼换层时层身份会变，地图依旧从干净状态开始，不会有上一层残留的图标。
-5. 额外在 `MC_POST_NEW_ROOM` 上补一次（限定在重建后 5 帧窗口内），
-   防止 MinimapAPI 在某些版本里改在换房回调中重建地图。
+1. 每帧（`MC_POST_UPDATE`）读取一次 MinimapAPI 的地图数据，保存：
+   - 各维度**房间数组本身**（用来识别 `ClearLevels()` + `LoadDefaultMap()` 是否重建过地图）；
+   - 各维度「有图标的房间」及其 `ItemIcons` 的**深拷贝**。
+2. 与上一帧比较，判定是否发生「整批清空」：
+   - 上一帧有图标、这一帧变空的房间 **≥ 2 个**；或
+   - 地图被重建（房间数组被换掉）且**至少丢了 1 个**房间的图标。
+   一次合法拾取最多只能让 1 个房间变空，所以不会被误判。
+3. 判定为整批清空、且**层身份一致**（同层回滚）时，把上一帧（= 回滚前）的 `ItemIcons`
+   贴回**当前为空**的房间——只填空房间，绝不覆盖 MinimapAPI 自己算出来的数据。
+   层身份由 `stage / stageType / absoluteStage / startSeed / 房间数 / IsAscent` 组成，
+   正常下楼换层时身份会变，地图依旧从干净状态开始。
+4. 关卡重建发生在 update 阶段，而 `MC_POST_UPDATE` 在 update 末尾、渲染之前执行，
+   所以还原发生在这一帧被画出来之前，不会出现闪烁。
 
 可以在 **Mod Config Menu → GoodTripPlus → 修复 rewind 后掉落物图标消失** 里开关；
 也可以在 `gtconfig.lua` 里设置 `gt.FixRewindPickupIcons = false`。
 
 ### 自查手段
 
-游戏内控制台输入 `gtpdiag`，会打印当前层身份、修复开关、上一次恢复结果、
-各维度房间数与带图标房间数，方便确认修复是否命中。
+游戏内控制台输入 `gtpdiag`，会打印层身份、修复开关、累计命中次数、各维度房间数与带图标房间数，
+以及最近 16 条事件（`POST_NEW_LEVEL` / `POST_NEW_ROOM` / `POST_GAME_STARTED` 的触发、
+每次判定为清空时的 `rebuilt/lost/sameFloor` 与前后层身份、恢复了多少个房间）。
+
+命中修复时控制台会直接打印：
+
+```
+[GoodTripPlus] rewind fix: 检测到整批图标丢失，已恢复 N 个房间的图标
+```
 
 ---
 
