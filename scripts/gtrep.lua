@@ -1098,11 +1098,15 @@ do
 
   if REPENTOGON then
     gt:AddPriorityCallback(ModCallbacks.MC_POST_HUD_RENDER, late_priority, gt.render_cursor)
+    gt.renderCallback = "MC_POST_HUD_RENDER (REPENTOGON)"
   elseif StageAPI and StageAPI.Loaded then
     StageAPI.AddCallback("GoodTripPlus", "POST_HUD_RENDER", 1, gt.render_cursor)
+    gt.renderCallback = "StageAPI POST_HUD_RENDER"
   elseif is_repentance then
     gt:AddPriorityCallback(ModCallbacks.MC_POST_RENDER, late_priority, gt.render_cursor)
+    gt.renderCallback = "MC_POST_RENDER (priority)"
   else
     gt:AddCallback(ModCallbacks.MC_POST_RENDER, gt.render_cursor)
+    gt.renderCallback = "MC_POST_RENDER (plain)"
   end
 end

@@ -129,11 +129,15 @@ do
 
   if REPENTOGON then
     gt:AddPriorityCallback(ModCallbacks.MC_POST_HUD_RENDER, marker_priority, render.render)
+    gt.markerRenderCallback = "MC_POST_HUD_RENDER (REPENTOGON)"
   elseif StageAPI and StageAPI.Loaded then
     StageAPI.AddCallback("GoodTripPlus", "POST_HUD_RENDER", 0.5, render.render)
+    gt.markerRenderCallback = "StageAPI POST_HUD_RENDER"
   elseif is_repentance then
     gt:AddPriorityCallback(ModCallbacks.MC_POST_RENDER, marker_priority, render.render)
+    gt.markerRenderCallback = "MC_POST_RENDER (priority)"
   else
     gt:AddCallback(ModCallbacks.MC_POST_RENDER, render.render)
+    gt.markerRenderCallback = "MC_POST_RENDER (plain)"
   end
 end

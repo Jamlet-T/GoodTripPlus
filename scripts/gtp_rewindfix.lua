@@ -270,6 +270,11 @@ gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command)
 
   out("REWIND FIX DIAGNOSTICS BEGIN")
   out("identity=" .. tostring(level_identity()))
+  out("repentogon=" .. tostring(REPENTOGON) ..
+    " stageAPI=" .. tostring(StageAPI ~= nil and StageAPI.Loaded ~= nil and StageAPI.Loaded ~= false) ..
+    " postHudRender=" .. tostring(ModCallbacks.MC_POST_HUD_RENDER ~= nil))
+  out("renderCallback.cursor=" .. tostring(gt.renderCallback) ..
+    " markers=" .. tostring(gt.markerRenderCallback))
   out("wipes=" .. stats.wipes .. " restoredRooms=" .. stats.restored_rooms)
   out("lastResult=" .. tostring(stats.last_result))
   if MinimapAPI and MinimapAPI.Levels then

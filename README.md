@@ -203,9 +203,16 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 
 朋友那边需要满足这几条：
 
-1. **先装 REPENTOGON**。MinimapAPI 的代码里直接引用了 REPENTOGON 才有的 `CallbackPriority`，
-   原版忏悔+跑不起来；让朋友也通过 REPENTOGON 启动器开游戏。
-2. **装 MinimapAPI**（必需）。Mod Config Menu 可选，只决定能不能在游戏内改设置。
+1. **装 MinimapAPI**（必需），**建议同时装 REPENTOGON**。
+   严格说 REPENTOGON 不是硬依赖：它提供的唯一东西是 `ModCallbacks.MC_POST_HUD_RENDER` 这个回调
+   （定义在 `Repentogon/resources/scripts/enums_ex.lua`，原版自带的 `enums.lua` 里没有它）。
+   MinimapAPI 和本模组都写了三分支回退——REPENTOGON → StageAPI → 原版 `MC_POST_RENDER`，
+   所以没装 REPENTOGON 时地图与光标/标记会一起退回 `MC_POST_RENDER`，理论上功能照旧。
+   但这属于「作者写了、我们没实测」的路径，**建议还是装上**（它和本模组的测试环境一致）。
+   > 另外提醒：REPENTOGON 装好后 **Steam 直接启动也会注入**，不必每次都开它的启动器——
+   > 安装器已经就地改过主程序（`isaac-ng.exe`）。想确认自己有没有在跑 REPENTOGON，
+   > 看游戏根目录的 `Repentogon/repentogon.log`，或在游戏内输入 `gtpdiag`。
+2. **Mod Config Menu 可选**，只决定能不能在游戏内改设置（没有它也能用，只是选项改不了）。
 3. 解压后**文件夹名必须正好是 `goodtripplus`**——不能是 `goodtripplus (1)`、`goodtripplus-1.1.0` 之类，
    否则游戏可能找不到它（`metadata.xml` 里的 `<directory>` 写的就是这个名字）。
 4. **停用 `goodtrip_mlxtweak` 和原版 `Goodtrip`**，否则两边重复注册回调、出现双光标。
