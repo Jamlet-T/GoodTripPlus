@@ -8,3 +8,6 @@ gt.HighlightCursorRoom = true
 
 -- rewind 掉落物图标修复（GoodTripPlus 新增）
 gt.FixRewindPickupIcons = true
+
+-- 隐藏房候选标记（合并自 Lazy Delver）
+gt.ShowSecretMarkers = true

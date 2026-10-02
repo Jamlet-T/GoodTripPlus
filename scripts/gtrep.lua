@@ -39,6 +39,7 @@ gt.RequireExploredPath = true
 gt.HighlightStartingRoom = true
 gt.HighlightCursorRoom = true
 gt.FixRewindPickupIcons = true
+gt.ShowSecretMarkers = true
 local _, err = pcall(require, "gtconfig")
 ----
 local debug = gt.DebugMod
@@ -938,6 +939,8 @@ local GT_STRINGS = {
     highlight_cursor_desc = "Highlights a teleportable room under the cursor. Default: enabled",
     rewind_icons_name = "Keep Pickup Icons After Rewind",
     rewind_icons_desc = "After using the 'rewind' console command the minimap normally loses every pickup icon until each room is re-entered. This restores them. Default: enabled",
+    secret_markers_name = "Secret Room Candidate Markers",
+    secret_markers_desc = "Marks where Secret / Super Secret / Ultra Secret rooms could be while holding the map key. Merged from Lazy Delver (MIT). Disable Lazy Delver itself to avoid drawing two sets of markers. Default: enabled",
   },
   zh_hans = {
     title = "GoodTripPlus",
@@ -953,6 +956,8 @@ local GT_STRINGS = {
     highlight_cursor_desc = "高亮显示光标下可传送的房间。默认开启。",
     rewind_icons_name = "修复 rewind 后掉落物图标消失",
     rewind_icons_desc = "使用控制台 rewind 指令后，小地图上的掉落物图标不会全部消失（原版需要重新挨个进入房间才会恢复）。默认开启。",
+    secret_markers_name = "显示隐藏房候选标记",
+    secret_markers_desc = "按住地图键时标出隐藏房 / 超级隐藏房 / 究极隐藏房的可能位置（合并自 Lazy Delver，MIT）。请同时禁用 Lazy Delver 本体，否则会画出两套标记。默认开启。",
   },
 }
 -- A few plausible spellings/casings for each supported language, since the
@@ -1024,6 +1029,13 @@ gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
       true,
       L.rewind_icons_name,
       L.rewind_icons_desc
+    )
+    ModConfigMenu.AddBooleanSetting(
+      "GoodTripPlus", nil,
+      "ShowSecretMarkers",
+      true,
+      L.secret_markers_name,
+      L.secret_markers_desc
     )
   end
 end)

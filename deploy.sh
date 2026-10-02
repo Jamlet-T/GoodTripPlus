@@ -8,9 +8,10 @@ MODS_DIR="F:/Steam/steamapps/common/The Binding of Isaac Rebirth/mods"
 DST="$MODS_DIR/goodtripplus"
 
 mkdir -p "$DST"
-rm -rf "$DST/scripts"
+rm -rf "$DST/scripts" "$DST/resources"
 cp "$SRC/main.lua" "$SRC/metadata.xml" "$SRC/gtconfig.lua" "$DST/"
 cp -r "$SRC/scripts" "$DST/scripts"
+cp -r "$SRC/resources" "$DST/resources"
 
 echo "已同步到: $DST"
 find "$DST" -type f | sort
