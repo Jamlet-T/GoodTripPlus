@@ -196,6 +196,32 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 
 4. 运行需要 **MinimapAPI**；可选 **Mod Config Menu**（用于游戏内设置）。
 
+### 分享给朋友 / 分发单包
+
+`dist/goodtripplus-1.1.0.zip` 就是可直接发人的完整包——解压丢进 `mods/` 即可。
+它只含运行必需的 19 个文件，**不含 `deploy.sh`**（那是开发机上的同步脚本，里面写死了本机路径）。
+
+朋友那边需要满足这几条：
+
+1. **先装 REPENTOGON**。MinimapAPI 的代码里直接引用了 REPENTOGON 才有的 `CallbackPriority`，
+   原版忏悔+跑不起来；让朋友也通过 REPENTOGON 启动器开游戏。
+2. **装 MinimapAPI**（必需）。Mod Config Menu 可选，只决定能不能在游戏内改设置。
+3. 解压后**文件夹名必须正好是 `goodtripplus`**——不能是 `goodtripplus (1)`、`goodtripplus-1.1.0` 之类，
+   否则游戏可能找不到它（`metadata.xml` 里的 `<directory>` 写的就是这个名字）。
+4. **停用 `goodtrip_mlxtweak` 和原版 `Goodtrip`**，否则两边重复注册回调、出现双光标。
+5. 如果他装了 `Lazy Delver`，也让他停用，否则地图上会有两套隐藏房标记。
+6. 装完**重启游戏**（Lua 不热重载）。
+
+包里的 `LICENSE`、`THIRD_PARTY.md`、`scripts/delver/LICENSE-lazy-delver.txt` **别删**：
+Lazy Delver 是 MIT 许可，要求许可证文本随副本一起分发。
+**私下发给朋友没问题**；但**公开上传到创意工坊要先拿到 MLX's Tweak 作者的许可**，见第八节。
+
+改动源码后重新打包：
+
+```bash
+bash pack.sh        # 产出 dist/goodtripplus-<版本>.zip
+```
+
 ---
 
 ## 五、目录结构
@@ -206,7 +232,9 @@ issacMod/                       ← 工作区 git 仓库（可容纳多个 mod�
     ├── main.lua                ← 入口：加载 gtrep + gtp_rewindfix + gtp_delver
     ├── metadata.xml            ← mod 元数据（name / directory / id）
     ├── gtconfig.lua            ← 静态默认值（可被 MCM 覆盖）
-    ├── deploy.sh               ← 同步到游戏 mods/goodtripplus
+    ├── deploy.sh               ← 同步到游戏 mods/goodtripplus（开发机用）
+    ├── pack.sh                 ← 打包成 dist/goodtripplus-<版本>.zip（分发用）
+    ├── dist/                   ← 打包产物（不进版本控制）
     ├── LICENSE                 ← MIT（仅覆盖本项目自有代码）
     ├── THIRD_PARTY.md          ← 各来源的授权状况与发布路线
     ├── resources/gfx/goodtripplus/ ← 隐藏房候选标记的精灵（marker.anm2 / marker.png）
