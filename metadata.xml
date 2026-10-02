@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<metadata>
+    <name>GoodTripPlus</name>
+    <directory>goodtripplus</directory>
+    <id>goodtripplus</id>
+    <description>Minimap teleport mod based on Goodtrip MLX's Tweak.
+Hold TAB to activate a cursor on the minimap, use the shoot direction keys to select a room, and release TAB to teleport.
+Supports the mirrored map in the mirror world. Curse room teleportation is disabled by default. Default cursor speed is 2.
+
+GoodTripPlus additionally fixes a bug where every pickup icon on the minimap vanished after using the "rewind" console command, and only came back after re-entering each room one by one.
+
+Default settings can be changed in the MCM menu or config file.
+Please uninstall or disable goodtrip_mlxtweak (and the original Goodtrip) before use.
+Required: MinimapAPI
+
+Optional: Mod Config Menu (for in-game settings)</description>
+    <version>1.0.0</version>
+    <visibility>Public</visibility>
+    <tag id="Lua"/>
+    <tag id="Tweaks"/>
+</metadata>
