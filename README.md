@@ -201,26 +201,32 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 ## 五、目录结构
 
 ```
-issacMod/                       ← 本 git 仓库（源码唯一来源）
-├── main.lua                    ← 入口：加载 gtrep + gtp_rewindfix + gtp_delver
-├── metadata.xml                ← mod 元数据（name / directory / id）
-├── gtconfig.lua                ← 静态默认值（可被 MCM 覆盖）
-├── deploy.sh                   ← 同步到游戏 mods/goodtripplus
-├── resources/gfx/goodtripplus/ ← 隐藏房候选标记的精灵（marker.anm2 / marker.png）
-└── scripts/
-    ├── gtrep.lua               ← 上游 MLX's Tweak 主逻辑（仅改名重写）
-    ├── gtp_rewindfix.lua       ← rewind 掉落物图标修复（不依赖具体回调的帧末监视）
-    ├── gtp_delver.lua          ← 隐藏房候选标记的回调接线 + MCM 开关
-    └── delver/                 ← 移植自 Lazy Delver（MIT），仅改了 require 路径
-        ├── const.lua           ← 常量表
-        ├── geometry.lua        ← 形状占据格、相邻格、门槽映射
-        ├── log.lua             ← 原版调试日志（默认静默）
-        ├── state.lua           ← 楼层 / 维度 / 道具持有状态
-        ├── map.lua             ← 房间表、候选推演、真假候选判定
-        ├── room.lua            ← 门位检查、炸弹排除
-        ├── render.lua          ← **已改写**：坐标改用 gt:gid_to_rtmap_pos()
-        └── LICENSE-lazy-delver.txt
+issacMod/                       ← 工作区 git 仓库（可容纳多个 mod）
+└── goodtripplus/               ← 本 mod 的源码目录（自包含，可独立打包/拆出）
+    ├── main.lua                ← 入口：加载 gtrep + gtp_rewindfix + gtp_delver
+    ├── metadata.xml            ← mod 元数据（name / directory / id）
+    ├── gtconfig.lua            ← 静态默认值（可被 MCM 覆盖）
+    ├── deploy.sh               ← 同步到游戏 mods/goodtripplus
+    ├── LICENSE                 ← MIT（仅覆盖本项目自有代码）
+    ├── THIRD_PARTY.md          ← 各来源的授权状况与发布路线
+    ├── resources/gfx/goodtripplus/ ← 隐藏房候选标记的精灵（marker.anm2 / marker.png）
+    └── scripts/
+        ├── gtrep.lua           ← 上游 MLX's Tweak 主逻辑（仅改名重写 + 准入判定扩展）
+        ├── gtp_rewindfix.lua   ← rewind 掉落物图标修复（不依赖具体回调的帧末监视）
+        ├── gtp_delver.lua      ← 隐藏房候选标记的回调接线 + MCM 开关
+        └── delver/             ← 移植自 Lazy Delver（MIT），仅改了 require 路径
+            ├── const.lua       ← 常量表
+            ├── geometry.lua    ← 形状占据格、相邻格、门槽映射
+            ├── log.lua         ← 原版调试日志（默认静默）
+            ├── state.lua       ← 楼层 / 维度 / 道具持有状态
+            ├── map.lua         ← 房间表、候选推演、真假候选判定
+            ├── room.lua        ← 门位检查、炸弹排除
+            ├── render.lua      ← **已改写**：坐标改用 gt:gid_to_rtmap_pos()
+            └── LICENSE-lazy-delver.txt
 ```
+
+`deploy.sh` 用脚本自身所在目录当源码根，所以在仓库根跑 `bash goodtripplus/deploy.sh`
+或在 `goodtripplus/` 里跑 `bash deploy.sh` 都可以；仓库根还提供 `deploy-all.sh` 一次同步全部 mod。
 
 对应游戏内路径：`F:/Steam/steamapps/common/The Binding of Isaac Rebirth/mods/goodtripplus`
 
