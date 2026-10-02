@@ -45,9 +45,12 @@ end
 
 所有房间对象被丢弃重建，新对象一律 `ItemIcons = {}`。而图标只在「玩家待在房间里」时才会产生，
 所以回滚之后整张地图的掉落物图标都是空的，只能一个个重新进房间刷出来——与现象完全吻合。
-`MC_POST_NEW_LEVEL`、`MC_POST_NEW_ROOM` 与 `MC_POST_GAME_STARTED` 三条路径里都调用了它，
-具体是哪一条被 `rewind` 触发在不同环境下并不一致（实测 `MC_POST_NEW_LEVEL` 并没有触发），
-因此修复不依赖具体触发点。
+
+**已实测确认的触发点**：`rewind` 会触发 `MC_POST_GAME_STARTED`（`continued=true`），
+MinimapAPI 注册在这个回调上的 `MinimapAPI.OnGameLoad` → `LoadSaveTable` 会把整张地图数据重建一遍。
+游戏内 `gtpdiag` 在那一帧记录到的是 `rebuilt=1 lost=4 sameFloor=true`
+（1 个维度的房间数组被换掉，4 个原本有图标的房间同时清空）。
+第一版修复曾把这个触发点猜成 `MC_POST_NEW_LEVEL`，**实测该回调在 rewind 时根本不触发**，因此作废。
 
 （发光沙漏为什么没这个问题：MinimapAPI 为它单独留了一条 `CopyLevels` / `RewindLevels` 通路，
 由 `MC_USE_ITEM` 触发，会在重建后用备份把图标贴回来。`rewind` 是控制台指令，不会设置那个标记，
@@ -55,9 +58,9 @@ end
 
 ### 修复方式
 
-`scripts/gtp_rewindfix.lua`。第一版曾试图把触发点押在 `MC_POST_NEW_LEVEL` 上（按 EARLY/LATE 优先级包夹
-MinimapAPI 的处理），**实测失败**：游戏内 `gtpdiag` 显示该回调在 rewind 时根本没触发，
-所以改成不依赖任何具体触发点、只在帧末做监视与还原：
+`scripts/gtp_rewindfix.lua`。既然根因已确认，为什么不直接挂 `MC_POST_GAME_STARTED`？
+因为监视方案不依赖触发点，将来游戏或 MinimapAPI 改动触发路径时修复依然有效，代价只是每帧遍历一次
+MinimapAPI 的房间表（几十个房间，远小于 MinimapAPI 自己每帧的开销）。做法：
 
 1. 每帧（`MC_POST_UPDATE`）读取一次 MinimapAPI 的地图数据，保存：
    - 各维度**房间数组本身**（用来识别 `ClearLevels()` + `LoadDefaultMap()` 是否重建过地图）；

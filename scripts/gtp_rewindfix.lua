@@ -19,11 +19,19 @@
   而图标只在「玩家待在房间里」时才会产生，所以回滚之后整张地图的掉落物图标都是空的，
   只能一个个重新进房间刷出来。
 
-  本修复不依赖具体的触发点
+  已确认的触发点（实测）
+  --------------------
+  rewind 会触发 MC_POST_GAME_STARTED（continued=true）。MinimapAPI 注册在这个回调上的
+  MinimapAPI.OnGameLoad → LoadSaveTable 会把整张地图数据重建一遍，于是所有房间对象被重新生成、
+  ItemIcons 全部变成空。实测那一帧的事件是：rebuilt=1 lost=4 sameFloor=true
+  （1 个维度的房间数组被换掉，4 个原本有图标的房间同时清空）。
+
+  不过修复本身**不去挂钩这个回调**，而是采用下面这种不依赖触发点的帧末监视，
+  这样将来游戏或 MinimapAPI 改动触发路径时修复依然有效。
+
+  修复做法（不依赖触发点）
   ----------------------
-  rewind 到底触发的是 MC_POST_NEW_LEVEL 还是 MC_POST_GAME_STARTED 之类的回调，
-  在不同版本 / 不同环境下并不一致（实测 MC_POST_NEW_LEVEL 并没有触发）。
-  所以这里不去猜触发点，改成在帧末（MC_POST_UPDATE）盯住 MinimapAPI 的数据结构：
+  在帧末（MC_POST_UPDATE）盯住 MinimapAPI 的数据结构：
 
     * 上一帧还带着图标的房间，这一帧整批变成空（>= 2 个房间），或者
     * MinimapAPI.Levels 的房间数组被整个换掉了（重建），同时又确实丢了图标
@@ -220,7 +228,9 @@ end)
 gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function(_, is_continued)
   push_event("frame=" .. Game():GetFrameCount() ..
     " POST_GAME_STARTED continued=" .. tostring(is_continued))
-  out("POST_GAME_STARTED continued=" .. tostring(is_continued))
+  if gt.DebugMod then
+    out("POST_GAME_STARTED continued=" .. tostring(is_continued))
+  end
 end)
 
 -- 诊断指令：控制台输入 gtpdiag

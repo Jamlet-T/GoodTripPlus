@@ -14,7 +14,7 @@ Please uninstall or disable goodtrip_mlxtweak (and the original Goodtrip) before
 Required: MinimapAPI
 
 Optional: Mod Config Menu (for in-game settings)</description>
-    <version>1.0.0</version>
+    <version>1.0.1</version>
     <visibility>Public</visibility>
     <tag id="Lua"/>
     <tag id="Tweaks"/>
