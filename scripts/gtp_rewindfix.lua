@@ -59,8 +59,7 @@
   未探索的房间一律跳过、不贴图标。判定刻意不读 MinimapAPI 房间对象上的 `Visited` 缓存，
   那是重建那一刻的快照，而存活的描述符才是游戏此刻的真实状态。
 
-  关掉这个修复：Mod Config Menu 里的 "修复 rewind 后掉落物图标消失"，或 gtconfig.lua
-  里设置 gt.FixRewindPickupIcons = false。
+  这是一个 bug 修复，没有开关：只要 mod 启用就一直生效。
   诊断：控制台输入 gtpdiag。
 ]]
 
@@ -75,10 +74,6 @@ local stats = {
   restored_rooms = 0,
   last_result = "尚未触发",
 }
-
-local function fix_enabled()
-  return gt:get_config_bool("FixRewindPickupIcons", true)
-end
 
 local function push_event(text)
   events[#events + 1] = text
@@ -229,7 +224,7 @@ gt:AddCallback(ModCallbacks.MC_POST_UPDATE, function()
         push_event("  curIdentity =" .. tostring(current.identity))
       end
 
-      if same_floor and fix_enabled() then
+      if same_floor then
         local restored_rooms, skipped_unexplored = restore_item_icons(prev_state.icons)
         stats.wipes = stats.wipes + 1
         stats.restored_rooms = stats.restored_rooms + restored_rooms
@@ -275,9 +270,7 @@ gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command)
 
   out("REWIND FIX DIAGNOSTICS BEGIN")
   out("identity=" .. tostring(level_identity()))
-  out("fixEnabled=" .. tostring(fix_enabled()) ..
-    " wipes=" .. stats.wipes ..
-    " restoredRooms=" .. stats.restored_rooms)
+  out("wipes=" .. stats.wipes .. " restoredRooms=" .. stats.restored_rooms)
   out("lastResult=" .. tostring(stats.last_result))
   if MinimapAPI and MinimapAPI.Levels then
     for dimension, rooms in pairs(MinimapAPI.Levels) do

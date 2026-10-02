@@ -88,8 +88,7 @@ MinimapAPI 的房间表（几十个房间，远小于 MinimapAPI 自己每帧的
 5. 关卡重建发生在 update 阶段，而 `MC_POST_UPDATE` 在 update 末尾、渲染之前执行，
    所以还原发生在这一帧被画出来之前，不会出现闪烁。
 
-可以在 **Mod Config Menu → GoodTripPlus → 修复 rewind 后掉落物图标消失** 里开关；
-也可以在 `gtconfig.lua` 里设置 `gt.FixRewindPickupIcons = false`。
+**这是一个 bug 修复，没有开关**：只要模组启用就一直生效，MCM 和 `gtconfig.lua` 里都不提供该选项。
 
 ### 自查手段
 
@@ -205,7 +204,7 @@ issacMod/                       ← 本 git 仓库（源码唯一来源）
 
 | 位置 | 改动 |
 | --- | --- |
-| `scripts/gtrep.lua` | `RegisterMod` 名、ModConfigMenu 配置键 / 标题全部改为 `GoodTripPlus`；新增两个 MCM 开关 `FixRewindPickupIcons`、`ShowSecretMarkers`；其余逻辑与 MLX's Tweak 完全一致 |
+| `scripts/gtrep.lua` | `RegisterMod` 名、ModConfigMenu 配置键 / 标题全部改为 `GoodTripPlus`；新增 MCM 开关 `ShowSecretMarkers`；其余逻辑与 MLX's Tweak 完全一致 |
 | `scripts/gtp_rewindfix.lua` | 新增文件，rewind 图标修复 |
 | `scripts/gtp_delver.lua` | 新增文件，隐藏房候选标记的回调接线 |
 | `scripts/delver/*` | 从 Lazy Delver 原样移植（仅改写 `require` 路径），`render.lua` 重写了定位部分 |
