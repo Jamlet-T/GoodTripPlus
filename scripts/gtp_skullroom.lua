@@ -28,11 +28,15 @@
   渲染时 `VisitedIcons` 只在「房间已探索」时才画（见它的 renderIconsInlineFunc 调用处）。
   它自己标镜子房 / 矿车房用的就是这个机制（`t.VisitedIcons = {"MirrorRoom"}`）。
 
-  所以这里只做一件事：把 `"Card"`（MinimapAPI 自带的卡牌图标，IconList 里 ID = "Card"）
-  塞进对应房间的 `VisitedIcons`。好处是：
+  所以这里做两件事：
+    1. 启动时用 `MinimapAPI:AddIcon` 注册一个自己的图标 `GTPMarkedSkull`
+       （素材 `resources/gfx/goodtripplus/skull.png`，16x16，随本模组走）；
+    2. 把那个图标 ID 塞进对应房间的 `VisitedIcons`。
+  好处是：
     * 坐标、缩放、大小图切换、地图滑动全部由 MinimapAPI 自己算，天然对齐；
-    * 「没进去过的房间不显示」这条防剧透规则是 MinimapAPI 自己执行的，不用我们重写；
-    * 不需要任何新素材。
+    * 「没进去过的房间不显示」这条防剧透规则是 MinimapAPI 自己执行的，不用我们重写。
+  注意图标尺寸必须与 MinimapAPI 的图标一致（16x16、pivot 0,0），否则它的图标位置计算会错位；
+  万一 `AddIcon` 不存在或精灵加载失败，会退回它自带的 `"Card"` 图标（见 FALLBACK_ICON_ID）。
 
   为什么每帧都要「确保」
   ----------------------
@@ -50,11 +54,21 @@ local GTP_SKULL = {}
 -- 等价于 GridEntityType.GRID_ROCK_ALT2（= 26，原版 enums.lua 注释「special skull in Depths 2」）
 local MARKED_SKULL_SPAWN_TYPE = 1008
 
--- MinimapAPI 自带的卡牌图标（data.lua 的 IconList 里 ID = "Card"，动画 IconCard）
-local MARKER_ICON_ID = "Card"
+-- 自己的标记图标：resources/gfx/goodtripplus/skull.png（16x16，随本模组分发）
+-- 通过 MinimapAPI:AddIcon 注册进它的图标表，之后就能像内置图标一样塞进 room.VisitedIcons。
+-- 尺寸必须与 MinimapAPI 的图标一致（16x16、pivot 0,0），否则它的图标位置计算会错位。
+local MARKER_ICON_ID = "GTPMarkedSkull"
+local MARKER_ICON_ANIM = "GTPMarkedSkull"
+
+-- 兜底图标：万一 MinimapAPI 太老没有 AddIcon、或精灵加载失败，
+-- 退回它自带的卡牌图标（语义相近，功能不至于整个失效）
+local FALLBACK_ICON_ID = "Card"
 
 -- LevelStage.STAGE3_2 —— 深牢 II
 local TARGET_STAGE = 6
+
+-- 图标注册状态：nil = 还没成功过（下次再试）；true = 已注册；false = 本环境没戏
+local marker_icon_state = nil
 
 local stats = {
   scans = 0,          -- 重新扫描生成表的次数（每层一次）
@@ -76,6 +90,36 @@ end
 
 local function is_enabled()
   return gt:get_config_bool("FoolsSkullRoom", true)
+end
+
+-- 懒注册我们的骷髅图标（放到运行时做，确保 MinimapAPI 已经加载）
+local function register_marker_icon()
+  if marker_icon_state ~= nil then
+    return marker_icon_state
+  end
+  if not (MinimapAPI and MinimapAPI.AddIcon) then
+    return false -- 还没就绪，下次再试（刻意不缓存失败）
+  end
+
+  local ok, sprite = pcall(function()
+    local s = Sprite()
+    s:Load("gfx/goodtripplus/skull.anm2", true)
+    return s
+  end)
+
+  if ok and sprite then
+    marker_icon_state = true
+    MinimapAPI:AddIcon(MARKER_ICON_ID, sprite, MARKER_ICON_ANIM, 0)
+    log("标记骷髅：已注册自定义骷髅图标 " .. MARKER_ICON_ID)
+  else
+    marker_icon_state = false
+    log("标记骷髅：骷髅图标注册失败，退回 " .. FALLBACK_ICON_ID)
+  end
+  return marker_icon_state
+end
+
+local function marker_icon_id()
+  return register_marker_icon() and MARKER_ICON_ID or FALLBACK_ICON_ID
 end
 
 -- 层身份：用于判断缓存是否还有效。换层（含 rewind 回来的层）时至少一个字段会变
@@ -172,17 +216,18 @@ local function ensure_icon(room, descriptor)
     return false
   end
 
+  local icon_id = marker_icon_id()
   local icons = room.VisitedIcons
   if type(icons) ~= "table" then
     icons = {}
     room.VisitedIcons = icons
   end
   for i = 1, #icons do
-    if icons[i] == MARKER_ICON_ID then
+    if icons[i] == icon_id then
       return false
     end
   end
-  icons[#icons + 1] = MARKER_ICON_ID
+  icons[#icons + 1] = icon_id
   return true
 end
 
@@ -217,7 +262,7 @@ local function update()
         stats.applied = stats.applied + 1
         stats.last_result = string.format("已标记房间 %s（累计 %d 次）",
           tostring(grid_index), stats.applied)
-        log("标记骷髅：房间 " .. tostring(grid_index) .. " 已加上卡牌图标")
+        log("标记骷髅：房间 " .. tostring(grid_index) .. " 已加上骷髅图标")
       end
     end
   end
@@ -243,6 +288,8 @@ gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command)
     " foundRooms=" .. stats.found_rooms ..
     " applied=" .. stats.applied
   lines[#lines + 1] = "skullRoom.lastResult=" .. stats.last_result
+  lines[#lines + 1] = "skullRoom.icon=" .. tostring(marker_icon_id()) ..
+    (marker_icon_state == true and " (custom)" or " (fallback)")
 
   local ids = {}
   for grid_index in pairs(marked_rooms) do

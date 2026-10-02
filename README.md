@@ -206,10 +206,17 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 
 复用 MinimapAPI 自己的房间图标系统：它的房间对象有 `PermanentIcons` / `VisitedIcons` 两个图标名数组，
 渲染 `VisitedIcons` 时**只在房间已探索时**才画（它标镜子房 / 矿车房用的就是这个机制）。
-所以本模块只把 MinimapAPI 自带的 `"Card"` 图标塞进对应房间的 `VisitedIcons`。
+本模块在启动时用 `MinimapAPI:AddIcon` 注册一个**自己的图标** `GTPMarkedSkull`
+（素材 `resources/gfx/goodtripplus/skull.png`，16x16，随本模组分发），再把它塞进对应房间的 `VisitedIcons`。
 
 这样做的好处：坐标 / 缩放 / 大小图切换 / 地图滑动全由 MinimapAPI 自己算，天然对齐；
-**「没进去过的房间不显示」这条防剧透规则也是 MinimapAPI 执行的**，不需要重写；而且不需要任何新素材。
+**「没进去过的房间不显示」这条防剧透规则也是 MinimapAPI 执行的**，不需要重写。
+
+两个实现注意点：
+
+- 图标尺寸必须与 MinimapAPI 的图标一致（**16x16、pivot 0,0**），否则它的图标位置计算会错位。
+- 万一 `AddIcon` 不存在（MinimapAPI 版本太老）或精灵加载失败，会退回它自带的 `Card` 卡牌图标，
+  功能不至于整个失效；`gtpdiag` 的 `skullRoom.icon=` 会显示当前实际用的是哪个。
 
 因为 MinimapAPI 会在换层、rewind 等时机整表重建房间对象（重建后我们塞的图标会没），
 本模块在每帧的 `MC_POST_UPDATE` 里**确保**一次：命中集合为空时直接返回，
@@ -223,11 +230,12 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 skullRoom.enabled=true stage=6
 skullRoom.scans=1 foundRooms=1 applied=1
 skullRoom.lastResult=已标记房间 42（累计 1 次）
+skullRoom.icon=GTPMarkedSkull (custom)
 skullRoom.rooms={42}
 ```
 
 `foundRooms=0` 说明本层生成表里没找到该骷髅（正常——不是每层都有）；
-`rooms={...}` 是识别到的网格索引列表。
+`rooms={...}` 是识别到的网格索引列表；`icon=` 后面 `(custom)` 表示用的是自绘骷髅图标。
 
 ---
 
@@ -295,7 +303,8 @@ issacMod/                       ← 工作区 git 仓库（可容纳多个 mod�
     ├── dist/                   ← 打包产物（不进版本控制）
     ├── LICENSE                 ← MIT（仅覆盖本项目自有代码）
     ├── THIRD_PARTY.md          ← 各来源的授权状况与发布路线
-    ├── resources/gfx/goodtripplus/ ← 隐藏房候选标记的精灵（marker.anm2 / marker.png）
+    ├── resources/gfx/goodtripplus/ ← 标记精灵：marker.*（隐藏房候选，来自 Lazy Delver）
+    │                                 skull.*（愚者骷髅房图标，本模组自有素材）
     └── scripts/
         ├── gtrep.lua           ← 上游 MLX's Tweak 主逻辑（仅改名重写 + 准入判定扩展）
         ├── gtp_rewindfix.lua   ← rewind 掉落物图标修复（不依赖具体回调的帧末监视）
@@ -328,7 +337,7 @@ issacMod/                       ← 工作区 git 仓库（可容纳多个 mod�
 | `scripts/gtp_delver.lua` | 新增文件，隐藏房候选标记的回调接线 |
 | `scripts/gtp_skullroom.lua` | 新增文件，深牢 II 愚者骷髅房标记（自己写的，未参考任何 mod 的实现代码） |
 | `scripts/delver/*` | 从 Lazy Delver 原样移植（仅改写 `require` 路径），`render.lua` 重写了定位部分 |
-| `resources/gfx/goodtripplus/*` | 从 Lazy Delver 复制标记精灵，换到自己的路径避免与它本体冲突 |
+| `resources/gfx/goodtripplus/*` | `marker.*` 从 Lazy Delver 复制（换到自己的路径避免与它本体冲突）；`skull.*` 是本模组自有的骷髅图标（16x16） |
 | `main.lua` / `metadata.xml` / `gtconfig.lua` / `deploy.sh` | 新增 / 重写 |
 
 ---
