@@ -11,7 +11,17 @@
 | **GoodTrip**（原始版本，作者 tarako） | MLX's Tweak 本身就是它的二次开发，因此本条也在授权链上 | **无许可证文件** → 默认保留所有权利 | ⚠️ 间接依赖 |
 | **Lazy Delver**<br>(作者 dokee，工坊 3751630929，[GitHub](https://github.com/dokee39/IsaacLazyDelver)) | `scripts/delver/`（const / geometry / log / state / map / room 原样移植）、`resources/gfx/goodtripplus/marker.anm2` 与 `marker.png` | **MIT** | ✅ 已合规 |
 | **MinimapAPI**<br>(作者 TazTxUK，工坊 1978904635，[GitHub](https://github.com/TazTxUK/MinimapAPI)) | 仅在运行时调用其 API、读取其内部表结构（`MinimapAPI.Levels` 等）与配置项 | 仓库无许可证；但**本仓库未包含其任何代码或素材** | ✅ 无需许可（作为依赖） |
-| 本项目自有代码 | rewind 掉落物图标修复、隐藏房标记的对接与渲染、部署脚本 | MIT（本仓库声明） | ✅ |
+| `resources/gfx/goodtripplus/skull.*`<br>（深牢 II 愚者骷髅房的标记图标） | 16x16 PNG **由使用者提供**；`skull.anm2` 是本项目自写 | **来源待确认** | ⚠️ 见下方说明 |
+| 本项目自有代码 | rewind 掉落物图标修复、隐藏房标记的对接与渲染、深牢 II 骷髅房标记、部署脚本 | MIT（本仓库声明） | ✅ |
+
+### 关于 skull.png（标记图标）
+
+它是使用者提供的 16x16 图，外观与游戏里那种「带标记的骷髅」很接近。
+**如果这张图是从游戏素材里抠出来的、或来自其它 mod，那么它不属于本项目自有素材**，
+按上面的同理需要相应授权（素材来自游戏本体的情况在 mod 圈很常见，但严格说仍受版权约束）。
+公开上传前请确认来源；若来源不明，替换成完全自绘的图标即可（格式要求：16x16 PNG，二值透明背景，
+配一份同名的 `.anm2`，见 `resources/gfx/goodtripplus/skull.anm2` 模板）。
+
 
 ## 关键问题：上游基底没有许可证
 
@@ -61,6 +71,7 @@
 - [ ] 描述里明确写出：原始 GoodTrip 作者 tarako、基底 MLX's Tweak、隐藏房标记来自 Lazy Delver (dokee, MIT)。
 - [ ] 描述里提示：**GoodTripPlus 与 MLX's Tweak / 原版 Goodtrip 功能重叠，只能启用一个**；
       并提示「已合并 Lazy Delver，请禁用 Lazy Delver 本体」。
-- [ ] 不要使用他人的封面图、截图（本项目 `resources/` 下只有来自 Lazy Delver 的 MIT 素材）。
+- [ ] 不要使用他人的封面图、截图；确认 `resources/gfx/goodtripplus/skull.png` 的来源
+      （若来源不明，换成自绘图标——格式要求见上文「关于 skull.png」；`marker.*` 来自 Lazy Delver，MIT 已合规）。
 - [ ] mod 必须免费，不得以任何形式商业化。
 - [ ] 上传时由 ModUploader 分配工坊 id，`metadata.xml` 里的 `<id>` 会被替换成它。

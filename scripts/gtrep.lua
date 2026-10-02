@@ -982,7 +982,7 @@ local GT_STRINGS = {
     unexplored_name = "Teleport Into Unexplored Rooms",
     unexplored_desc = "Allow teleporting into a room you have never entered, as long as it sits next to an explored room that is reachable from your current room (only when 'Disable Unconnected Teleport' is on does that reachability matter). Default: disabled",
     fools_skull_name = "Mark The Fool Skull Room",
-    fools_skull_desc = "In Depths II a special skull always drops The Fool card when destroyed. This puts a card icon on the room that contains it, so you can find it again. Only shown for rooms you have already visited, so it never spoils the layout. Default: enabled",
+    fools_skull_desc = "In Depths II a special skull always drops The Fool card when destroyed. This puts a skull icon on the room that contains it, so you can find it again. Only shown for rooms you have already visited, so it never spoils the layout. Default: enabled",
   },
   zh_hans = {
     title = "GoodTripPlus",
@@ -1001,7 +1001,7 @@ local GT_STRINGS = {
     unexplored_name = "允许传送到未探索的相邻房间",
     unexplored_desc = "开启后可以传送到还没进去过、但紧邻某个已探索房间的位置；若同时开着「禁用未连通房间传送」，那个相邻的已探索房间还需要能从当前房间沿已探索路径抵达。默认关闭。",
     fools_skull_name = "标记深牢 II 的愚者骷髅房",
-    fools_skull_desc = "深牢 II 里有一个特殊骷髅，炸掉后固定掉落愚者卡牌。开启后会在地图上给它所在的房间加一个卡牌图标，方便回头再找。只在你已经进过该房间后才显示，不会剧透本层布局。默认开启。",
+    fools_skull_desc = "深牢 II 里有一个特殊骷髅，炸掉后固定掉落愚者卡牌。开启后会在地图上给它所在的房间加一个骷髅图标，方便回头再找。只在你已经进过该房间后才显示，不会剧透本层布局。默认开启。",
   },
 }
 -- A few plausible spellings/casings for each supported language, since the
