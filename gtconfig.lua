@@ -11,3 +11,6 @@ gt.ShowSecretMarkers = true
 
 -- 允许传送到未探索的相邻房间（默认关闭，想用改成 true；也可在 MCM 里开）
 gt.AllowUnexploredNeighbor = false
+
+-- 深牢 II 的「标记骷髅」房间标记（炸掉固定掉愚者卡牌的那个骷髅）
+gt.FoolsSkullRoom = true

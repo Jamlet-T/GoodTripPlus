@@ -7,6 +7,7 @@
 1. **修复**了使用控制台 `rewind` 指令后，小地图上所有掉落物图标全部消失的问题（见第一节）。
 2. **合并**了 Lazy Delver 的隐藏房候选标记，并把标记对齐到 MinimapAPI 的真实布局（见第二节）。
 3. **新增**了「传送到未探索的相邻房间」功能，默认关闭（见第三节）。
+4. **新增**了深牢 II 愚者骷髅房的标记，默认开启（见第四节）。
 
 ---
 
@@ -180,7 +181,57 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 
 ---
 
-## 四、安装 / 与上游共存
+## 四、深牢 II 的愚者骷髅房标记（默认开启）
+
+**背景**：深牢 II（Depths II）里有一个特殊的骷髅障碍物，炸掉后**固定掉落愚者卡牌**（The Fool）。
+开启后，小地图会在它所在的房间上画一个卡牌图标，方便回头再找。
+
+开关：**MCM → GoodTripPlus → 「标记深牢 II 的愚者骷髅房」**，或 `gtconfig.lua` 里 `gt.FoolsSkullRoom = false`。
+
+### 怎么识别的（依据全在游戏自己的数据里，不是猜的）
+
+| 依据 | 内容 |
+| --- | --- |
+| 游戏自带 `resources/scripts/enums.lua` 第 497 行 | `GRID_ROCK_ALT2 = 26, -- special skull in Depths 2` —— 注释直接写明「深牢 II 的特殊骷髅」 |
+| REPENTOGON 的 `enums_ex.lua` 第 1625 行 | `StbGridType` 里 `ALT_ROCK_MARKED = 1008, MARKED_SKULL = 1008` —— 房间布局（`.stb`）里这个骷髅的类型 ID |
+| 层判定 | `Level:GetStage() == LevelStage.STAGE3_2`（= 6），即深牢 II（含 Necropolis II / Dank Depths II 同类层） |
+
+识别方式是读房间的**生成表**（`RoomDescriptor.Data.Spawns`）里有没有 Type == 1008 的条目，
+而不是进房扫实体。理由：
+
+- 骷髅可能在玩家进房前就被炸掉，扫实体拿不到；生成表是布局自带的，永远在；
+- 生成表在地图被重建后仍能重新读取，**rewind 之后不会丢**（不需要维护快照）。
+
+### 标记怎么画上去的
+
+复用 MinimapAPI 自己的房间图标系统：它的房间对象有 `PermanentIcons` / `VisitedIcons` 两个图标名数组，
+渲染 `VisitedIcons` 时**只在房间已探索时**才画（它标镜子房 / 矿车房用的就是这个机制）。
+所以本模块只把 MinimapAPI 自带的 `"Card"` 图标塞进对应房间的 `VisitedIcons`。
+
+这样做的好处：坐标 / 缩放 / 大小图切换 / 地图滑动全由 MinimapAPI 自己算，天然对齐；
+**「没进去过的房间不显示」这条防剧透规则也是 MinimapAPI 执行的**，不需要重写；而且不需要任何新素材。
+
+因为 MinimapAPI 会在换层、rewind 等时机整表重建房间对象（重建后我们塞的图标会没），
+本模块在每帧的 `MC_POST_UPDATE` 里**确保**一次：命中集合为空时直接返回，
+只在深牢 II 才扫描生成表（每层一次，缓存在层身份上），开销可忽略。
+
+### 自查手段
+
+控制台输入 `gtpdiag`，会多出这几行：
+
+```
+skullRoom.enabled=true stage=6
+skullRoom.scans=1 foundRooms=1 applied=1
+skullRoom.lastResult=已标记房间 42（累计 1 次）
+skullRoom.rooms={42}
+```
+
+`foundRooms=0` 说明本层生成表里没找到该骷髅（正常——不是每层都有）；
+`rooms={...}` 是识别到的网格索引列表。
+
+---
+
+## 五、安装 / 与上游共存
 
 1. 把本仓库同步到游戏 mods 目录（mod 目录名必须是 `goodtripplus`）：
 
@@ -221,7 +272,7 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 
 包里的 `LICENSE`、`THIRD_PARTY.md`、`scripts/delver/LICENSE-lazy-delver.txt` **别删**：
 Lazy Delver 是 MIT 许可，要求许可证文本随副本一起分发。
-**私下发给朋友没问题**；但**公开上传到创意工坊要先拿到 MLX's Tweak 作者的许可**，见第八节。
+**私下发给朋友没问题**；但**公开上传到创意工坊要先拿到 MLX's Tweak 作者的许可**，见第九节。
 
 改动源码后重新打包：
 
@@ -231,12 +282,12 @@ bash pack.sh        # 产出 dist/goodtripplus-<版本>.zip
 
 ---
 
-## 五、目录结构
+## 六、目录结构
 
 ```
 issacMod/                       ← 工作区 git 仓库（可容纳多个 mod）
 └── goodtripplus/               ← 本 mod 的源码目录（自包含，可独立打包/拆出）
-    ├── main.lua                ← 入口：加载 gtrep + gtp_rewindfix + gtp_delver
+    ├── main.lua                ← 入口：加载 gtrep + gtp_rewindfix + gtp_delver + gtp_skullroom
     ├── metadata.xml            ← mod 元数据（name / directory / id）
     ├── gtconfig.lua            ← 静态默认值（可被 MCM 覆盖）
     ├── deploy.sh               ← 同步到游戏 mods/goodtripplus（开发机用）
@@ -249,6 +300,7 @@ issacMod/                       ← 工作区 git 仓库（可容纳多个 mod�
         ├── gtrep.lua           ← 上游 MLX's Tweak 主逻辑（仅改名重写 + 准入判定扩展）
         ├── gtp_rewindfix.lua   ← rewind 掉落物图标修复（不依赖具体回调的帧末监视）
         ├── gtp_delver.lua      ← 隐藏房候选标记的回调接线 + MCM 开关
+        ├── gtp_skullroom.lua   ← 深牢 II 愚者骷髅房标记（读房间生成表 → MinimapAPI 房间图标）
         └── delver/             ← 移植自 Lazy Delver（MIT），仅改了 require 路径
             ├── const.lua       ← 常量表
             ├── geometry.lua    ← 形状占据格、相邻格、门槽映射
@@ -267,20 +319,21 @@ issacMod/                       ← 工作区 git 仓库（可容纳多个 mod�
 
 ---
 
-## 六、与上游 / 来源的差异清单
+## 七、与上游 / 来源的差异清单
 
 | 位置 | 改动 |
 | --- | --- |
-| `scripts/gtrep.lua` | `RegisterMod` 名、ModConfigMenu 配置键 / 标题全部改为 `GoodTripPlus`；新增 MCM 开关 `ShowSecretMarkers`、`AllowUnexploredNeighbor`，并放宽 `check_teleble()` 的准入判定；其余逻辑与 MLX's Tweak 完全一致 |
+| `scripts/gtrep.lua` | `RegisterMod` 名、ModConfigMenu 配置键 / 标题全部改为 `GoodTripPlus`；新增 MCM 开关 `ShowSecretMarkers`、`AllowUnexploredNeighbor`、`FoolsSkullRoom`，并放宽 `check_teleble()` 的准入判定；其余逻辑与 MLX's Tweak 完全一致 |
 | `scripts/gtp_rewindfix.lua` | 新增文件，rewind 图标修复 |
 | `scripts/gtp_delver.lua` | 新增文件，隐藏房候选标记的回调接线 |
+| `scripts/gtp_skullroom.lua` | 新增文件，深牢 II 愚者骷髅房标记（自己写的，未参考任何 mod 的实现代码） |
 | `scripts/delver/*` | 从 Lazy Delver 原样移植（仅改写 `require` 路径），`render.lua` 重写了定位部分 |
 | `resources/gfx/goodtripplus/*` | 从 Lazy Delver 复制标记精灵，换到自己的路径避免与它本体冲突 |
 | `main.lua` / `metadata.xml` / `gtconfig.lua` / `deploy.sh` | 新增 / 重写 |
 
 ---
 
-## 七、开发流程
+## 八、开发流程
 
 ```bash
 # 改完源码后
@@ -294,7 +347,7 @@ git add -A && git commit -m "..."
 
 ---
 
-## 八、授权与发布
+## 九、授权与发布
 
 本仓库的内容来自三个来源，授权状况**互不相同**，详见 [`LICENSE`](LICENSE) 与 [`THIRD_PARTY.md`](THIRD_PARTY.md)。
 
