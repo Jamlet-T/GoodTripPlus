@@ -14,6 +14,3 @@ gt.AllowUnexploredNeighbor = false
 
 -- 深牢 II 的「标记骷髅」房间标记（炸掉固定掉愚者卡牌的那个骷髅）
 gt.FoolsSkullRoom = true
-
--- 战斗时隐藏右上角小地图（按住地图键仍可唤出大地图；默认关闭）
-gt.HideMinimapInCombat = false

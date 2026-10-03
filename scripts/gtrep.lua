@@ -36,7 +36,6 @@ gt.FastRestartEnable = false
 gt.TeleportAnimation = true
 gt.BlockCurseRoom = true
 gt.RequireExploredPath = true
-gt.HighlightStartingRoom = true
 gt.HighlightCursorRoom = true
 gt.ShowSecretMarkers = true
 gt.AllowUnexploredNeighbor = false
@@ -151,25 +150,50 @@ function gt:check_teleble(gid)
 end
 --
 -- 「传送到未探索的相邻房间」用的判定。
--- 目标房间还没进去过时，看它上下左右四个格子里有没有「已探索」的房间，
+-- 目标房间还没进去过时，看它有没有「已探索」的相邻房间，
 -- 并且（在开启 RequireExploredPath 时）那个房间能从当前房间沿已探索路径抵达。
--- 注意 ±1 会跨行，必须按列号把左右两侧的越界排除掉。
+--
+-- 注意两点：
+-- 1. ±1 会跨行，必须按列号把左右两侧的越界排除掉；
+-- 2. 目标可能是**大房间**（2x1/1x2/2x2/L 形），占据多个格子。
+--    只检查光标所在格子的四邻会漏判——比如 2x2 房里不贴着
+--    已探索房的那两个格子，四邻全是本房间的其他格（未探索）或空格。
+--    所以这里先收集目标房间占据的**全部**格子，再逐格检查四邻，
+--    任何一格挨着已探索房间即算相邻（房间与房间相邻，而非格子与格子）。
 --
 function gt:has_reachable_explored_neighbor(gid, requireExploredPath)
-    local column = gid % 13
-    local neighbors = {gid - 13, gid + 13}
-    if column > 0 then
-      neighbors[#neighbors + 1] = gid - 1
-    end
-    if column < 12 then
-      neighbors[#neighbors + 1] = gid + 1
+    local targetDesc = grid_room[gid]
+    if not targetDesc then
+      return false
     end
 
-    for _, neighborGid in ipairs(neighbors) do
-      local neighbor = grid_room[neighborGid]
-      if neighbor and neighbor.VisitedCount > 0 then
-        if not requireExploredPath or gt:has_explored_path_to(neighborGid) then
-          return true
+    -- 目标房间占据的所有格子（大房间在 grid_room 里有多个键指向同一描述符）
+    local cells = {}
+    for cellGid, rd in pairs(grid_room) do
+      if rd.ListIndex == targetDesc.ListIndex then
+        cells[#cells + 1] = cellGid
+      end
+    end
+
+    for _, cellGid in ipairs(cells) do
+      local column = cellGid % 13
+      local neighbors = {cellGid - 13, cellGid + 13}
+      if column > 0 then
+        neighbors[#neighbors + 1] = cellGid - 1
+      end
+      if column < 12 then
+        neighbors[#neighbors + 1] = cellGid + 1
+      end
+
+      for _, neighborGid in ipairs(neighbors) do
+        local neighbor = grid_room[neighborGid]
+        -- 排除目标房间自己的其他格子（未探索时 VisitedCount 必为 0，
+        -- 这里显式排除以保证该函数对任意目标状态都语义正确）
+        if neighbor and neighbor.ListIndex ~= targetDesc.ListIndex
+        and neighbor.VisitedCount > 0 then
+          if not requireExploredPath or gt:has_explored_path_to(neighborGid) then
+            return true
+          end
         end
       end
     end
@@ -820,23 +844,11 @@ function gt:draw_minapi_room_highlight(mapRoom, color)
     sprite:Render(mapRoom.RenderOffset, Vector(0, 0), Vector(0, 0))
 end
 --
-function gt:render_map_highlights()
-    if not MinimapAPI then
-      return
-    end
-    if gt:get_config_bool("HighlightStartingRoom", true)
-    and not level:IsAscent()
-    and gt:get_current_dimension() == 0
-    and not gt:is_mirror_world() then
-      local startDesc = level:GetRoomByIdx(level:GetStartingRoomIndex(), 0)
-      if startDesc then
-        gt:draw_minapi_room_highlight(
-          gt:get_minapi_room_by_list_index(startDesc.ListIndex),
-          Color(0.35, 1, 0.35, 0.45, 0, 0, 0)
-        )
-      end
-    end
-end
+-- 初始房间的绿色高亮已移除（2026-10-03）：MinimapAPI 自带
+-- "Highlight Start Room"（HighlightStartRoom，其菜单里开），
+-- 按项目定位（MinimapAPI 的外置传送插件）不再自己画。
+-- 光标所在房间的高亮保留（HighlightCursorRoom，MinimapAPI 无对应功能），
+-- 由 render_cursor 直接绘制。
 --
 -- Renders the cursor on top of MinimapAPI's own minimap. This is
 -- deliberately a separate callback from gt:tab_action() (see the bottom of
@@ -847,7 +859,6 @@ end
 -- minimap art was painted on top of it afterwards, making the cursor appear
 -- to be stuck underneath the map with REPENTOGON installed.
 function gt:render_cursor()
-    gt:render_map_highlights()
     if mmp_ctrl then
       if gt:get_config_bool("HighlightCursorRoom", true) and mmp_highlight_gid then
         local desc = grid_room[mmp_highlight_gid]
@@ -981,8 +992,6 @@ local GT_STRINGS = {
     block_curse_desc = "When enabled, you cannot teleport into Curse Rooms (the ones that damage you on entry/exit). Default: enabled",
     require_path_name = "Disable Unconnected Teleport",
     require_path_desc = "When enabled, teleporting requires an explored route between the current and target rooms. Default: enabled",
-    highlight_start_name = "Highlight Starting Room",
-    highlight_start_desc = "Highlights the floor's starting room on the minimap. Default: enabled",
     highlight_cursor_name = "Highlight Cursor Room",
     highlight_cursor_desc = "Highlights a teleportable room under the cursor. Default: enabled",
     secret_markers_name = "Secret Room Candidate Markers",
@@ -991,8 +1000,6 @@ local GT_STRINGS = {
     unexplored_desc = "Allow teleporting into a room you have never entered, as long as it sits next to an explored room that is reachable from your current room (only when 'Disable Unconnected Teleport' is on does that reachability matter). Secret rooms are excluded: those still have to be blown open. Default: disabled",
     fools_skull_name = "Mark The Fool Skull Room",
     fools_skull_desc = "In Depths II a special skull always drops The Fool card when destroyed. This puts a skull icon on the room that contains it, so you can find it again. Only shown for rooms you have already visited, so it never spoils the layout. Default: enabled",
-    hide_combat_name = "Hide Minimap In Combat",
-    hide_combat_desc = "While the current room is not cleared, the minimap in the top-right corner is hidden. Holding the map key still brings up the large map, so teleporting and the markers keep working. Your MinimapAPI settings are not changed. Default: disabled",
   },
   zh_hans = {
     title = "GoodTripPlus",
@@ -1002,8 +1009,6 @@ local GT_STRINGS = {
     block_curse_desc = "开启后不能传送进会在进出时扣血的诅咒房。默认开启。",
     require_path_name = "禁用未连通房间传送",
     require_path_desc = "开启后，只有当前房间与目标房间之间存在已探索路径时才能传送。默认开启。",
-    highlight_start_name = "高亮显示初始房间",
-    highlight_start_desc = "在小地图上高亮显示本层的初始房间。默认开启。",
     highlight_cursor_name = "高亮光标下房间",
     highlight_cursor_desc = "高亮显示光标下可传送的房间。默认开启。",
     secret_markers_name = "显示隐藏房候选标记",
@@ -1012,8 +1017,6 @@ local GT_STRINGS = {
     unexplored_desc = "开启后可以传送到还没进去过、但紧邻某个已探索房间的位置；若同时开着「禁用未连通房间传送」，那个相邻的已探索房间还需要能从当前房间沿已探索路径抵达。隐藏房不在这个范围内——它们仍然必须炸开墙才能进去。默认关闭。",
     fools_skull_name = "标记深牢 II 的愚者骷髅房",
     fools_skull_desc = "深牢 II 里有一个特殊骷髅，炸掉后固定掉落愚者卡牌。开启后会在地图上给它所在的房间加一个骷髅图标，方便回头再找。只在你已经进过该房间后才显示，不会剧透本层布局。默认开启。",
-    hide_combat_name = "战斗时隐藏小地图",
-    hide_combat_desc = "当前房间未清理时，隐藏右上角的小地图；按住地图键仍然能唤出大地图，传送光标与各类标记照常可用。不会改动你在 MinimapAPI 里的设置。默认关闭。",
   },
 }
 -- A few plausible spellings/casings for each supported language, since the
@@ -1067,13 +1070,6 @@ gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
     )
     ModConfigMenu.AddBooleanSetting(
       "GoodTripPlus", nil,
-      "HighlightStartingRoom",
-      true,
-      L.highlight_start_name,
-      L.highlight_start_desc
-    )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
       "HighlightCursorRoom",
       true,
       L.highlight_cursor_name,
@@ -1099,13 +1095,6 @@ gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
       true,
       L.fools_skull_name,
       L.fools_skull_desc
-    )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
-      "HideMinimapInCombat",
-      false,
-      L.hide_combat_name,
-      L.hide_combat_desc
     )
   end
 end)

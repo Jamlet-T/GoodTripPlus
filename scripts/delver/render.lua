@@ -7,6 +7,8 @@
 -- 于是整张地图的锚点平移一格，标记就整体错位。
 -- 这里直接复用 GoodTripPlus 的 gt:gid_to_rtmap_pos(cid) —— 那是传送光标用的同一套投影，
 -- 逐项复刻了 MinimapAPI 的布局数学（含镜像世界的负缩放），因此与地图必然对齐。
+--
+-- 第二个差别：MinimapAPI 战斗隐藏（HideInCombat 等）生效时不画标记（见 minimapapi_hides_map）。
 
 local C = require("scripts.delver.const")
 local geo = require("scripts.delver.geometry")
@@ -25,6 +27,49 @@ local tab_hold_cnt = -TAB_HOLD_THRESHOLD
 local marker_sprite = Sprite()
 marker_sprite:Load("gfx/goodtripplus/marker.anm2", true)
 marker_sprite:SetFrame(marker_sprite:GetDefaultAnimation(), 1)
+
+-- MinimapAPI 的「战斗时隐藏地图」（HideInCombat，外加几处无条件隐藏）是在它的
+-- 渲染回调**开头直接 return**——条件命中时整块地图（含按住 TAB 的大地图）都不画。
+-- 我们自己画的标记不在它的管辖范围，若不跟进，会出现「地图没了、标记浮在屏幕上」。
+-- 下面把它的隐藏条件逐条镜像过来（minimapi 2.58，main.lua 渲染回调开头 2218-2244 行）。
+local function minimapapi_hides_map()
+  local game = Game()
+  local gameroom = game:GetRoom()
+
+  -- boss 开场过场动画
+  if gameroom:GetFrameCount() == 0
+  and gameroom:GetType() == RoomType.ROOM_BOSS
+  and not gameroom:IsClear() then
+    return true
+  end
+  -- Mega Satan 战（BossID: 55），无条件隐藏
+  if gameroom:GetType() == RoomType.ROOM_BOSS and gameroom:GetBossID() == 55 then
+    return true
+  end
+  -- Beast 战，无条件隐藏
+  if MinimapAPI.isRepentance
+  and gameroom:GetType() == RoomType.ROOM_DUNGEON
+  and game:GetLevel():GetAbsoluteStage() == LevelStage.STAGE8 then
+    return true
+  end
+  -- 玩家设置的战斗隐藏档位：2 = 未清理的 boss 房，3 = 任意未清理房间
+  local hide_mode = MinimapAPI:GetConfig("HideInCombat")
+  if hide_mode == 2 then
+    if not gameroom:IsClear() and gameroom:GetType() == RoomType.ROOM_BOSS then
+      return true
+    end
+  elseif hide_mode == 3 then
+    if not gameroom:IsClear() then
+      return true
+    end
+  end
+  -- StageAPI 重实现的层间过场动画（仅当 MinimapAPI 走 MC_POST_HUD_RENDER 时存在）
+  if MinimapAPI.UsingPostHUDRender and StageAPI and StageAPI.TransitionAnimationData
+  and StageAPI.TransitionAnimationData.State == 2 then
+    return true
+  end
+  return false
+end
 
 
 local function check_real_and_clear_fake()
@@ -160,6 +205,9 @@ function M.render()
   if not gt:get_config_bool("ShowSecretMarkers", true) then return end
 
   if not MinimapAPI then return end
+
+  -- MinimapAPI 战斗隐藏生效中：地图整块没画，标记必须跟着藏
+  if minimapapi_hides_map() then return end
 
   if need_refresh then refresh() end
 
