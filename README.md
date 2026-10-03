@@ -179,38 +179,31 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 
 ---
 
-## 四、传送到未探索的相邻房间（可选，默认关闭）
+## 四、传送准入与传送判定（2026-10-03 起整体移植自 GoodTrip [Fixed]）
 
-开关：**Mod Config Menu → GoodTripPlus → 「允许传送到未探索的相邻房间」**，
-或 `gtconfig.lua` 里设 `gt.AllowUnexploredNeighbor = true`。
+本节原为「传送到未探索的相邻房间」（`AllowUnexploredNeighbor`）的说明。
+2026-10-03 按项目定位变更，**准入与传送判定整体忠实移植自 GoodTrip [Fixed]**
+（其 `rules.lua` 全部 + `floor.lua` 门图/邻接基础设施 + `trip.lua` 传送与诅咒过路费），
+选项与 Fixed 同名同默认值：
 
-上游的逻辑里，传送目标必须同时满足「已探索（`VisitedCount > 0`）」和「已清理（`Clear`）」，
-所以任何没进去过的房间都会被直接拦下。这个开关放宽「未探索」这一条，但**依然要求目标贴着你的探索边界**：
+| 选项 | 默认 | 作用 |
+| --- | --- | --- |
+| `FollowCurseOfLost` | 开 | 迷失诅咒下禁用传送 |
+| `AllowNeighborRoom` | 开 | 已清且可达房间旁「已显示但未清/未探索」的房间放行（普通房/boss/小 boss/献祭房除外；红钥匙房、一层与水层镜像的商店/宝箱房豁免；虚空 Delirium boss 房角落特判） |
+| `AllowAnyRoom` | 关 | 所有已显示房间全部放行 |
+| `FairTripPath` | 开 | 目标必须沿「已探索+已清怪」的房间逐真门抵达（门图 BFS） |
+| `ArriveAtDoor` | 关 | 落地在走路会走进来的门口（跨屏大房间远途会先经过前一格） |
+| `FairTripTime` | 关 | 按传送距离与移速补回游戏时间 |
+| `FastTransition` | 关 | 跳过传送动画 |
 
-- 目标房间 `VisitedCount == 0`（从未进入）；
-- 它上下左右四个相邻格子里，至少有一个 `VisitedCount > 0`（已探索）；
-- 若「禁用未连通房间传送」开着（默认开），那个已探索邻居还必须能**从当前房间沿已探索路径抵达**；
-- **隐藏房（普通 / 超级 / 究极）一律排除**，见下。
+旧的 `AllowUnexploredNeighbor` / `RequireExploredPath` / `BlockCurseRoom` 三个开关已移除：
+未探索场景并入 `AllowNeighborRoom` 的放宽逻辑；路径判定即 `FairTripPath`；
+诅咒房不再禁止传送，改为进门扣血（`curse_toll_free`：Flat File / 深渊书免伤，
+以撒的心脏 / 牙与甲照扣，尖刺状态从门两侧分别记录）。
 
-所以它不会让你跳到地图另一头，只能扎进你已经探索到的边界外侧一格。
-
-实现上动的是 `gt:check_teleble()` 里的准入分支，新增判定 `gt:has_reachable_explored_neighbor()`
-（左右两侧按列号排除了跨行越界；直接紧邻当前房间时，路径判定自然通过）。
-
-### 隐藏房必须炸墙才能进（v1.3.2 修）
-
-拥有蓝地图之类道具时，隐藏房会显示在地图上。如果它旁边已有探索过的房间，
-上面那条「相邻放行」规则就会让你**穿墙直接进屋** —— 那是错的：隐藏房在墙被炸开之前根本进不去。
-所以未探索的隐藏房（`RoomType.ROOM_SECRET = 7` / `ROOM_SUPERSECRET = 8` / `ROOM_ULTRASECRET = 29`）
-在这个开关下**一律拦下**。已经进去过的隐藏房不受影响（那是 `VisitedCount > 0` 的另一个分支）。
-
-三点注意：
-
-- 这类房间通常**还没清怪**，传送进去会直接落在敌群里，请自行判断风险——这正是它的用途。
-- 诅咒房（进出扣血的那种）依旧受「禁止传送进诅咒房」约束，未探索的诅咒房也照样被拦下。
-- 模组自带的调试模式（`gtconfig.lua` 里 `gt.DebugMod = true`）本来就能传送到任意房间，与本开关无关。
-
----
+核心机制（门图）：网格相邻分不清「门洞」和「隐藏房没炸开的墙」，所以按维度维护
+一张逐房间学出来的门图（`sweep_doors` 只读当前房的门、跳过 `DOOR_HIDDEN`、双向记录，
+换层清空），BFS 寻路与相邻放宽的最后一跳都要求**真实门**。
 
 ## 五、深牢 II 的愚者骷髅房标记（默认开启）
 
@@ -388,7 +381,7 @@ issacMod/                       ← 工作区 git 仓库（可容纳多个 mod�
 
 | 位置 | 改动 |
 | --- | --- |
-| `scripts/gtrep.lua` | `RegisterMod` 名、ModConfigMenu 配置键 / 标题全部改为 `GoodTripPlus`；新增 MCM 开关 `ShowSecretMarkers`、`AllowUnexploredNeighbor`、`FoolsSkullRoom`，并放宽 `check_teleble()` 的准入判定；其余逻辑与 MLX's Tweak 完全一致 |
+| `scripts/gtrep.lua` | `RegisterMod` 名、ModConfigMenu 配置键 / 标题全部改为 `GoodTripPlus`；新增 MCM 开关 `ShowSecretMarkers`、`FoolsSkullRoom`；传送准入与传送判定整体移植自 GoodTrip [Fixed]（选项同名同默认值，见第四节） |
 | `scripts/gtp_rewindfix.lua` | 新增文件，rewind 图标修复 |
 | `scripts/gtp_delver.lua` | 新增文件，隐藏房候选标记的回调接线 |
 | `scripts/gtp_skullroom.lua` | 新增文件，深牢 II 愚者骷髅房标记（自己写的，未参考任何 mod 的实现代码） |

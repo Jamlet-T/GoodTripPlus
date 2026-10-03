@@ -23,6 +23,7 @@ local ltroom = Vector(6, 6)
 local rbroom = Vector(6, 6)
 ---
 local tele_maze = false
+local tele_door_slot = -1 --the door a trip means to arrive by
 local secret_pre_room_id = {}
 local prep_alarm = false
 local testnum = 0
@@ -30,27 +31,51 @@ local n_room_num = 0
 local mmp_ctrl = false
 local mmp_ctrl_pos = Vector(0, 0)
 local mmp_highlight_gid = nil
+-- ===== 门图与邻接基础设施：忠实移植自 GoodTrip [Fixed]（scripts/floor.lua）=====
+-- door graph, learned one room at a time: grid adjacency alone cannot tell a
+-- doorway from a secret room's unbombed wall. Per dimension: the mirror world
+-- reuses the same grid numbers for different rooms.
+local door_link = {}  --door_link[dim][a][b]: a passage, seen from either end
+local door_swept = {} --door_swept[dim][a]: a's own walls were read
+--curse-room door spikes seen from outside / inside; Flat File strips only the
+--side it was used on, so the two are kept apart
+local curse_bare_outside, curse_bare_inside = {}, {}
+--each room shape's cell offsets beyond the anchor's four direct neighbours
+--（floor.lua 的 neighlut 原样；下标 = RoomDescriptor.Data.Shape）
+local neighlut = {
+    {-1, 1, -13, 13},
+    {-1, 1},
+    {-13, 13},
+    {-1, 1, -1+13, 1+13, -13, 13+13},
+    {-13, 13+13},
+    {-1, 2, -13, 13, -13+1, 13+1},
+    {-1, 2},
+    {-1, 2, -1+13, 2+13, -13, 13+13, -13+1, 13+13+1},
+    {-1, 1, -13, -2+13, 1+13, 13+13-1, 13+13},
+    {-13, -1, 1, -1+13, 2+13, 13+13, 13+13+1},
+    {-13, -13+1, -1, 2, 13, 13+2, 13+13+1},
+    {-13, -13+1, -1, 2, 13-1, 13+1, 13+13},
+}
+--每个房间的邻居列表（floor.lua get_room_neighbours；get_grid_room 之后重建）
+local room_neighbours = {}
 
 gt.DebugMod = false
 gt.FastRestartEnable = false
 gt.TeleportAnimation = true
-gt.BlockCurseRoom = true
-gt.RequireExploredPath = true
+gt.FollowCurseOfLost = true
+gt.AllowNeighborRoom = true
+gt.AllowAnyRoom = false
+gt.FairTripPath = true
+gt.ArriveAtDoor = false
+gt.FairTripTime = false
+gt.FastTransition = false
 gt.HighlightCursorRoom = true
 gt.ShowSecretMarkers = true
-gt.AllowUnexploredNeighbor = false
 local _, err = pcall(require, "gtconfig")
 ----
 local debug = gt.DebugMod
 local fastrestartenable = gt.FastRestartEnable
-local tele_anime = 3
-local tele_cd0 = 45
 local tele_cd = 0
-if not gt.TeleportAnimation then
-  tele_anime = 1
-  tele_cd0 = 10
-end
-if debug then tele_cd0 = 1 end
 -------------------------------
 function gt:check_pos_en_box(pos,ltpos,rbpos)
   if pos.X > ltpos.X and pos.X < rbpos.X and pos.Y > ltpos.Y and pos.Y < rbpos.Y then
@@ -85,8 +110,307 @@ function gt:check_room_open()
     return false
 end
 --
+-- ===== 以下准入与传送判定：忠实移植自 GoodTrip [Fixed]（scripts/rules.lua）=====
+--（floor.lua door_graph/sweep_doors/linked：门图，一格一格学出来）
+local function door_graph()
+    local d = Game():GetRoom():IsMirrorWorld() and 1 or 0
+    door_link[d] = door_link[d] or {}
+    door_swept[d] = door_swept[d] or {}
+    return door_link[d], door_swept[d]
+end
+
+--read the current room's doors (the only room the game answers for) into the
+--graph both ways. DOOR_HIDDEN is an unbombed wall, so no passage; everything
+--else, locked included, is walkable. All read live so nothing is from different moments.
+function gt:sweep_doors()
+    local live = Game():GetRoom()
+    local lvl = Game():GetLevel()
+    local here = lvl:GetCurrentRoomDesc().SafeGridIndex
+    local link, swept = door_graph()
+    link[here] = link[here] or {}
+    swept[here] = true
+    for i = 0, 7 do
+      local door = live:GetDoor(i)
+      if door and door.Desc.Variant ~= DoorVariant.DOOR_HIDDEN then
+        local there = lvl:GetRoomByIdx(door.TargetRoomIndex, -1).SafeGridIndex
+        --curse-room spikes are read off the door itself: Flat File strips them
+        --once and for good, so the trinket in hand says nothing about this door
+        if door.TargetRoomType == RoomType.ROOM_CURSE then
+          curse_bare_outside[there] = door.VarData ~= 0
+        elseif live:GetType() == RoomType.ROOM_CURSE then
+          curse_bare_inside[here] = door.VarData ~= 0
+        end
+        if there ~= here then
+          --this end knows its slot; the far end gets a bare mark until its own turn
+          link[here][there] = i
+          link[there] = link[there] or {}
+          if link[there][here] == nil then link[there][here] = true end
+        end
+      end
+    end
+end
+
+--may a trip step between these rooms? A passage seen from either end: yes. A
+--swept room saying nothing: no. Neither swept (mod loaded mid-run): grid adjacency stands.
+function gt:rooms_linked(a, b)
+    local link, swept = door_graph()
+    if link[a] and link[a][b] ~= nil then
+      return true
+    end
+    return not (swept[a] or swept[b])
+end
+
+--（floor.lua get_room_neighbours：由格子邻接推导房间级邻接，大房间/L 形天然覆盖）
+function gt:get_room_neighbours()
+    room_neighbours = {}
+    local all_room = level:GetRooms()
+    for i = 0, all_room.Size do
+      local des = all_room:Get(i)
+      if des then
+        room_neighbours[des.SafeGridIndex] = {
+          Descriptor = des,
+          Neighbors = {}
+        }
+      end
+    end
+    local offsets = {-13, 13, -1, 1}
+    for _, r in pairs(room_neighbours) do
+      local safeIndex = r.Descriptor.SafeGridIndex
+      for gridIndex, cellRoom in pairs(grid_room) do
+        if cellRoom.SafeGridIndex == safeIndex then
+          for _, offset in ipairs(offsets) do
+              --column guard, as in check_neigh_connected
+              local wrapped = (offset == -1 and gridIndex % 13 == 0)
+                           or (offset == 1 and gridIndex % 13 == 12)
+              local other = not wrapped and grid_room[gridIndex + offset] or nil
+              if other and other.SafeGridIndex ~= safeIndex then
+                  r.Neighbors[other.SafeGridIndex] = true
+              end
+          end
+        end
+      end
+    end
+    for _, r in pairs(room_neighbours) do
+      local list = {}
+      for id in pairs(r.Neighbors) do
+        list[#list + 1] = id
+      end
+      r.Neighbors = list
+    end
+end
+
+--may I go there: the predicates a trip is checked against, the reachable set,
+--the fair distance, the door a walk would have come in by.
+function gt:check_neigh_connected(trd, cond)
+    local tid = trd.SafeGridIndex
+    if (trd.DisplayFlags & 1) ~= 0 then
+      --a red-key room stands open already, whatever it turned out to hold
+      if (trd.VisitedCount == 0 or not trd.Clear) and
+        trd.Flags & RoomDescriptor.FLAG_RED_ROOM == 0 and
+        trd.Data.Type ~= 1 and trd.Data.Type ~= 5 and
+        trd.Data.Type ~= 6 and trd.Data.Type ~= 13 and
+        not (((stage == 1 and level:GetStageType() < StageType.STAGETYPE_REPENTANCE) or room:IsMirrorWorld())
+                and ((not Game():IsGreedMode() and trd.Data.Type == 4) or trd.Data.Type == 2)) then --free: stage-1 normal floor, or Downpour/Dross mirror world
+        return false
+      end
+      local function check_grid(off)
+        local id = tid + off
+        if id < 0 or id > 168 then
+          return false
+        end
+        --column guard: a sideways offset must not wrap to the neighbouring row
+        local dcol = ((off % 13) + 6) % 13 - 6
+        if (tid % 13) + dcol ~= id % 13 then
+          return false
+        end
+        local rd = grid_room[id]
+        return rd ~= nil and cond(rd)
+      end
+      local near_room = {check_grid(-13), check_grid(13), check_grid(-1), check_grid(1)}
+      if stage == 12 and trd.Data.Type == 5 and trd.Data.Shape > 3 then
+        --void bossrooms--type4=1x2/type6=2x1/type8=2x2=Delirium
+        if (near_room[1] and near_room[4])
+          or (near_room[2] and near_room[3])
+          or (trd.Data.Shape == 6 and (near_room[1] or near_room[4]))
+          or (trd.Data.Shape == 4 and (near_room[2] or near_room[3]))
+        then
+          return true
+        end
+      else
+        if near_room[1] or near_room[4] or near_room[2] or near_room[3] then
+          return true
+        end
+        for _, off in ipairs(neighlut[trd.Data.Shape]) do
+            if check_grid(off) then
+                return true
+            end
+        end
+      end
+    end
+    return false
+end
+
+function gt:get_reachable_rooms()
+    --flood from the current room through visited+cleared rooms; each step needs
+    --a door too, else a secret room counts as a corridor on all four sides
+    local start = crd.SafeGridIndex
+    gt:sweep_doors() --a wall bombed since entering would still read as solid
+    local reach = {[start] = true}
+    local queue = {start}
+    local head = 1
+    while queue[head] do
+      local cur = queue[head]
+      head = head + 1
+      local node = room_neighbours[cur]
+      if node then
+        for _, adj in ipairs(node.Neighbors) do
+          local rd = grid_room[adj]
+          if rd and not reach[adj] and rd.VisitedCount > 0 and rd.Clear
+              and gt:rooms_linked(cur, adj) then
+            reach[adj] = true
+            queue[#queue + 1] = adj
+          end
+        end
+      end
+    end
+    return reach
+end
+
+--the game's own landing ignores Direction (measured twice): it takes the wall of
+--the cell handed over that faces the room left from, by the axis with the larger
+--grid distance (a tie goes to the row), whatever door is there, an unbombed
+--secret room's included, and with no door on that wall the lowest slot. Right
+--only when the walk was straight; the landing below aims at the walk's door.
+--route_parent: the step before the target on the shortest walk through walked rooms
+function gt:route_parent(from, to)
+    local parent = {[from] = from}
+    local queue, head = {from}, 1
+    while queue[head] do
+      local cur = queue[head]
+      head = head + 1
+      if cur == to then break end
+      local node = room_neighbours[cur]
+      if node then
+        for _, adj in ipairs(node.Neighbors) do
+          local rd = grid_room[adj]
+          --the target may be an uncleared neighbour: a landing, not a pass-through
+          if rd and not parent[adj] and gt:rooms_linked(cur, adj)
+              and (adj == to or (rd.VisitedCount > 0 and rd.Clear)) then
+            parent[adj] = cur
+            queue[#queue + 1] = adj
+          end
+        end
+      end
+    end
+    local p = parent[to]
+    return p ~= to and p or nil
+end
+
+--the target cell a walk from `from` would step into, and the grid step taken
+--into it (-13 up, 13 down, -1 left, 1 right). Read off the grid, not the door
+--sweep, so a room nobody has been inside yet answers too
+function gt:touching_cell(from, to)
+    local src, dst = grid_room[from], grid_room[to]
+    if not (src and dst) then return nil end
+    for cell, d in pairs(grid_room) do
+      if d.ListIndex == src.ListIndex then
+        local col = cell % 13
+        for _, step in ipairs({ -13, 13, -1, 1 }) do
+          if not ((step == -1 and col == 0) or (step == 1 and col == 12)) then --column guard
+            local nd = grid_room[cell + step]
+            if nd and nd.ListIndex == dst.ListIndex then return cell + step, step end
+          end
+        end
+      end
+    end
+    return nil
+end
+
+--the cell to hand the transition, the room to leave from to make it stick, and
+--the door slot to land at. The game reads the cell to pick among the doors on
+--one wall, and the wall from the room the trip starts in; so next door the
+--cell is enough, further off the trip must also start from the room the walk
+--would have come from. The slot comes off the grid, never the door sweep, so a
+--room nobody has stood in yet has one too: the side stepped in by names the
+--wall, and which of a big room's two doors on that wall it is follows from the
+--entered cell's row (left and right walls) or column (top and bottom) within
+--the room, which is how the game numbers them for every shape, L included.
+--No route to trace: no slot, and the game's own landing stands
+function gt:landing_route(from, to)
+    local cell, step = gt:touching_cell(from, to)
+    local walked = nil
+    if not cell then
+      walked = gt:route_parent(from, to)
+      if not walked then return nil, nil, -1 end
+      cell, step = gt:touching_cell(walked, to)
+      if not cell then return nil, walked, -1 end
+    end
+    local wall = ({ [1] = 0, [13] = 1, [-1] = 2, [-13] = 3 })[step]
+    local top = grid_room[to].GridIndex
+    local second = wall % 2 == 0 and (cell - top) // 13 or (cell - top) % 13
+    return cell, walked, wall + 4 * second
+end
+
+--BFS distance through cleared rooms; any room connected to the target is the last hop
+function gt:fair_trip(roomIndex, target)
+    local grid_room, room_neighbours = grid_room, room_neighbours
+    local startRoom = grid_room[roomIndex]
+    local targetRoom = grid_room[target]
+    if not startRoom or not targetRoom then
+        return 0
+    end
+    local safeTarget = targetRoom.SafeGridIndex
+    local visited = {[startRoom.SafeGridIndex] = true}
+    local queue = {{room = startRoom, dist = 0}}
+    local head = 1
+    while queue[head] do
+        local cur = queue[head]
+        head = head + 1
+        local safeIndex = cur.room.SafeGridIndex
+        if safeIndex == safeTarget and cur.room.Clear then
+            return cur.dist
+        end
+        if gt:check_neigh_connected(targetRoom, function(rd)
+            return rd.SafeGridIndex == safeIndex
+                and (not gt:get_config_bool("FairTripPath", true) or gt:rooms_linked(safeIndex, safeTarget))
+        end) then
+            return cur.dist + 1
+        end
+        if cur.room.Clear then
+            for _, adj in ipairs(room_neighbours[cur.room.SafeGridIndex].Neighbors) do
+                local adj_dsc = grid_room[adj]
+                local sid = adj_dsc.SafeGridIndex
+                if not visited[sid]
+                    and (not gt:get_config_bool("FairTripPath", true) or gt:rooms_linked(safeIndex, sid)) then
+                    visited[sid] = true
+                    queue[#queue+1] = {room = adj_dsc, dist = cur.dist + 1}
+                end
+            end
+        end
+    end
+    return 999
+end
+
+--is this curse-room door free? Isaac's Heart / Tooth and Nail take the hit.
+--Flat File acts on the door as the room is laid down, so the trinket in hand
+--only answers for a door about to be laid down again, not the one stood beside
+function gt:curse_toll_free(gid, by_inner_door, room_reloads)
+    local p = player
+    if p:HasCollectible(276) or p:HasCollectible(663) then
+      return true
+    end
+    if room_reloads and p:HasTrinket(151) then
+      return true
+    end
+    local bare = curse_bare_outside[gid]
+    if by_inner_door then bare = curse_bare_inside[gid] end
+    return bare == true
+end
+
 function gt:check_teleble(gid)
-    if gid == -99 or level:GetCurses() & LevelCurse.CURSE_OF_THE_LOST ~= 0 then
+    if gid == -99
+    or (gt:get_config_bool("FollowCurseOfLost", true)
+        and level:GetCurses() & LevelCurse.CURSE_OF_THE_LOST ~= 0) then
       return false
     elseif debug and grid_room[gid] then
       return true
@@ -94,12 +418,12 @@ function gt:check_teleble(gid)
     local cid = crd.SafeGridIndex
     if grid_room[cid] == nil or not crd.Clear then
       return false
-    elseif (crd.Data.Type == 6 or crd.Data.Type == 11) then
+    elseif (crd.Data.Type == 6 or crd.Data.Type == 11) then --miniboss/challengeroom
       if not gt:check_room_open() then
         return false
       end
     end
-    if gid == false then return true end
+    if gid == false then return true end --current room only
     if grid_room[gid] == nil then
       return false
     else
@@ -107,198 +431,26 @@ function gt:check_teleble(gid)
       if trd.ListIndex == crd.ListIndex then
         return false
       end
-      local requireExploredPath = gt.RequireExploredPath
-      if ModConfigMenu and ModConfigMenu.Config["GoodTripPlus"] then
-        local v = ModConfigMenu.Config["GoodTripPlus"]["RequireExploredPath"]
-        if v ~= nil then requireExploredPath = v end
-      end
-
-      if trd.VisitedCount == 0 then
-        -- 未探索的房间：默认不允许。开启 AllowUnexploredNeighbor 后，
-        -- 只要它紧挨着某个「已探索 + 从当前房间可达」的房间就放行。
-        --
-        -- 例外：隐藏房（普通 / 超级 / 究极）必须炸开墙才能进去。
-        -- 蓝地图之类会把这些房间显示到地图上，此时若旁边已有探索过的房间，
-        -- 上面的「相邻放行」规则就会让你穿墙直接进屋，所以这里一律拦掉。
-        -- （已经进去过的隐藏房不受影响：那是 VisitedCount > 0 的另一个分支。）
-        local unexplored_type = trd.Data and trd.Data.Type
-        local is_secret_room = unexplored_type == 7 or unexplored_type == 8 or unexplored_type == 29
-        if is_secret_room
-        or not gt:get_config_bool("AllowUnexploredNeighbor", false)
-        or not gt:has_reachable_explored_neighbor(gid, requireExploredPath) then
-          return false
-        end
-      else
-        if not trd.Clear then
-          return false
-        end
-        if requireExploredPath and not gt:has_explored_path_to(gid) then
-          return false
-        end
-      end
-
-      if trd.Data.Type == 10 then
-        local blockCurse = gt.BlockCurseRoom
-        if ModConfigMenu and ModConfigMenu.Config["GoodTripPlus"] then
-          local v = ModConfigMenu.Config["GoodTripPlus"]["BlockCurseRoom"]
-          if v ~= nil then blockCurse = v end
-        end
-        if blockCurse then return false end
-      end
-    end
-    return true
-end
---
--- 「传送到未探索的相邻房间」用的判定。
--- 目标房间还没进去过时，看它有没有「已探索」的相邻房间，
--- 并且（在开启 RequireExploredPath 时）那个房间能从当前房间沿已探索路径抵达。
---
--- 注意两点：
--- 1. ±1 会跨行，必须按列号把左右两侧的越界排除掉；
--- 2. 目标可能是**大房间**（2x1/1x2/2x2/L 形），占据多个格子。
---    只检查光标所在格子的四邻会漏判——比如 2x2 房里不贴着
---    已探索房的那两个格子，四邻全是本房间的其他格（未探索）或空格。
---    所以这里先收集目标房间占据的**全部**格子，再逐格检查四邻，
---    任何一格挨着已探索房间即算相邻（房间与房间相邻，而非格子与格子）。
---
-function gt:has_reachable_explored_neighbor(gid, requireExploredPath)
-    local targetDesc = grid_room[gid]
-    if not targetDesc then
-      return false
-    end
-
-    -- 目标房间占据的所有格子（大房间在 grid_room 里有多个键指向同一描述符）
-    local cells = {}
-    for cellGid, rd in pairs(grid_room) do
-      if rd.ListIndex == targetDesc.ListIndex then
-        cells[#cells + 1] = cellGid
-      end
-    end
-
-    for _, cellGid in ipairs(cells) do
-      local column = cellGid % 13
-      local neighbors = {cellGid - 13, cellGid + 13}
-      if column > 0 then
-        neighbors[#neighbors + 1] = cellGid - 1
-      end
-      if column < 12 then
-        neighbors[#neighbors + 1] = cellGid + 1
-      end
-
-      for _, neighborGid in ipairs(neighbors) do
-        local neighbor = grid_room[neighborGid]
-        -- 排除目标房间自己的其他格子（未探索时 VisitedCount 必为 0，
-        -- 这里显式排除以保证该函数对任意目标状态都语义正确）
-        if neighbor and neighbor.ListIndex ~= targetDesc.ListIndex
-        and neighbor.VisitedCount > 0 then
-          if not requireExploredPath or gt:has_explored_path_to(neighborGid) then
-            return true
-          end
-        end
-      end
-    end
-    return false
-end
---
-function gt:has_explored_path_to(targetGid)
-    if not MinimapAPI then
-      return false
-    end
-
-    local targetDesc = grid_room[targetGid]
-    local map = MinimapAPI:GetLevel(gt:get_current_dimension())
-    if not targetDesc or not map then
-      return false
-    end
-
-    local roomsByListIndex = {}
-    for _, mapRoom in ipairs(map) do
-      if mapRoom.Descriptor then
-        roomsByListIndex[mapRoom.Descriptor.ListIndex] = mapRoom
-      end
-    end
-
-    local start = roomsByListIndex[crd.ListIndex]
-    local target = roomsByListIndex[targetDesc.ListIndex]
-    if not start or not target then
-      return false
-    end
-
-    local queue = {start}
-    local head = 1
-    local seen = {[start.Descriptor.ListIndex] = true}
-    while queue[head] do
-      local current = queue[head]
-      head = head + 1
-      if current == target then
+      if gt:get_config_bool("AllowAnyRoom", false) then
         return true
       end
-      for _, adjacent in ipairs(current:GetAdjacentRooms()) do
-        local adjacentDesc = adjacent.Descriptor
-        if adjacentDesc and adjacentDesc.VisitedCount > 0
-        and not seen[adjacentDesc.ListIndex] then
-          seen[adjacentDesc.ListIndex] = true
-          queue[#queue + 1] = adjacent
-        end
-      end
-    end
-    return false
-end
---
-function gt:is_curse_room_bypass_room(mapRoom)
-    local desc = mapRoom and mapRoom.Descriptor
-    if not desc or not desc.Data then
-      return false
-    end
-    return desc.Data.Type == RoomType.ROOM_SECRET
-end
---
-function gt:has_explored_curse_bypass(targetGid)
-    local targetDesc = grid_room[targetGid]
-    if not MinimapAPI or not targetDesc or
-      (crd.Data.Type ~= RoomType.ROOM_CURSE and targetDesc.Data.Type ~= RoomType.ROOM_CURSE) then
-      return false
-    end
-
-    local map = MinimapAPI:GetLevel(gt:get_current_dimension())
-    if not map then
-      return false
-    end
-    local roomsByListIndex = {}
-    for _, mapRoom in ipairs(map) do
-      if mapRoom.Descriptor then
-        roomsByListIndex[mapRoom.Descriptor.ListIndex] = mapRoom
-      end
-    end
-    local start = roomsByListIndex[crd.ListIndex]
-    local target = roomsByListIndex[targetDesc.ListIndex]
-    if not start or not target then
-      return false
-    end
-
-    local queue = {start}
-    local head = 1
-    local seen = {[start.Descriptor.ListIndex] = true}
-    while queue[head] do
-      local current = queue[head]
-      head = head + 1
-      if current == target then
+      --the room stepped off from must be on the player's own island, else an
+      --Emperor'd boss room is a free lift back across unexplored rooms
+      local reach = gt:get_config_bool("FairTripPath", true) and gt:get_reachable_rooms() or nil
+      if trd.VisitedCount > 0 and trd.Clear
+          and (not reach or reach[trd.SafeGridIndex] == true) then
+        --AllowNeighborRoom only widens this: an Emperor'd start room has no cleared neighbour
         return true
+      elseif not gt:get_config_bool("AllowNeighborRoom", true) then
+        return false
       end
-      for _, adjacent in ipairs(current:GetAdjacentRooms()) do
-        local currentDesc = current.Descriptor
-        local adjacentDesc = adjacent.Descriptor
-        local crossesCurseDoor = currentDesc and adjacentDesc and
-          (currentDesc.Data.Type == RoomType.ROOM_CURSE or adjacentDesc.Data.Type == RoomType.ROOM_CURSE) and
-          not gt:is_curse_room_bypass_room(currentDesc.Data.Type == RoomType.ROOM_CURSE and adjacent or current)
-        if adjacentDesc and adjacentDesc.VisitedCount > 0 and not crossesCurseDoor
-        and not seen[adjacentDesc.ListIndex] then
-          seen[adjacentDesc.ListIndex] = true
-          queue[#queue + 1] = adjacent
-        end
-      end
+      --the last hop needs a door too; `reach` is nil exactly when path rules are off
+      return gt:check_neigh_connected(trd, function(rd)
+          return (rd.DisplayFlags & 1 ~= 0) and rd.VisitedCount > 0 and rd.Clear
+            and (not reach or (reach[rd.SafeGridIndex]
+              and gt:rooms_linked(rd.SafeGridIndex, trd.SafeGridIndex)))
+      end)
     end
-    return false
 end
 --
 function gt:hurt(n)
@@ -311,32 +463,70 @@ end
 --
 function gt:check_curse_room(gid)
     if debug then return end
-    local trd = grid_room[gid]
-    if gt:has_explored_curse_bypass(gid) then
+    --a bombed secret-room wall has no spikes, so secret<->guard room is free
+    --both ways, even when the guard is the curse room
+    if secret_pre_room_id[crid] == gid or secret_pre_room_id[gid] == crid then
       return
     end
+    local trd = grid_room[gid]
     if crd.Data.Type == 10 then
-      if secret_pre_room_id[crid] and (secret_pre_room_id[crid] == gid or (secret_pre_room_id[secret_pre_room_id[crid]] and secret_pre_room_id[secret_pre_room_id[crid]] ~= crid)) then
-        return
+      if not gt:curse_toll_free(crd.SafeGridIndex, true, false) then
+        gt:hurt(1)
       end
-      gt:hurt(1)
     elseif trd.Data.Type == 10 and not player:IsFlying() then
-      if secret_pre_room_id[gid] and (secret_pre_room_id[gid] == crid or (secret_pre_room_id[secret_pre_room_id[gid]] and secret_pre_room_id[secret_pre_room_id[gid]] ~= gid)) then
-        return
+      if not gt:curse_toll_free(trd.SafeGridIndex, false, true) then
+        gt:hurt(1)
       end
-      gt:hurt(1)
     end
 end
 --
-function gt:teleport_to_grid_index(gid)
-    local dim = gt:get_current_dimension()
-    for _,en in pairs(Isaac.GetRoomEntities()) do
-      if en.Type == 867 then
-        gt:tele_failed()
-        return
+--everyone a landing carries: players, familiars by type, and anything owned by
+--a player (Mom's Knife, a carried tear)
+function gt:landed_party()
+    local party = {}
+    for i = 0, Game():GetNumPlayers() - 1 do
+      party[#party + 1] = Isaac.GetPlayer(i)
+    end
+    for _, e in ipairs(Isaac.GetRoomEntities()) do
+      local owner = e.Parent or e.SpawnerEntity
+      if e.Type ~= EntityType.ENTITY_PLAYER
+          and (e.Type == EntityType.ENTITY_FAMILIAR or (owner and owner:ToPlayer())) then
+        party[#party + 1] = e
       end
     end
-    if crd.Data.Name == "Mom" then
+    return party
+end
+
+--put the party one step inside the arrival door by hand. Direction is ignored,
+--EnterDoor ignores writes, LeaveDoor changes nothing (all measured)
+function gt:land_at_door()
+    local slot = tele_door_slot
+    tele_door_slot = -1
+    if slot < 0 then return end
+    local door = room:GetDoor(slot)
+    if not door then return end
+    local dx, dy = 0, 0
+    local side = slot % 4
+    if side == 0 then dx = 40 elseif side == 2 then dx = -40
+    elseif side == 1 then dy = 40 else dy = -40 end
+    local stand = Vector(door.Position.X + dx, door.Position.Y + dy)
+    --one shift for all, so a co-op pair keeps its spacing
+    local shift = stand - player.Position
+    for _, e in ipairs(gt:landed_party()) do
+      e.Position = e.Position + shift
+    end
+end
+
+--floor.* is read at each use, never copied at the top: an antechamber hop
+--mid-call changes the room, and with it the descriptor and the grid
+function gt:teleport_to_grid_index(gid)
+    for _,en in pairs(Isaac.GetRoomEntities()) do
+			if en.Type == 867 then
+        gt:tele_failed()
+        return
+			end
+		end
+    if crd.Data.Name == "Mom" or crd.Data.Name == "Ultra Greed" then
       gt:tele_failed()
       return
     elseif grid_room[gid].Data.Type == 11 and not grid_room[gid].ChallengeDone then
@@ -352,58 +542,92 @@ function gt:teleport_to_grid_index(gid)
         end
       end
     end
-    local flat = player:HasTrinket(151) or player:HasCollectible(276) or player:HasCollectible(663)
-    if not flat then
-      gt:check_curse_room(gid)
-    end
+    gt:check_curse_room(gid)
     level.EnterDoor = -1
     level.LeaveDoor = -1
     if level:GetCurses() & LevelCurse.CURSE_OF_MAZE ~= 0 then
       level:RemoveCurses(LevelCurse.CURSE_OF_MAZE)
       tele_maze = true
     end
-    if crd.Data.Type == 7 then
-      local secretPreId = secret_pre_room_id[crid]
-      local secretPreRoom = secretPreId and grid_room[secretPreId]
-      if secretPreRoom then
-        if secretPreRoom.ListIndex == grid_room[gid].ListIndex then
-          gid = secretPreId
-        else
-        if grid_room[gid].Data.Type == 10 and secret_pre_room_id[gid] and secret_pre_room_id[gid] == crid then
-        else
-          if secretPreRoom.Data.Type == 10 and not flat then
+
+    local dist = 0
+    if gt:get_config_bool("FairTripTime", false) then
+      dist = gt:fair_trip(crd.SafeGridIndex, gid)
+      if dist == 999 then
+        gt:tele_failed()
+        return
+      end
+    end
+
+    --an L room's anchor cell is not in grid_room, so the antechamber may be missing
+    local from_pre = crd.Data.Type == 7 and secret_pre_room_id[crid] or nil
+    local from_prd = from_pre and grid_room[from_pre] or nil
+    if from_prd then --from secret room
+      if from_prd.ListIndex == grid_room[gid].ListIndex then
+        gid = from_pre
+      elseif not (grid_room[gid].Data.Type == 10 and secret_pre_room_id[gid] and secret_pre_room_id[gid] == crid) then
+        --the toll is for the curse room's own door on the far side, not the bombed hole
+        if from_prd.Data.Type == 10 and not gt:curse_toll_free(from_prd.SafeGridIndex, true, true) then
+          gt:hurt(1)
+        end
+        Game():ChangeRoom(from_pre,-1)
+      end
+    end
+    if grid_room[gid].Data.Type == 7 then --to secret room
+      local to_pre = secret_pre_room_id[gid]
+      local to_prd = to_pre and grid_room[to_pre] or nil
+      if to_prd then
+        if to_prd.ListIndex == crd.ListIndex then --crd, since grid_room[crid] is nil in an L room
+          if crd.Data.Shape > 3 then
+            Game():ChangeRoom(to_pre,-1)
+          end
+        elseif not (crd.Data.Type == 10 and secret_pre_room_id[crid] and secret_pre_room_id[crid] == gid) then
+          if to_prd.Data.Type == 10 and not player:IsFlying()
+              and not gt:curse_toll_free(to_prd.SafeGridIndex, false, true) then
             gt:hurt(1)
           end
-          Game():ChangeRoom(secretPreId, dim)
-        end
+          Game():ChangeRoom(to_pre,-1)
         end
       end
     end
-    if grid_room[gid].Data.Type == 7 then
-      local targetSecretPreId = secret_pre_room_id[gid]
-      local targetSecretPreRoom = targetSecretPreId and grid_room[targetSecretPreId]
-      if targetSecretPreRoom then
-        if targetSecretPreRoom.ListIndex == grid_room[crid].ListIndex then
-          if grid_room[crid].Data.Shape > 3 then
-            Game():ChangeRoom(targetSecretPreId, dim)
-          end
-        else
-          if crd.Data.Type == 10 and secret_pre_room_id[crid] and secret_pre_room_id[crid] == gid then
-          else
-            if targetSecretPreRoom.Data.Type == 10 and not player:IsFlying() and not flat then
-              gt:hurt(1)
-            end
-            Game():ChangeRoom(targetSecretPreId, dim)
-          end
-        end
+    --read here, not up top: an antechamber hop may have moved the player
+    local trd = grid_room[gid]
+    local here = Game():GetLevel():GetCurrentRoomDesc().SafeGridIndex
+    local there = trd and trd.SafeGridIndex or gid
+    tele_door_slot = -1
+    local arrive = gid --the cell handed over; see rules.landing_route
+    if gt:get_config_bool("ArriveAtDoor", false) then
+      local cell, walked, slot = gt:landing_route(here, there)
+      arrive = cell or gid
+      tele_door_slot = slot
+      --a room bigger than the screen, reached from further than next door, needs
+      --the wall chosen too, and the wall comes from the room the trip starts in.
+      --The room hopped into is on screen until the fade, which is why this is
+      --off by default: the game shows it for a moment before the transition
+      if walked and trd and trd.Data.Shape >= RoomShape.ROOMSHAPE_1x2 then
+        Game():ChangeRoom(walked, -1)
       end
     end
     if debug then
-      Game():ChangeRoom(gid, dim)
+      Game():ChangeRoom(arrive,-1)
     else
-      Game():StartRoomTransition(gid, Direction.NO_DIRECTION, tele_anime,player,dim)
-      tele_cd = tele_cd0
+        if dist ~= 0 then
+          local speed = player.MoveSpeed
+          local addTime = math.floor((60.0*dist/speed)+0.5)
+          Game().TimeCounter = Game().TimeCounter + addTime --boss rush reads TimeCounter; Hush does not
+        end
+      tele_cd = 45
+      if not gt:get_config_bool("TeleportAnimation", true) then tele_cd = 10 end
+      if debug or gt:get_config_bool("FastTransition", false) then tele_cd = 1 end
     end
+    if gt:get_config_bool("FastTransition", false) or debug then
+      Game():ChangeRoom(arrive,-1)
+      Game():GetRoom():PlayMusic()
+      return
+    end
+    local tele_anime = gt:get_config_bool("TeleportAnimation", true) and 3 or 1
+    Game():StartRoomTransition(arrive, Direction.NO_DIRECTION, tele_anime, player, -1) --direction is ignored, measured twice
+    tele_cd = tele_anime == 3 and 45 or 10
 end
 --
 function gt:is_mirror_world()
@@ -901,6 +1125,11 @@ function gt:tab_action()
 end
 --
 function gt:step()
+    --a wall can open under the player's feet (bomb, red key), so sweep every
+    --tick; but not mid-transition, when the live room and the cached descriptor disagree
+    if level:GetCurrentRoomDesc().SafeGridIndex == crid then
+      gt:sweep_doors()
+    end
     if Game():IsPaused() then
       mmp_ctrl = false
       return
@@ -941,10 +1170,13 @@ end
 function gt:new_room()
     last_crd = crd
     gt:get_grid_room()
+    gt:get_room_neighbours()
+    gt:sweep_doors()
     room = Game():GetRoom()
     crd = level:GetCurrentRoomDesc()
     crid = crd.SafeGridIndex
     stage = level:GetStage()
+    gt:land_at_door()
     if tele_maze then
       level:AddCurse(LevelCurse.CURSE_OF_MAZE,false)
       tele_maze = false
@@ -975,8 +1207,13 @@ end
 function gt:new_level()
     level = Game():GetLevel()
     gt:get_grid_room()
+    gt:get_room_neighbours()
     n_room_num = (level:GetRooms()).Size
     secret_pre_room_id = {}
+    --a new floor: everything learned about the old one goes
+    door_link = {}
+    door_swept = {}
+    curse_bare_outside, curse_bare_inside = {}, {}
 end
 --
 -------------------------------
@@ -988,16 +1225,22 @@ local GT_STRINGS = {
     title = "GoodTripPlus",
     cursor_speed_name = "Cursor Speed",
     cursor_speed_desc = "Pixels the cursor moves per frame while holding a direction key. Default: 2",
-    block_curse_name = "Block Curse Room Teleport",
-    block_curse_desc = "When enabled, you cannot teleport into Curse Rooms (the ones that damage you on entry/exit). Default: enabled",
-    require_path_name = "Disable Unconnected Teleport",
-    require_path_desc = "When enabled, teleporting requires an explored route between the current and target rooms. Default: enabled",
+    follow_curse_name = "Disable On Curse Of Lost",
+    follow_curse_desc = "Disable GoodTrip teleport while the floor has the Curse of the Lost. Default: enabled",
+    neighbor_name = "Allow Neighbor Room",
+    neighbor_desc = "Also allow moving into a shown, not-yet-cleared room next to a cleared, reachable room (normal, boss, miniboss and sacrifice rooms excluded). Default: enabled",
+    anyroom_name = "Allow Any Room",
+    anyroom_desc = "Allow moving to every room shown on the map, cleared or not. Default: disabled",
+    fairpath_name = "Fair Trip Path",
+    fairpath_desc = "Only allow teleport to rooms reachable through cleared rooms, door by door. Default: enabled",
+    arrivedoor_name = "Arrive At Door",
+    arrivedoor_desc = "Arrive standing at the exact door a walk would have come in by. A far trip into a room bigger than the screen passes through the room before it, which shows for a moment. Default: disabled",
+    fairtime_name = "Fair Trip Time",
+    fairtime_desc = "Fairly increase game time according to player move speed and distance. Default: disabled",
     highlight_cursor_name = "Highlight Cursor Room",
     highlight_cursor_desc = "Highlights a teleportable room under the cursor. Default: enabled",
     secret_markers_name = "Secret Room Candidate Markers",
     secret_markers_desc = "Marks where Secret / Super Secret / Ultra Secret rooms could be while holding the map key. Merged from Lazy Delver (MIT). Disable Lazy Delver itself to avoid drawing two sets of markers. Default: enabled",
-    unexplored_name = "Teleport Into Unexplored Rooms",
-    unexplored_desc = "Allow teleporting into a room you have never entered, as long as it sits next to an explored room that is reachable from your current room (only when 'Disable Unconnected Teleport' is on does that reachability matter). Secret rooms are excluded: those still have to be blown open. Default: disabled",
     fools_skull_name = "Mark The Fool Skull Room",
     fools_skull_desc = "In Depths II a special skull always drops The Fool card when destroyed. This puts a skull icon on the room that contains it, so you can find it again. Only shown for rooms you have already visited, so it never spoils the layout. Default: enabled",
   },
@@ -1005,16 +1248,22 @@ local GT_STRINGS = {
     title = "GoodTripPlus",
     cursor_speed_name = "光标速度",
     cursor_speed_desc = "按住射击方向键时光标每帧移动的像素数。默认值：2",
-    block_curse_name = "禁止传送进诅咒房",
-    block_curse_desc = "开启后不能传送进会在进出时扣血的诅咒房。默认开启。",
-    require_path_name = "禁用未连通房间传送",
-    require_path_desc = "开启后，只有当前房间与目标房间之间存在已探索路径时才能传送。默认开启。",
+    follow_curse_name = "迷失诅咒下禁用传送",
+    follow_curse_desc = "层里带有迷失诅咒时禁用传送。默认开启。",
+    neighbor_name = "允许传送到未清的邻居房",
+    neighbor_desc = "已清怪且可达的房间旁那些已显示但未清怪的房间也允许传送（普通房、boss 房、小 boss 房、献祭房除外）。默认开启。",
+    anyroom_name = "允许传送到所有已显示房间",
+    anyroom_desc = "地图上显示的房间全部允许传送，无论是否清怪。默认关闭。",
+    fairpath_name = "只能传送到已清房连通的房间",
+    fairpath_desc = "传送目标必须能从当前房间沿已清怪的房间逐门抵达。默认开启。",
+    arrivedoor_name = "传送后站在门口",
+    arrivedoor_desc = "传送到走路会走进来的那扇门门口；跨屏大房间的远途传送会先经过房间前部，会短暂看到一瞬。默认关闭。",
+    fairtime_name = "按距离增加游戏时间",
+    fairtime_desc = "按传送距离和玩家移速公平地补回游戏时间（Boss Rush 计时用它）。默认关闭。",
     highlight_cursor_name = "高亮光标下房间",
     highlight_cursor_desc = "高亮显示光标下可传送的房间。默认开启。",
     secret_markers_name = "显示隐藏房候选标记",
     secret_markers_desc = "按住地图键时标出隐藏房 / 超级隐藏房 / 究极隐藏房的可能位置（合并自 Lazy Delver，MIT）。请同时禁用 Lazy Delver 本体，否则会画出两套标记。默认开启。",
-    unexplored_name = "允许传送到未探索的相邻房间",
-    unexplored_desc = "开启后可以传送到还没进去过、但紧邻某个已探索房间的位置；若同时开着「禁用未连通房间传送」，那个相邻的已探索房间还需要能从当前房间沿已探索路径抵达。隐藏房不在这个范围内——它们仍然必须炸开墙才能进去。默认关闭。",
     fools_skull_name = "标记深牢 II 的愚者骷髅房",
     fools_skull_desc = "深牢 II 里有一个特殊骷髅，炸掉后固定掉落愚者卡牌。开启后会在地图上给它所在的房间加一个骷髅图标，方便回头再找。只在你已经进过该房间后才显示，不会剧透本层布局。默认开启。",
   },
@@ -1056,17 +1305,52 @@ gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
     )
     ModConfigMenu.AddBooleanSetting(
       "GoodTripPlus", nil,
-      "BlockCurseRoom",
+      "FollowCurseOfLost",
       true,
-      L.block_curse_name,
-      L.block_curse_desc
+      L.follow_curse_name,
+      L.follow_curse_desc
     )
     ModConfigMenu.AddBooleanSetting(
       "GoodTripPlus", nil,
-      "RequireExploredPath",
+      "AllowNeighborRoom",
       true,
-      L.require_path_name,
-      L.require_path_desc
+      L.neighbor_name,
+      L.neighbor_desc
+    )
+    ModConfigMenu.AddBooleanSetting(
+      "GoodTripPlus", nil,
+      "AllowAnyRoom",
+      false,
+      L.anyroom_name,
+      L.anyroom_desc
+    )
+    ModConfigMenu.AddBooleanSetting(
+      "GoodTripPlus", nil,
+      "FairTripPath",
+      true,
+      L.fairpath_name,
+      L.fairpath_desc
+    )
+    ModConfigMenu.AddBooleanSetting(
+      "GoodTripPlus", nil,
+      "ArriveAtDoor",
+      false,
+      L.arrivedoor_name,
+      L.arrivedoor_desc
+    )
+    ModConfigMenu.AddBooleanSetting(
+      "GoodTripPlus", nil,
+      "FairTripTime",
+      false,
+      L.fairtime_name,
+      L.fairtime_desc
+    )
+    ModConfigMenu.AddBooleanSetting(
+      "GoodTripPlus", nil,
+      "FastTransition",
+      false,
+      "Fast Transition",
+      "Skip the teleport animation entirely. Default: disabled"
     )
     ModConfigMenu.AddBooleanSetting(
       "GoodTripPlus", nil,
@@ -1081,13 +1365,6 @@ gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
       true,
       L.secret_markers_name,
       L.secret_markers_desc
-    )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
-      "AllowUnexploredNeighbor",
-      false,
-      L.unexplored_name,
-      L.unexplored_desc
     )
     ModConfigMenu.AddBooleanSetting(
       "GoodTripPlus", nil,
