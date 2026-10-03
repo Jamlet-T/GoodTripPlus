@@ -105,6 +105,15 @@ MinimapAPI 的房间表（几十个房间，远小于 MinimapAPI 自己每帧的
 以及最近 16 条事件（`POST_NEW_LEVEL` / `POST_NEW_ROOM` / `POST_GAME_STARTED` 的触发、
 每次判定为清空时的 `rebuilt/lost/sameFloor` 与前后层身份、恢复了多少个房间）。
 
+> **控制台命令的两个坑**（2026-10-03 排查）：
+> 1. `MC_EXECUTE_CMD` 的回调签名是 `(Mod, command, args)` —— `command` 只有命令词，
+>    参数在 `args` 里。要带格子编号得写 `gtpdiag <格子编号>`，且必须读第三个参数。
+> 2. 原版控制台**要再按一次回车 / 输入别的**才会把这一批输出刷出来；
+>    看不到输出时先去 `log.txt` 搜 `GoodTripPlus`，那里一定有（`Isaac.DebugString` 兜底）。
+> 输出同时走 `return` 串、`Isaac.ConsoleOutput`（逐行直写，MinimapAPI 也这么做）与
+> `Isaac.DebugString`（落 log.txt），三个通道总有一个能看见。
+> 模块内各诊断回调都包了 `pcall`：诊断自己出错只打印一行 ERROR，不会把控制台命令带崩。
+
 命中修复时控制台会直接打印：
 
 ```
