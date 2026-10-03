@@ -33,6 +33,8 @@ gt.ShowSecretMarkers = true
 -- 深牢 II 的「标记骷髅」房间标记（炸掉固定掉愚者卡牌的那个骷髅）
 gt.FoolsSkullRoom = true
 
--- 当前房间里有「牌意解读 / 天堂阶梯」生成的入口（传送门 / 台阶）时禁止传送
--- （这两个入口一离开房间就消失，禁传送免得误触顶掉效果；房间里的入口没了自动解除）
-gt.LockStartRoomItems = true
+-- 注：以下两条「保护性禁传」自 2026-10-03 起**常开、不提供开关**
+--   · 当前房间里有「牌意解读 / 天堂阶梯」生成的入口（传送门 / 台阶）时禁传；
+--   · 当前房间里存在「通往奖励房间的门」时禁传（恶魔房 / 天使房 / Boss Rush / 死寂；
+--     独立模块 scripts/gtp_bosswindow.lua，按门的 TargetRoomType / TargetRoomIndex 判定）。
+-- 两者都只在 `gt.DebugMod`（调试模式）下才被绕过。

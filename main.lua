@@ -12,8 +12,12 @@
 --      其余自绘元素（光标/光标房高亮/标记）均有按键与清房门控，战斗中本就不绘制
 --   5. （已移除）大地图黑边修复 gtp_mapoutline.lua——2026-10-03 定位收缩时删去，
 --      遇黑边请关 MinimapAPI 菜单里的 "Show Room Outlines"
+--   6. 当前房间里出现「通往奖励房间的门」（恶魔房 / 天使房 / Boss Rush / 死寂）时禁用传送
+--      （scripts/gtp_bosswindow.lua，常开；包装 check_teleble 实现，不改 gtrep.lua）
 
 require("scripts.gtrep")
 require("scripts.gtp_rewindfix")
 require("scripts.gtp_delver")
 require("scripts.gtp_skullroom")
+-- 必须放在 gtrep 之后：它包一层 gt.check_teleble
+require("scripts.gtp_bosswindow")
