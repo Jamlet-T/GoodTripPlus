@@ -217,11 +217,28 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 | `ArriveAtDoor` | 关 | 落地在走路会走进来的门口（跨屏大房间远途会先经过前一格） |
 | `FairTripTime` | 关 | 按传送距离与移速补回游戏时间 |
 | `FastTransition` | 关 | 跳过传送动画 |
+| `LockStartRoomItems` | 开 | **本项目新增（非 Fixed 项）**：**判据＝当前房间里有没有道具生成的入口实体** —— 牌意解读（660）的传送门 = `EntityEffect` + `EffectVariant.PORTAL_TELEPORT`(161)、天堂阶梯（586）的台阶 = `EntityEffect` + `EffectVariant.TALL_LADDER`(156)。持有这两个道具之一、且房间里还有这枚入口时**禁止传送**（两者都是"一离开房间就销毁"，禁传送避免误触顶掉）；入口消失（即离开过）立刻恢复。不依赖任何"初始房间 / 本层离开过没有"的状态，所以回溯线等特殊路线也不会误禁。`gt.DebugMod` 调试模式仍可绕过 |
+
+**`LockStartRoomItems` 的判据（2026-10-03，回溯线实测后重做）**：早期版本靠
+`Level:GetStartingRoomIndex()` + 房间类型去猜"初始房间"，但**回溯线（The Ascent）里这个索引
+指向的是玩家进门的那间 boss 房**，会在 boss 房把传送误禁（用户实测）。现在直接看**房间里有没有
+道具生成的入口实体**：牌意解读（660）的传送门 = `EntityEffect` + `EffectVariant.PORTAL_TELEPORT`
+(161)，天堂阶梯（586）的台阶 = `EntityEffect` + `EffectVariant.TALL_LADDER`(156)。这两个入口
+"一离开房间就随房间销毁"，所以**实体在＝别动它**；门没了禁令自动解除，**不需要任何层/房间状态**。
+回溯线也自然正确 —— Wiki 写明那里的门生成在"通往下一层的那个起始房间"，不是进门那间 boss 房。
 
 旧的 `AllowUnexploredNeighbor` / `RequireExploredPath` / `BlockCurseRoom` 三个开关已移除：
 未探索场景并入 `AllowNeighborRoom` 的放宽逻辑；路径判定即 `FairTripPath`；
 诅咒房不再禁止传送，改为进门扣血（`curse_toll_free`：Flat File / 深渊书免伤，
 以撒的心脏 / 牙与甲照扣，尖刺状态从门两侧分别记录）。
+
+**对 Fixed 的两处偏离**（都为了修实际 bug，理由都写在代码注释里）：
+1. `check_neigh_connected()` 的类型白名单放进隐藏房 → 已炸开的隐藏房可以传送进入（见第 2 节）；
+2. **回溯线放行「Mom / Ultra Greed 房一律禁传」这条规则**（`gt:teleport_to_grid_index()` 开头）：
+   回溯线里 **Depths II 那层的 boss 房名字就是 `Mom`**，但那里 boss 早在正着走时打完、只是路过，
+   于是正常传送被拦 —— 现象是"光标能呼出、能选格子，松手只响一声失败音"。
+   现在 `not level:IsAscent()` 时该规则才生效；正常路线的 Mom / Ultra Greed 房照旧禁。
+   诊断 dump 新增 `tripPrecheck` 行，会直接点名这条与"Mother's Shadow(867) 在场"这条静态失败规则。
 
 核心机制（门图）：网格相邻分不清「门洞」和「隐藏房没炸开的墙」，所以按维度维护
 一张逐房间学出来的门图（`sweep_doors` 只读当前房的门、跳过 `DOOR_HIDDEN`、双向记录，
