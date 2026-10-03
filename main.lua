@@ -14,6 +14,8 @@
 --      遇黑边请关 MinimapAPI 菜单里的 "Show Room Outlines"
 --   6. 当前房间里出现「通往奖励房间的门」（恶魔房 / 天使房 / Boss Rush / 死寂）时禁用传送
 --      （scripts/gtp_bosswindow.lua，常开；包装 check_teleble 实现，不改 gtrep.lua）
+--   7. 地图边界房间高亮：按住地图键时，把贴着 13×13 边界的房间外沿画出来
+--      （scripts/gtp_mapbounds.lua，默认开启；素材 resources/gfx/goodtripplus/bounds.*）
 
 require("scripts.gtrep")
 require("scripts.gtp_rewindfix")
@@ -21,3 +23,4 @@ require("scripts.gtp_delver")
 require("scripts.gtp_skullroom")
 -- 必须放在 gtrep 之后：它包一层 gt.check_teleble
 require("scripts.gtp_bosswindow")
+require("scripts.gtp_mapbounds")

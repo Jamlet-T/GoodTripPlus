@@ -62,11 +62,10 @@ gt:AddCallback(ModCallbacks.MC_POST_NEW_ROOM, function()
   render.refresh()
 end)
 
--- 按住地图键时把标记淡入
+-- 按住地图键时把标记淡入（松开**立即消失**，见 delver/render.lua 的 tab_hold_check）。
+-- 注意：这个计数**与开关无关** —— 地图边界高亮（gtp_mapbounds.lua）也读它来同步
+-- 淡入与显示条件，所以关掉隐藏房标记时不能让它停摆（2026-10-03）。
 gt:AddCallback(ModCallbacks.MC_POST_UPDATE, function()
-  if not enabled() then
-    return
-  end
   render.tab_hold_check()
 end)
 

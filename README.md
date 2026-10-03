@@ -16,6 +16,7 @@
 5. **新增**了深牢 II 愚者骷髅房的标记，默认开启（见第五节）。
 6. **战斗时地图隐藏**：跟随 MinimapAPI 自带的 "Hide Map in Combat"，让本模组自绘的标记一起隐藏（见第六节）。
 7. **新增**了「房间里出现奖励房间的门（恶魔房 / 天使房 / Boss Rush / 死寂）时禁止传送」，**常开**（见第四节末尾）。
+8. **新增**了「地图边界房间高亮」：按住地图键时画出贴着 13×13 边界的房间外沿，默认开启（见第六节）。
 
 ---
 
@@ -333,7 +334,35 @@ skullRoom.rooms={42}
 
 ---
 
-## 六、战斗时地图隐藏（交给 MinimapAPI）
+## 六、地图边界房间高亮（默认开启）
+
+以撒的地图上限是 13×13（初始房为中心，上下左右各 6 格）。按住地图键时，把**贴着地图
+边界**的房间、**靠边的那条边**画出来（角房画两条），一眼就能看出「这一侧外面已经没有
+房间了」—— 找隐藏房、决定往哪探索都用得上。
+
+- **边界判定**：格号换 `col = gid % 13`、`row = floor(gid / 13)`，等于 0 或 12 即贴边
+  （起始房正好是 `col=6 / row=6`）。
+- **大房间占多格**：用 `delver/geometry.lua` 的 `SHAPE_OFFSETS` 取它占据的所有格逐格判断，
+  最靠外的那格自然会被画到。
+- **只画已探索的房间**（`RoomDescriptor.DisplayFlags & 1`），不会剧透还没探索的区域。
+- **坐标**用 `gt:gid_to_rtmap_pos()` —— 与传送光标、隐藏房标记同一套投影，天然对齐。
+- **画线**：Isaac 的 Lua **没有画矩形的 API**（本机所有 mod 都靠 Sprite），所以用 8×8 纯白
+  贴图 `resources/gfx/goodtripplus/bounds.png`（配 `bounds.anm2`）按需要的宽高缩放绘制，
+  颜色 / 透明度由 `sprite.Color` 控制。
+- **显示时机 / 显示条件与隐藏房候选标记完全一致**：淡入直接读 `delver/render.lua` 的
+  **同一份**帧计数（`get_fade()`，按住地图键才 > 0，返回 0~1 的系数；**松开地图键立即消失、
+  不做淡出**），显示条件也逐条对齐 ——
+  层被忽略（回溯线 / STAGE8 / 贪婪模式 / 镜像外维度）、**迷失诅咒**、房间不在网格上、
+  MinimapAPI 战斗隐藏，任一命中都不画。只有开关是各自独立的。
+- 为此 `gtp_delver.lua` 里那个「按住地图键」的计数**不再受隐藏房标记开关影响**（否则
+  关掉标记会让边界高亮一起停摆），`delver/render.lua` 另外暴露了 `get_fade()` 与
+  `minimapapi_hides_map` 供本模组其它模块复用。
+
+开关：**MCM → GoodTripPlus → 「显示地图边界」**，或 `gtconfig.lua` 里
+`gt.ShowMapBounds = false`（默认开启）。
+
+
+## 七、战斗时地图隐藏（交给 MinimapAPI）
 
 战斗时地图要不要隐藏，**由 MinimapAPI 自带的 "Hide Map in Combat" 决定**
 （MCM → Minimap API，`1 = Never` / `2 = Bosses Only` / `3 = Always`，默认 1）。
@@ -358,7 +387,7 @@ MinimapAPI 藏地图时管不到**本模组自己画的**元素。各元素的�
 
 ---
 
-## 七、安装 / 与上游共存
+## 八、安装 / 与上游共存
 
 1. 把本仓库同步到游戏 mods 目录（mod 目录名必须是 `goodtripplus`）：
 
@@ -409,7 +438,7 @@ bash pack.sh        # 产出 dist/goodtripplus-<版本>.zip
 
 ---
 
-## 八、目录结构
+## 九、目录结构
 
 ```
 issacMod/                       ← 工作区 git 仓库（可容纳多个 mod）
@@ -447,7 +476,7 @@ issacMod/                       ← 工作区 git 仓库（可容纳多个 mod�
 
 ---
 
-## 九、与上游 / 来源的差异清单
+## 十、与上游 / 来源的差异清单
 
 | 位置 | 改动 |
 | --- | --- |
@@ -456,13 +485,14 @@ issacMod/                       ← 工作区 git 仓库（可容纳多个 mod�
 | `scripts/gtp_delver.lua` | 新增文件，隐藏房候选标记的回调接线 |
 | `scripts/gtp_skullroom.lua` | 新增文件，深牢 II 愚者骷髅房标记（自己写的，未参考任何 mod 的实现代码） |
 | `scripts/gtp_bosswindow.lua` | 新增文件，房间里出现「奖励房间的门」（恶魔房 / 天使房 / Boss Rush / 死寂）时禁用传送，常开（**包装 `gt.check_teleble`** 实现，不改 `gtrep.lua`） |
+| `scripts/gtp_mapbounds.lua` | 新增文件，地图边界房间高亮（默认开；用一张 8×8 纯白贴图缩放画边） |
 | `scripts/delver/*` | 从 Lazy Delver 原样移植（仅改写 `require` 路径），`render.lua` 重写了定位部分 |
-| `resources/gfx/goodtripplus/*` | `marker.*` 从 Lazy Delver 复制（换到自己的路径避免与它本体冲突）；`TintedSkull.*` 是本模组自有的骷髅图标（16x16） |
+| `resources/gfx/goodtripplus/*` | `marker.*` 从 Lazy Delver 复制（换到自己的路径避免与它本体冲突）；`TintedSkull.*` 是本模组自有的骷髅图标（16x16）；`bounds.*` 是本模组自有的纯白贴图（8×8，画地图边界线用） |
 | `main.lua` / `metadata.xml` / `gtconfig.lua` / `deploy.sh` | 新增 / 重写 |
 
 ---
 
-## 十、开发流程
+## 十一、开发流程
 
 ```bash
 # 改完源码后
@@ -476,7 +506,7 @@ git add -A && git commit -m "..."
 
 ---
 
-## 十一、授权与发布
+## 十二、授权与发布
 
 本仓库的内容来自三个来源，授权状况**互不相同**，详见 [`LICENSE`](LICENSE) 与 [`THIRD_PARTY.md`](THIRD_PARTY.md)。
 
