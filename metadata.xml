@@ -3,30 +3,29 @@
     <name>GoodTripPlus</name>
     <directory>goodtripplus</directory>
     <id>goodtripplus</id>
-    <description>Minimap teleport mod based on Goodtrip MLX's Tweak.
-Hold TAB to activate a cursor on the minimap, use the shoot direction keys to select a room, and release TAB to teleport.
-Supports the mirrored map in the mirror world. Curse room teleportation is disabled by default. Default cursor speed is 2.
+    <description>Minimap teleport mod based on Goodtrip MLX's Tweak — an external teleport plugin for MinimapAPI.
+Hold the map key (TAB) to bring up a cursor on the minimap, steer it with the shoot direction keys, and release to teleport.
+Supports the mirrored map in the mirror world.
 
-GoodTripPlus additionally fixes a bug where every pickup icon on the minimap vanished after using the "rewind" console command, and only came back after re-entering each room one by one.
+Teleport admission and landing are a faithful port of GoodTrip [Fixed]: a trip may only travel through rooms you have explored and cleared, door by door.
 
-It also removes the dark ring that MinimapAPI draws around the expanded large map (its room outlines only get drawn once the fade-in reaches full opacity, so they used to pop in at the end of the animation and were absent while the map was pinned). The small map is left exactly as it was.
+Secret Rooms can be teleported into as soon as their wall has been blown open; a wall that is still intact (for example a Secret Room revealed by Blue Map) is still refused, so you can never teleport through a wall you have not opened.
 
-It also bundles the Secret Room candidate markers from Lazy Delver (by dokee, MIT), re-projected onto GoodTripPlus' own map math so they line up with MinimapAPI exactly. Please disable Lazy Delver itself to avoid drawing two sets of markers.
+Also in this build:
+- Fixes pickup icons vanishing from the minimap after the "rewind" console command.
+- Bundles the Secret Room candidate markers from Lazy Delver (by dokee, MIT), re-projected onto MinimapAPI's own map math so they line up exactly. Please disable Lazy Delver itself to avoid drawing two sets of markers.
+- Marks the room in Depths II that holds the special skull which always drops The Fool card, with a custom skull icon. Only shown for rooms you have already visited, so it never spoils the layout.
+- Diagnostics: hold the map key and press F4 for a full dump of the current teleport decision (drawn on screen and written to log.txt).
 
-Optional (MCM: AllowUnexploredNeighbor, off by default): teleport into a room you have never entered, as long as it sits next to an explored room reachable from your current room.
+Settings in the MCM menu or the config file: FollowCurseOfLost, AllowNeighborRoom, AllowAnyRoom, FairTripPath, ArriveAtDoor, FairTripTime, FastTransition, HighlightCursorRoom, ShowSecretMarkers, FoolsSkullRoom, CursorSpeed.
 
-New (MCM: FoolsSkullRoom, on by default): marks the room in Depths II that holds the special skull which always drops The Fool card, with a custom skull icon. The icon only appears on rooms you have already visited, so it never spoils the floor layout.
-
-Optional (MCM: HideMinimapInCombat, off by default): hides the minimap while the current room is not cleared. Holding the map key still brings up the large map, so teleporting keeps working. Your MinimapAPI settings are left untouched.
-
-Default settings can be changed in the MCM menu or config file.
-Please uninstall or disable goodtrip_mlxtweak (and the original Goodtrip) before use.
+Please uninstall or disable goodtrip_mlxtweak (and the original Goodtrip) before use: all three share the same globals and cannot run at the same time.
 Required: MinimapAPI
 
 Optional: Mod Config Menu (for in-game settings)
 
 Credits: original GoodTrip by tarako; this build is based on Goodtrip MLX's Tweak; Secret Room candidate markers are ported from Lazy Delver by dokee (MIT). See LICENSE and THIRD_PARTY.md for details.</description>
-    <version>1.5.7</version>
+    <version>1.6.0</version>
     <visibility>Public</visibility>
     <tag id="Lua"/>
     <tag id="Tweaks"/>
