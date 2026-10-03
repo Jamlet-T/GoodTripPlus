@@ -1,7 +1,7 @@
 gt = RegisterMod("GoodTripPlus", 1)
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "1.5.5"
+gt.VERSION = "1.5.6"
 pcall(function()
   Isaac.ConsoleOutput("[GoodTripPlus] v" .. gt.VERSION ..
     " loaded (console command: gtpdiag)\n")
@@ -1731,3 +1731,12 @@ do
     gt.renderCallback = "MC_POST_RENDER (plain)"
   end
 end
+
+-- 启动尾声：把「跑在哪个环境、走的哪条渲染回调」写进 log.txt。
+-- 排查「REPENTOGON 到底有没有在跑」（用 rgon 启动器 vs 直接启动 exe 是两种环境）、
+-- 「画不出来是不是回调选错」时，看这一行就够了。
+pcall(function()
+  Isaac.DebugString("[GoodTripPlus] ready: repentogon=" .. tostring(REPENTOGON) ..
+    " postHudRender=" .. tostring(ModCallbacks.MC_POST_HUD_RENDER ~= nil) ..
+    " render=" .. tostring(gt.renderCallback))
+end)
