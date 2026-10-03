@@ -1,4 +1,12 @@
 gt = RegisterMod("GoodTripPlus", 1)
+-- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
+-- 排查「改了没生效 / 没重启」时是第一手证据。
+gt.VERSION = "1.5.3"
+pcall(function()
+  Isaac.ConsoleOutput("[GoodTripPlus] v" .. gt.VERSION ..
+    " loaded (console command: gtpdiag)\n")
+  Isaac.DebugString("[GoodTripPlus] v" .. gt.VERSION .. " loaded")
+end)
 -------------------------------------------
 local player = Isaac.GetPlayer(0)
 local level = Game():GetLevel()
@@ -1141,6 +1149,14 @@ function gt:tab_action()
     local cp = Isaac.WorldToRenderPosition(Vector(320,280))
     scpos = cp + cp
     --
+    -- 免控制台诊断入口：按住地图键 + F4 → 把光标所在格（光标没启用时用当前房间）
+    -- 的完整判定打到控制台与 log.txt。控制台命令在某些环境看不到输出时的备用路。
+    if Input.IsButtonTriggered(Keyboard.KEY_F4, player.ControllerIndex) then
+      local cell = mmp_ctrl and gt:get_pos_grid_index(mmp_ctrl_pos)
+        or gt:get_current_room_cursor_gid()
+      gt:console_dump_diag(cell, "gtpdiag TAB+F4")
+    end
+    --
     if Input.IsActionTriggered(ButtonAction.ACTION_RESTART, player.ControllerIndex) and fastrestartenable then
       Isaac.ExecuteCommand("restart")
     end
@@ -1561,6 +1577,12 @@ function gt:auto_log_secret_diag(gid)
     return
   end
   secret_diag_logged[key] = true
+  if debug then
+    -- 开发模式（gtconfig.lua 里 gt.DebugMod = true）：同一份内容也进控制台，
+    -- 连命令都不用输 —— 按住地图键瞄一下隐藏房就能在控制台看到整份判定
+    gt:console_dump_diag(gid, "secretDiag")
+    return
+  end
   local ok, result = pcall(gt.dump_tele_diag, gt, gid)
   Isaac.DebugString("[GoodTripPlus][secretDiag] " ..
     (ok and result or ("ERROR: " .. tostring(result))))
@@ -1579,38 +1601,50 @@ function gt:get_minapi_display_flags(listIndex)
   return nil
 end
 
--- 控制台诊断命令：gtpdiag [格子编号]（缺省 = 光标所在格子）、gtmapdiag。
--- 三个输出通道一起用，照顾不同控制台：
---   return 串      —— 原版控制台会回显（REPENTOGON 的 ImGui 控制台不回显返回串）
---   ConsoleOutput  —— 逐行直写控制台输出（MinimapAPI 的 mapitel 也是这么做的）
---   DebugString    —— 落 log.txt，控制台看不到时也能查
--- 两个坑：①回调签名是 (Mod, command, args)，command 只有命令词，格子编号在 args 里；
--- ②原版控制台要**再按一次回车 / 输入别的**才会把这批行刷出来，看到「没输出」先别急。
+-- 逐行把诊断文本写进控制台输出缓冲（Isaac.ConsoleOutput 不认多行字符串，
+-- 整段丢进去容易只看到一行，所以自己按 \n 拆）
 local function gt_console_out(text)
   for line in tostring(text):gmatch("[^\n]+") do
     Isaac.ConsoleOutput(line .. "\n")
   end
 end
 
+-- 免控制台诊断入口：按住地图键 + F4（tab_action 里调用），把光标所在格的完整判定
+-- 打到控制台与 log.txt。控制台看不见输出时的另一条路。
+-- （定义在 gt_console_out 之后，tab_action 里是运行时按名字取，不受定义顺序影响。）
+function gt:console_dump_diag(gid, tag)
+  local ok, result = pcall(gt.dump_tele_diag, gt, gid)
+  if not ok then
+    result = "teleDiag ERROR: " .. tostring(result)
+  end
+  local name = "GoodTripPlus " .. (tag or "gtpdiag")
+  result = "===== " .. name .. " BEGIN =====\n" .. tostring(result) ..
+    "\n===== " .. name .. " END ====="
+  gt_console_out(result)
+  Isaac.DebugString(result)
+  return result
+end
+
+-- 控制台诊断命令：gtpdiag [格子编号]（缺省 = 光标所在格子）、gtmapdiag；gtpd 是简写。
+-- 三个输出通道一起用，照顾不同控制台：
+--   return 串      —— 原版控制台会回显（REPENTOGON 的 ImGui 控制台不回显返回串）
+--   ConsoleOutput  —— 逐行直写控制台输出（MinimapAPI 的 mapitel 也是这么做的）
+--   DebugString    —— 落 log.txt，控制台看不到时也能查（最可靠的一条）
+-- 两个坑：①回调签名是 (Mod, command, args)，command 只有命令词，格子编号在 args 里；
+-- ②原版控制台要**再按一次回车 / 输入别的**才会把这批行刷出来，看到「没输出」先别急。
 gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command, args)
-  if not command then
+  -- 解析尽量宽容：大小写、前后空格、以及「有的环境把整行塞进 command」
+  local cmd, inline = tostring(command or ""):match("^%s*(%S+)%s*(.*)$")
+  cmd = cmd and cmd:lower() or ""
+  if cmd ~= "gtpdiag" and cmd ~= "gtpd" and cmd ~= "gtmapdiag" then
     return
   end
-  local cmd = command:lower()
-  local rest = args
-  if type(rest) ~= "string" then
-    -- 兜底：有的环境把整行塞进 command（"gtpdiag 98"）
-    local head, tail = cmd:match("^(%S+)%s+(.*)$")
-    if head then
-      cmd, rest = head, tail
-    end
-  end
-  if cmd ~= "gtpdiag" and cmd ~= "gtmapdiag" then
-    return
-  end
-  -- 先把「命令确实触发了」写进 log.txt，免得再出现「没输出」时无从判断
-  Isaac.DebugString("[GoodTripPlus] console command: " .. tostring(command) ..
-    " args=" .. tostring(args))
+  local rest = type(args) == "string" and args or inline
+  rest = tostring(rest or ""):match("^%s*(.-)%s*$")
+  -- 先把「命令确实触发了」写进 log.txt（含版本与原始入参），免得再出现
+  -- 「没输出」时无从判断到底是没触发还是没显示
+  Isaac.DebugString("[GoodTripPlus] v" .. tostring(gt.VERSION) ..
+    " console command: '" .. tostring(command) .. "' args=" .. tostring(args))
   if cmd == "gtmapdiag" then
     local ok, result = pcall(gt.dump_map_diagnostics, gt)
     local text = ok and "gtmapdiag: done (details in log.txt)"
@@ -1619,16 +1653,8 @@ gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command, args)
     Isaac.DebugString(text)
     return text
   end
-  local gid = tonumber(rest)
-  local ok, result = pcall(gt.dump_tele_diag, gt, gid)
-  if not ok then
-    result = "teleDiag ERROR: " .. tostring(result)
-  end
-  result = "===== GoodTripPlus gtpdiag BEGIN =====\n" .. tostring(result) ..
-    "\n===== GoodTripPlus gtpdiag END ====="
-  gt_console_out(result)
-  Isaac.DebugString(result)
-  return result
+  local gid = rest ~= "" and tonumber(rest) or nil
+  return gt:console_dump_diag(gid, "gtpdiag v" .. tostring(gt.VERSION))
 end)
 --
 -- Draw the cursor on whichever render callback MinimapAPI itself draws its

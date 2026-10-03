@@ -113,6 +113,15 @@ MinimapAPI 的房间表（几十个房间，远小于 MinimapAPI 自己每帧的
 > 输出同时走 `return` 串、`Isaac.ConsoleOutput`（逐行直写，MinimapAPI 也这么做）与
 > `Isaac.DebugString`（落 log.txt），三个通道总有一个能看见。
 > 模块内各诊断回调都包了 `pcall`：诊断自己出错只打印一行 ERROR，不会把控制台命令带崩。
+> 命令名大小写 / 前后空格 / 整行塞进 `command` 都已兼容，另有简写 `gtpd`。
+>
+> **控制台里死活看不到输出时，还有两条不用打字的备用路**：
+> - 按住地图键 + **F4**：把光标所在格（光标没启用时用当前房间）的完整判定打到控制台与 `log.txt`；
+> - 把 `gtconfig.lua` 里 `gt.DebugMod` 改成 `true`：之后按住地图键瞄一下隐藏房再松手，
+>   判定会自动进控制台与 `log.txt`，连命令都不用输。
+>
+> 每次启动都会打印 `[GoodTripPlus] vX.Y.Z loaded (console command: gtpdiag)` ——
+> 想确认「改完到底重启了没、现在跑的是哪一版」，看这一行。
 
 命中修复时控制台会直接打印：
 
