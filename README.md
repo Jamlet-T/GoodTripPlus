@@ -278,6 +278,18 @@ end
 - **不接管任何渲染、不和 MinimapAPI 抢回调**，所以不会画坏别的东西；
 - 关掉开关或战斗结束时立刻撤销覆盖，恢复成玩家自己的设置。
 
+### 本模组自己画的元素要让路
+
+MinimapAPI 的元素都跟着 `GetTransparency()` 走，但**本模组自己画的**不受影响。
+目前只有一处是无条件绘制的：`gtrep.lua` 的 `gt:render_map_highlights()`——**初始房间的绿色高亮**。
+它由 `gt:render_cursor()` 每帧调用、没有按键门控（传送光标与隐藏房标记都有，见
+`gtrep.lua` 的 `if mmp_ctrl then` 与 `delver/render.lua` 的 `ACTION_MAP` 判定），
+所以小地图藏起来之后它还会留在屏幕上。
+
+处理方式：在本模块里把它包一层，小地图被隐藏、且玩家没在看大地图时直接跳过。
+**用包装而不是去改 `gtrep.lua`**，是为了让「战斗隐藏」这件事的代码集中在本模块内。
+按住地图键看大地图时，高亮照常显示。
+
 「战斗中」的判定与 MinimapAPI 的 `Always` 一致：`Game():GetRoom():IsClear()` 为假，
 即**当前房间还没清理干净**（不区分是否 boss 房）。
 
@@ -286,12 +298,13 @@ end
 控制台输入 `gtpdiag`，会多出：
 
 ```
-combatMap.enabled=true inCombat=true hidden=true
+combatMap.enabled=true inCombat=true hidden=true smallMapHidden=true
 combatMap.overrides=3 lastResult=战斗中已隐藏小地图（第 3 次）
 combatMap.overrideValue=0
 ```
 
-`hidden=true` 表示覆盖正在生效；`overrideValue` 为 `nil` 表示已撤销、用的是你自己的配置。
+`hidden=true` 表示覆盖正在生效；`smallMapHidden=true` 表示此刻连本模组自己的高亮也一并跳过
+（按住地图键时会变回 false）；`overrideValue` 为 `nil` 表示已撤销、用的是你自己的配置。
 
 ### 一个已知的小瑕疵
 

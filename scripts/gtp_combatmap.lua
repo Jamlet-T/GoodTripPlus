@@ -102,6 +102,38 @@ end
 
 gt:AddCallback(ModCallbacks.MC_POST_UPDATE, update)
 
+--[[
+  我们自己的绘制也要让路
+  ----------------------
+  MinimapAPI 的元素都跟着 GetTransparency 走，但**本模组自己画的**不受影响。
+  目前我们只有一处是无条件绘制的：
+    gtrep.lua 的 `gt:render_map_highlights()` —— 初始房间的绿色高亮，
+    它由 `gt:render_cursor()` 每帧调用，没有按键门控（光标和隐藏房标记都有，
+    见 gtrep.lua 的 `if mmp_ctrl then` 与 delver/render.lua 的 ACTION_MAP 判定）。
+  所以这里把它包一层：小地图被隐藏、且玩家没在看大地图时直接跳过。
+  用包装而不是去改 gtrep.lua，是为了让「战斗隐藏」这件事的代码集中在本模块里。
+]]--
+local function small_map_is_hidden()
+  if not override_active then
+    return false
+  end
+  -- 按住地图键时 MinimapAPI 画的是大地图（用的是另一个透明度键），此时高亮照常显示
+  if MinimapAPI and MinimapAPI.IsLarge and MinimapAPI:IsLarge() then
+    return false
+  end
+  return true
+end
+
+if gt and type(gt.render_map_highlights) == "function" then
+  local original_render_map_highlights = gt.render_map_highlights
+  gt.render_map_highlights = function(self, ...)
+    if small_map_is_hidden() then
+      return
+    end
+    return original_render_map_highlights(self, ...)
+  end
+end
+
 gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command)
   if not command or command:lower() ~= "gtpdiag" then
     return
@@ -109,7 +141,8 @@ gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command)
   local lines = {}
   lines[#lines + 1] = "combatMap.enabled=" .. tostring(is_enabled()) ..
     " inCombat=" .. tostring(stats.in_combat) ..
-    " hidden=" .. tostring(override_active)
+    " hidden=" .. tostring(override_active) ..
+    " smallMapHidden=" .. tostring(small_map_is_hidden())
   lines[#lines + 1] = "combatMap.overrides=" .. stats.overrides ..
     " lastResult=" .. stats.last_result
   lines[#lines + 1] = "combatMap.overrideValue=" ..
