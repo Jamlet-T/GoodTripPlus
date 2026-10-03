@@ -2,13 +2,14 @@
 
 《以撒的结合：忏悔+》的小地图传送模组，基于 **Goodtrip MLX's Tweak**（Steam 创意工坊 3749565569）二次开发。
 
-与上游相比只做三处改动：
+与上游相比主要有以下改动：
 
 1. **修复**了使用控制台 `rewind` 指令后，小地图上所有掉落物图标全部消失的问题（见第一节）。
-2. **合并**了 Lazy Delver 的隐藏房候选标记，并把标记对齐到 MinimapAPI 的真实布局（见第二节）。
-3. **新增**了「传送到未探索的相邻房间」功能，默认关闭（见第三节）。
-4. **新增**了深牢 II 愚者骷髅房的标记，默认开启（见第四节）。
-5. **新增**了「战斗时隐藏小地图」的可选开关，默认关闭（见第五节）。
+2. **修复**了按住 TAB 展开的大地图四周会突然出现一圈黑边的问题（那是 MinimapAPI 的房间轮廓，见第二节）。
+3. **合并**了 Lazy Delver 的隐藏房候选标记，并把标记对齐到 MinimapAPI 的真实布局（见第三节）。
+4. **新增**了「传送到未探索的相邻房间」功能，默认关闭（见第四节）。
+5. **新增**了深牢 II 愚者骷髅房的标记，默认开启（见第五节）。
+6. **新增**了「战斗时隐藏小地图」的可选开关，默认关闭（见第六节）。
 
 ---
 
@@ -109,7 +110,91 @@ MinimapAPI 的房间表（几十个房间，远小于 MinimapAPI 自己每帧的
 
 ---
 
-## 二、隐藏房候选标记（合并自 Lazy Delver）
+## 二、大地图四周的黑边（v1.3.3）
+
+### 现象
+
+按住地图键（默认 TAB）展开大地图时，地图四周有一圈**较厚的黑边**；
+而点按地图键让大地图**常驻**时没有黑边。于是缩放过程中看不到黑边，
+缩放一结束黑边**突然出现**。
+
+### 根因（在 MinimapAPI 侧，不是本模组画的）
+
+那圈黑边是 MinimapAPI 的**房间轮廓**（`RoomOutline` 精灵）。它在
+`MinimapAPI:renderRoomShadows()` 里绘制，而这个函数开头有一道很硬的门槛：
+
+```lua
+function MinimapAPI:renderRoomShadows(useCutOff)
+    if not (MinimapAPI:GetConfig("ShowShadows") and MinimapAPI:GetTransparency() == 1) then
+        return
+    end
+```
+
+透明度**不正好等于 1 就整段不画**。于是两种大地图分叉了：
+
+| 状态 | 透明度 | 结果 |
+| --- | --- | --- |
+| 常驻大地图 | 恒为 `TransparencyLargeMap`（本机 0.3） | 门槛不通过 → **没有轮廓** |
+| 按住大地图 | `LargeMapFadeInOnHold` 把 0.3 抬到 1 | 渐显期间没有轮廓，**抬到 1 的那一帧起突然开始画** |
+| 小地图 | 恒为 `TransparencySmallMap`（1） | 门槛通过 → 有轮廓 |
+
+所以它和「未探索隐藏房在放大时闪白」是**同一道 `== 1` 门槛的两种表现**：
+一个是门该开却关着（闪白），一个是门在该保持闭时突然打开（黑边）。
+
+轮廓本身**为什么看起来是「一圈」**：`renderRoomShadows` 在画房间本体**之前**被调用
+（`main.lua` 的 `renderUnboundedMinimap`），房间会盖住轮廓的内侧部分，
+相邻房间互相覆盖后只剩整张地图外缘那一圈露在外面。
+
+轮廓的颜色来自 MinimapAPI 的 `DefaultOutlineColorR/G/B`（本机为 `0,0,0` 纯黑），
+总开关是它菜单里的 **"Show Room Outlines"**（对应 `ShowShadows`）。
+
+### 修复方式
+
+`scripts/gtp_mapoutline.lua`：让**大地图不绘制房间轮廓**，于是「按住」与「常驻」两种
+大地图表现一致，黑边不再出现；小地图不走这条分支，观感完全不变。
+
+做法是把 `MinimapAPI.renderRoomShadows` **包一层**，`MinimapAPI:IsLarge()`
+（按住和常驻的大地图都返回真）为真时直接跳过：
+
+```lua
+local original = MinimapAPI.renderRoomShadows
+MinimapAPI.renderRoomShadows = function(self, use_cutoff)
+  if MinimapAPI:IsLarge() then return end          -- 大地图：不画轮廓
+  return original(self, use_cutoff)
+end
+```
+
+用包装而不是直接改 MinimapAPI 的文件，有两个理由：工坊内容会被 Steam 校验/更新还原；
+而且改别人的文件会扩大「未授权上游代码」的面积（见第十一节）。
+
+一个实现细节：本模组目录名 `goodtripplus` 按字母序排在 `minimapi` **之前**，
+加载时 `MinimapAPI` 这个全局还不存在，所以接管是在 `MC_POST_UPDATE` 里**懒执行**的
+（每帧检查一次，接管后立即置位，之后不再检查）。
+
+### 如果你想要不同的效果
+
+- **想让黑边在小地图上也消失**：直接关掉 MinimapAPI 菜单里的
+  **"Show Room Outlines"**（路径：Mod Config Menu → Minimap API → Map(1)），
+  一秒生效、不用重启（它的说明是 "If true, the dark room outlines will show."）。
+  顺带一提，关掉它还会让「未探索隐藏房」始终以黑块绘制，等于把上游那个闪白问题也绕过去了。
+- **想把轮廓颜色改得没那么显眼**：同菜单下的 "Outline Color Red/Green/Blue"。
+
+### 自查手段
+
+控制台输入 `gtpdiag`，会多出：
+
+```
+mapOutline.wrapped=true isLarge=false skipped=0
+mapOutline.lastResult=已接管（大地图尚未打开过）
+mapOutline.minimapShowRoomOutlines=true
+```
+
+`skipped` 是累计跳过的轮廓绘制次数；按住或常驻大地图时它会增长，
+`isLarge=true` 表示当前正处在大地图状态。
+
+---
+
+## 三、隐藏房候选标记（合并自 Lazy Delver）
 
 功能来自 **Lazy Delver**（作者 dokee，MIT 许可，许可证原文见 `scripts/delver/LICENSE-lazy-delver.txt`），
 候选位置的推演逻辑原样移植，只替换了「标记画在哪里」这一层。
@@ -157,7 +242,7 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 
 ---
 
-## 三、传送到未探索的相邻房间（可选，默认关闭）
+## 四、传送到未探索的相邻房间（可选，默认关闭）
 
 开关：**Mod Config Menu → GoodTripPlus → 「允许传送到未探索的相邻房间」**，
 或 `gtconfig.lua` 里设 `gt.AllowUnexploredNeighbor = true`。
@@ -190,7 +275,7 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 
 ---
 
-## 四、深牢 II 的愚者骷髅房标记（默认开启）
+## 五、深牢 II 的愚者骷髅房标记（默认开启）
 
 **背景**：深牢 II（Depths II）里有一个特殊的骷髅障碍物，炸掉后**固定掉落愚者卡牌**（The Fool）。
 开启后，小地图会在它所在的房间上画一个卡牌图标，方便回头再找。
@@ -248,7 +333,7 @@ skullRoom.rooms={42}
 
 ---
 
-## 五、战斗时隐藏小地图（可选，默认关闭）
+## 六、战斗时隐藏小地图（可选，默认关闭）
 
 开启后，**当前房间未清理时右上角的小地图会消失**；按住地图键（默认 TAB）仍然能唤出大地图，
 传送光标和各路标记照常可用。
@@ -322,7 +407,7 @@ combatMap.overrideValue=0
 
 ---
 
-## 六、安装 / 与上游共存
+## 七、安装 / 与上游共存
 
 1. 把本仓库同步到游戏 mods 目录（mod 目录名必须是 `goodtripplus`）：
 
@@ -363,7 +448,7 @@ combatMap.overrideValue=0
 
 包里的 `LICENSE`、`THIRD_PARTY.md`、`scripts/delver/LICENSE-lazy-delver.txt` **别删**：
 Lazy Delver 是 MIT 许可，要求许可证文本随副本一起分发。
-**私下发给朋友没问题**；但**公开上传到创意工坊要先拿到 MLX's Tweak 作者的许可**，见第十节。
+**私下发给朋友没问题**；但**公开上传到创意工坊要先拿到 MLX's Tweak 作者的许可**，见第十一节。
 
 改动源码后重新打包：
 
@@ -373,12 +458,12 @@ bash pack.sh        # 产出 dist/goodtripplus-<版本>.zip
 
 ---
 
-## 七、目录结构
+## 八、目录结构
 
 ```
 issacMod/                       ← 工作区 git 仓库（可容纳多个 mod）
 └── goodtripplus/               ← 本 mod 的源码目录（自包含，可独立打包/拆出）
-    ├── main.lua                ← 入口：加载 gtrep + gtp_rewindfix + gtp_delver + gtp_skullroom + gtp_combatmap
+    ├── main.lua                ← 入口：加载 gtrep + gtp_rewindfix + gtp_delver + gtp_skullroom + gtp_combatmap + gtp_mapoutline
     ├── metadata.xml            ← mod 元数据（name / directory / id）
     ├── gtconfig.lua            ← 静态默认值（可被 MCM 覆盖）
     ├── deploy.sh               ← 同步到游戏 mods/goodtripplus（开发机用）
@@ -394,6 +479,7 @@ issacMod/                       ← 工作区 git 仓库（可容纳多个 mod�
         ├── gtp_delver.lua      ← 隐藏房候选标记的回调接线 + MCM 开关
         ├── gtp_skullroom.lua   ← 深牢 II 愚者骷髅房标记（读房间生成表 → MinimapAPI 房间图标）
         ├── gtp_combatmap.lua   ← 战斗时隐藏小地图（覆盖 MinimapAPI 的小图透明度）
+        ├── gtp_mapoutline.lua  ← 大地图不再绘制 MinimapAPI 的房间轮廓（黑边）
         └── delver/             ← 移植自 Lazy Delver（MIT），仅改了 require 路径
             ├── const.lua       ← 常量表
             ├── geometry.lua    ← 形状占据格、相邻格、门槽映射
@@ -412,7 +498,7 @@ issacMod/                       ← 工作区 git 仓库（可容纳多个 mod�
 
 ---
 
-## 八、与上游 / 来源的差异清单
+## 九、与上游 / 来源的差异清单
 
 | 位置 | 改动 |
 | --- | --- |
@@ -421,13 +507,14 @@ issacMod/                       ← 工作区 git 仓库（可容纳多个 mod�
 | `scripts/gtp_delver.lua` | 新增文件，隐藏房候选标记的回调接线 |
 | `scripts/gtp_skullroom.lua` | 新增文件，深牢 II 愚者骷髅房标记（自己写的，未参考任何 mod 的实现代码） |
 | `scripts/gtp_combatmap.lua` | 新增文件，战斗时隐藏小地图（运行时覆盖 MinimapAPI 的 `TransparencySmallMap`，不改它的存档配置） |
+| `scripts/gtp_mapoutline.lua` | 新增文件，大地图不绘制 MinimapAPI 的房间轮廓（包装 `MinimapAPI.renderRoomShadows`，不改它的文件） |
 | `scripts/delver/*` | 从 Lazy Delver 原样移植（仅改写 `require` 路径），`render.lua` 重写了定位部分 |
 | `resources/gfx/goodtripplus/*` | `marker.*` 从 Lazy Delver 复制（换到自己的路径避免与它本体冲突）；`TintedSkull.*` 是本模组自有的骷髅图标（16x16） |
 | `main.lua` / `metadata.xml` / `gtconfig.lua` / `deploy.sh` | 新增 / 重写 |
 
 ---
 
-## 九、开发流程
+## 十、开发流程
 
 ```bash
 # 改完源码后
@@ -441,7 +528,7 @@ git add -A && git commit -m "..."
 
 ---
 
-## 十、授权与发布
+## 十一、授权与发布
 
 本仓库的内容来自三个来源，授权状况**互不相同**，详见 [`LICENSE`](LICENSE) 与 [`THIRD_PARTY.md`](THIRD_PARTY.md)。
 

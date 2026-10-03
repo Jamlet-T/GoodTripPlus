@@ -9,6 +9,8 @@ Supports the mirrored map in the mirror world. Curse room teleportation is disab
 
 GoodTripPlus additionally fixes a bug where every pickup icon on the minimap vanished after using the "rewind" console command, and only came back after re-entering each room one by one.
 
+It also removes the dark ring that MinimapAPI draws around the expanded large map (its room outlines only get drawn once the fade-in reaches full opacity, so they used to pop in at the end of the animation and were absent while the map was pinned). The small map is left exactly as it was.
+
 It also bundles the Secret Room candidate markers from Lazy Delver (by dokee, MIT), re-projected onto GoodTripPlus' own map math so they line up with MinimapAPI exactly. Please disable Lazy Delver itself to avoid drawing two sets of markers.
 
 Optional (MCM: AllowUnexploredNeighbor, off by default): teleport into a room you have never entered, as long as it sits next to an explored room reachable from your current room.
@@ -24,7 +26,7 @@ Required: MinimapAPI
 Optional: Mod Config Menu (for in-game settings)
 
 Credits: original GoodTrip by tarako; this build is based on Goodtrip MLX's Tweak; Secret Room candidate markers are ported from Lazy Delver by dokee (MIT). See LICENSE and THIRD_PARTY.md for details.</description>
-    <version>1.3.2</version>
+    <version>1.3.3</version>
     <visibility>Public</visibility>
     <tag id="Lua"/>
     <tag id="Tweaks"/>
