@@ -6,8 +6,10 @@
 --   2. 合并了 Lazy Delver 的隐藏房候选标记功能，并把标记对齐到 MinimapAPI 的真实布局
 --      （scripts/gtp_delver.lua + scripts/delver/，MIT，见 scripts/delver/LICENSE-lazy-delver.txt）
 --   3. 标记深牢 II 里那个炸掉固定掉愚者卡牌的特殊骷髅所在的房间（scripts/gtp_skullroom.lua）
+--   4. 可选：战斗时隐藏右上角小地图，按住地图键仍可唤出大地图（scripts/gtp_combatmap.lua）
 
 require("scripts.gtrep")
 require("scripts.gtp_rewindfix")
 require("scripts.gtp_delver")
 require("scripts.gtp_skullroom")
+require("scripts.gtp_combatmap")

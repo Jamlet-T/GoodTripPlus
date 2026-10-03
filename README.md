@@ -8,6 +8,7 @@
 2. **合并**了 Lazy Delver 的隐藏房候选标记，并把标记对齐到 MinimapAPI 的真实布局（见第二节）。
 3. **新增**了「传送到未探索的相邻房间」功能，默认关闭（见第三节）。
 4. **新增**了深牢 II 愚者骷髅房的标记，默认开启（见第四节）。
+5. **新增**了「战斗时隐藏小地图」的可选开关，默认关闭（见第五节）。
 
 ---
 
@@ -239,7 +240,68 @@ skullRoom.rooms={42}
 
 ---
 
-## 五、安装 / 与上游共存
+## 五、战斗时隐藏小地图（可选，默认关闭）
+
+开启后，**当前房间未清理时右上角的小地图会消失**；按住地图键（默认 TAB）仍然能唤出大地图，
+传送光标和各路标记照常可用。
+
+开关：**MCM → GoodTripPlus → 「战斗时隐藏小地图」**，或 `gtconfig.lua` 里 `gt.HideMinimapInCombat = true`。
+
+### 为什么不用 MinimapAPI 自带的 "Hide Map in Combat"
+
+MinimapAPI 自己确实有一个 `HideInCombat` 选项（`1 = Never` / `2 = Bosses Only` / `3 = Always`），
+但它的实现是在渲染回调**开头直接 `return`** —— 也就是整块都不画，**连按住 TAB 的大地图一起没**。
+那不符合「小图藏起来、大地图照常」的需求，所以这里另做了一套。
+
+### 本模组的做法：只覆盖「小地图」的透明度
+
+MinimapAPI 的所有绘制都通过 `MinimapAPI:GetTransparency()` 取透明度，而这个函数是**分模式**的：
+
+```lua
+function MinimapAPI:GetTransparency()
+    if MinimapAPI:IsLarge() then          -- 按住地图键时 mapheldframes > 0
+        -- 大地图：Options.MapOpacity 或 TransparencyLargeMap（还带渐显）
+    end
+    return MinimapAPI:GetConfig("TransparencySmallMap")   -- 小地图
+end
+```
+
+而 `GetConfig` 优先读运行时覆盖表：`OverrideConfig[键] ~= nil and OverrideConfig[键] or Config[键]`。
+
+所以本模块只是把 **`OverrideConfig.TransparencySmallMap` 设为 0**：房间底色、房间图标、
+地图边框、地图标志全都拿这个值当 alpha，于是小地图整体不可见；
+按住地图键切到大地图时用的是另一个键，**完全不受影响**。
+
+这样做的三个好处：
+
+- **不改玩家在 MinimapAPI 里的配置** —— `OverrideConfig` 只存在于内存，退出游戏即还原；
+- **不接管任何渲染、不和 MinimapAPI 抢回调**，所以不会画坏别的东西；
+- 关掉开关或战斗结束时立刻撤销覆盖，恢复成玩家自己的设置。
+
+「战斗中」的判定与 MinimapAPI 的 `Always` 一致：`Game():GetRoom():IsClear()` 为假，
+即**当前房间还没清理干净**（不区分是否 boss 房）。
+
+### 自查手段
+
+控制台输入 `gtpdiag`，会多出：
+
+```
+combatMap.enabled=true inCombat=true hidden=true
+combatMap.overrides=3 lastResult=战斗中已隐藏小地图（第 3 次）
+combatMap.overrideValue=0
+```
+
+`hidden=true` 表示覆盖正在生效；`overrideValue` 为 `nil` 表示已撤销、用的是你自己的配置。
+
+### 一个已知的小瑕疵
+
+受**迷失诅咒**时 MinimapAPI 会在小地图位置画一个问号（`renderQuestionMark`），
+那处绘制没有设置颜色、不经过 `GetTransparency()`，所以开启本功能后那个问号可能仍然显示。
+这是 MinimapAPI 自身的问题，本模块不去改动它。
+
+---
+
+## 六、安装 / 与上游共存
 
 1. 把本仓库同步到游戏 mods 目录（mod 目录名必须是 `goodtripplus`）：
 
@@ -280,7 +342,7 @@ skullRoom.rooms={42}
 
 包里的 `LICENSE`、`THIRD_PARTY.md`、`scripts/delver/LICENSE-lazy-delver.txt` **别删**：
 Lazy Delver 是 MIT 许可，要求许可证文本随副本一起分发。
-**私下发给朋友没问题**；但**公开上传到创意工坊要先拿到 MLX's Tweak 作者的许可**，见第九节。
+**私下发给朋友没问题**；但**公开上传到创意工坊要先拿到 MLX's Tweak 作者的许可**，见第十节。
 
 改动源码后重新打包：
 
@@ -290,12 +352,12 @@ bash pack.sh        # 产出 dist/goodtripplus-<版本>.zip
 
 ---
 
-## 六、目录结构
+## 七、目录结构
 
 ```
 issacMod/                       ← 工作区 git 仓库（可容纳多个 mod）
 └── goodtripplus/               ← 本 mod 的源码目录（自包含，可独立打包/拆出）
-    ├── main.lua                ← 入口：加载 gtrep + gtp_rewindfix + gtp_delver + gtp_skullroom
+    ├── main.lua                ← 入口：加载 gtrep + gtp_rewindfix + gtp_delver + gtp_skullroom + gtp_combatmap
     ├── metadata.xml            ← mod 元数据（name / directory / id）
     ├── gtconfig.lua            ← 静态默认值（可被 MCM 覆盖）
     ├── deploy.sh               ← 同步到游戏 mods/goodtripplus（开发机用）
@@ -310,6 +372,7 @@ issacMod/                       ← 工作区 git 仓库（可容纳多个 mod�
         ├── gtp_rewindfix.lua   ← rewind 掉落物图标修复（不依赖具体回调的帧末监视）
         ├── gtp_delver.lua      ← 隐藏房候选标记的回调接线 + MCM 开关
         ├── gtp_skullroom.lua   ← 深牢 II 愚者骷髅房标记（读房间生成表 → MinimapAPI 房间图标）
+        ├── gtp_combatmap.lua   ← 战斗时隐藏小地图（覆盖 MinimapAPI 的小图透明度）
         └── delver/             ← 移植自 Lazy Delver（MIT），仅改了 require 路径
             ├── const.lua       ← 常量表
             ├── geometry.lua    ← 形状占据格、相邻格、门槽映射
@@ -328,21 +391,22 @@ issacMod/                       ← 工作区 git 仓库（可容纳多个 mod�
 
 ---
 
-## 七、与上游 / 来源的差异清单
+## 八、与上游 / 来源的差异清单
 
 | 位置 | 改动 |
 | --- | --- |
-| `scripts/gtrep.lua` | `RegisterMod` 名、ModConfigMenu 配置键 / 标题全部改为 `GoodTripPlus`；新增 MCM 开关 `ShowSecretMarkers`、`AllowUnexploredNeighbor`、`FoolsSkullRoom`，并放宽 `check_teleble()` 的准入判定；其余逻辑与 MLX's Tweak 完全一致 |
+| `scripts/gtrep.lua` | `RegisterMod` 名、ModConfigMenu 配置键 / 标题全部改为 `GoodTripPlus`；新增 MCM 开关 `ShowSecretMarkers`、`AllowUnexploredNeighbor`、`FoolsSkullRoom`、`HideMinimapInCombat`，并放宽 `check_teleble()` 的准入判定；其余逻辑与 MLX's Tweak 完全一致 |
 | `scripts/gtp_rewindfix.lua` | 新增文件，rewind 图标修复 |
 | `scripts/gtp_delver.lua` | 新增文件，隐藏房候选标记的回调接线 |
 | `scripts/gtp_skullroom.lua` | 新增文件，深牢 II 愚者骷髅房标记（自己写的，未参考任何 mod 的实现代码） |
+| `scripts/gtp_combatmap.lua` | 新增文件，战斗时隐藏小地图（运行时覆盖 MinimapAPI 的 `TransparencySmallMap`，不改它的存档配置） |
 | `scripts/delver/*` | 从 Lazy Delver 原样移植（仅改写 `require` 路径），`render.lua` 重写了定位部分 |
 | `resources/gfx/goodtripplus/*` | `marker.*` 从 Lazy Delver 复制（换到自己的路径避免与它本体冲突）；`TintedSkull.*` 是本模组自有的骷髅图标（16x16） |
 | `main.lua` / `metadata.xml` / `gtconfig.lua` / `deploy.sh` | 新增 / 重写 |
 
 ---
 
-## 八、开发流程
+## 九、开发流程
 
 ```bash
 # 改完源码后
@@ -356,7 +420,7 @@ git add -A && git commit -m "..."
 
 ---
 
-## 九、授权与发布
+## 十、授权与发布
 
 本仓库的内容来自三个来源，授权状况**互不相同**，详见 [`LICENSE`](LICENSE) 与 [`THIRD_PARTY.md`](THIRD_PARTY.md)。
 
