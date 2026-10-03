@@ -15,6 +15,8 @@ Optional (MCM: AllowUnexploredNeighbor, off by default): teleport into a room yo
 
 New (MCM: FoolsSkullRoom, on by default): marks the room in Depths II that holds the special skull which always drops The Fool card, with a custom skull icon. The icon only appears on rooms you have already visited, so it never spoils the floor layout.
 
+Optional (MCM: HideMinimapInCombat, off by default): hides the minimap while the current room is not cleared. Holding the map key still brings up the large map, so teleporting keeps working. Your MinimapAPI settings are left untouched.
+
 Default settings can be changed in the MCM menu or config file.
 Please uninstall or disable goodtrip_mlxtweak (and the original Goodtrip) before use.
 Required: MinimapAPI
@@ -22,7 +24,7 @@ Required: MinimapAPI
 Optional: Mod Config Menu (for in-game settings)
 
 Credits: original GoodTrip by tarako; this build is based on Goodtrip MLX's Tweak; Secret Room candidate markers are ported from Lazy Delver by dokee (MIT). See LICENSE and THIRD_PARTY.md for details.</description>
-    <version>1.2.3</version>
+    <version>1.3.0</version>
     <visibility>Public</visibility>
     <tag id="Lua"/>
     <tag id="Tweaks"/>
