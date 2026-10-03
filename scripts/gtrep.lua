@@ -1,7 +1,7 @@
 gt = RegisterMod("GoodTripPlus", 1)
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "1.5.4"
+gt.VERSION = "1.5.5"
 pcall(function()
   Isaac.ConsoleOutput("[GoodTripPlus] v" .. gt.VERSION ..
     " loaded (console command: gtpdiag)\n")
@@ -1571,6 +1571,12 @@ function gt:adjacent_secret_gid()
 end
 
 function gt:auto_log_secret_diag(gid)
+  -- 只在开发模式（gtconfig.lua 的 gt.DebugMod = true）下自动弹诊断：
+  -- 正式游玩时不往 log.txt 写这些行，免得每次瞄隐藏房都刷十几行；
+  -- 想临时看诊断按「按住地图键 + F4」，那条不依赖本开关。
+  if not debug then
+    return
+  end
   if gid == -99 then
     gid = gt:adjacent_secret_gid()
     if not gid then return end
@@ -1584,15 +1590,8 @@ function gt:auto_log_secret_diag(gid)
     return
   end
   secret_diag_logged[key] = true
-  if debug then
-    -- 开发模式（gtconfig.lua 里 gt.DebugMod = true）：同一份内容也进控制台，
-    -- 连命令都不用输 —— 按住地图键瞄一下隐藏房就能在控制台看到整份判定
-    gt:console_dump_diag(gid, "secretDiag")
-    return
-  end
-  local ok, result = pcall(gt.dump_tele_diag, gt, gid)
-  Isaac.DebugString("[GoodTripPlus][secretDiag] " ..
-    (ok and result or ("ERROR: " .. tostring(result))))
+  -- DebugMod 下：屏幕浮层 + 控制台 + log.txt 一次给全，连按键都不用
+  gt:console_dump_diag(gid, "secretDiag")
 end
 
 -- MinimapAPI 对某 ListIndex 房间的显示旗标（诊断用；查不到返回 nil）
