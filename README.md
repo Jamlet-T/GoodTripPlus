@@ -2,14 +2,19 @@
 
 《以撒的结合：忏悔+》的小地图传送模组，基于 **Goodtrip MLX's Tweak**（Steam 创意工坊 3749565569）二次开发。
 
+> **项目定位（2026-10-03 起）**：**MinimapAPI 的外置传送插件**。
+> MinimapAPI 已经把地图显示、缩放、图标、战斗隐藏等地图能力做得很好，
+> 本模组不再追求「全家桶」，只在其基础上搭建 GoodTrip 的传送玩法
+> （传送光标、传送准入、传送相关开关与修复），运行必需 MinimapAPI。
+
 与上游相比主要有以下改动：
 
 1. **修复**了使用控制台 `rewind` 指令后，小地图上所有掉落物图标全部消失的问题（见第一节）。
-2. **修复**了按住 TAB 展开的大地图四周会突然出现一圈黑边的问题（那是 MinimapAPI 的房间轮廓，见第二节）。
+2. （已移除）大地图黑边修复：遇黑边请直接关 MinimapAPI 菜单里的 "Show Room Outlines"（见第二节）。
 3. **合并**了 Lazy Delver 的隐藏房候选标记，并把标记对齐到 MinimapAPI 的真实布局（见第三节）。
 4. **新增**了「传送到未探索的相邻房间」功能，默认关闭（见第四节）。
 5. **新增**了深牢 II 愚者骷髅房的标记，默认开启（见第五节）。
-6. **新增**了「战斗时隐藏小地图」的可选开关，默认关闭（见第六节）。
+6. **战斗时地图隐藏**：跟随 MinimapAPI 自带的 "Hide Map in Combat"，让本模组自绘的标记一起隐藏（见第六节）。
 
 ---
 
@@ -110,87 +115,19 @@ MinimapAPI 的房间表（几十个房间，远小于 MinimapAPI 自己每帧的
 
 ---
 
-## 二、大地图四周的黑边（v1.3.3）
+## 二、大地图四周的黑边（修复已移除）
 
-### 现象
+2026-10-03 项目定位收缩为「MinimapAPI 的外置传送插件」时，`scripts/gtp_mapoutline.lua`
+已随包移除——地图显示问题应回到 MinimapAPI 侧解决。
 
-按住地图键（默认 TAB）展开大地图时，地图四周有一圈**较厚的黑边**；
-而点按地图键让大地图**常驻**时没有黑边。于是缩放过程中看不到黑边，
-缩放一结束黑边**突然出现**。
+黑边本身是 MinimapAPI 的房间轮廓（`RoomOutline`）在大地图渐显到不透明度 1 时突然开画所致。
+如果还遇到它，两个现成的绕法：
 
-### 根因（在 MinimapAPI 侧，不是本模组画的）
+- 关掉 MinimapAPI 菜单里的 **"Show Room Outlines"**（MCM → Minimap API → Map(1)）；
+- 或保持大地图**常驻**（点按地图键）而不是按住，透明度不到 1 时轮廓不画。
 
-那圈黑边是 MinimapAPI 的**房间轮廓**（`RoomOutline` 精灵）。它在
-`MinimapAPI:renderRoomShadows()` 里绘制，而这个函数开头有一道很硬的门槛：
-
-```lua
-function MinimapAPI:renderRoomShadows(useCutOff)
-    if not (MinimapAPI:GetConfig("ShowShadows") and MinimapAPI:GetTransparency() == 1) then
-        return
-    end
-```
-
-透明度**不正好等于 1 就整段不画**。于是两种大地图分叉了：
-
-| 状态 | 透明度 | 结果 |
-| --- | --- | --- |
-| 常驻大地图 | 恒为 `TransparencyLargeMap`（本机 0.3） | 门槛不通过 → **没有轮廓** |
-| 按住大地图 | `LargeMapFadeInOnHold` 把 0.3 抬到 1 | 渐显期间没有轮廓，**抬到 1 的那一帧起突然开始画** |
-| 小地图 | 恒为 `TransparencySmallMap`（1） | 门槛通过 → 有轮廓 |
-
-所以它和「未探索隐藏房在放大时闪白」是**同一道 `== 1` 门槛的两种表现**：
-一个是门该开却关着（闪白），一个是门在该保持闭时突然打开（黑边）。
-
-轮廓本身**为什么看起来是「一圈」**：`renderRoomShadows` 在画房间本体**之前**被调用
-（`main.lua` 的 `renderUnboundedMinimap`），房间会盖住轮廓的内侧部分，
-相邻房间互相覆盖后只剩整张地图外缘那一圈露在外面。
-
-轮廓的颜色来自 MinimapAPI 的 `DefaultOutlineColorR/G/B`（本机为 `0,0,0` 纯黑），
-总开关是它菜单里的 **"Show Room Outlines"**（对应 `ShowShadows`）。
-
-### 修复方式
-
-`scripts/gtp_mapoutline.lua`：让**大地图不绘制房间轮廓**，于是「按住」与「常驻」两种
-大地图表现一致，黑边不再出现；小地图不走这条分支，观感完全不变。
-
-做法是把 `MinimapAPI.renderRoomShadows` **包一层**，`MinimapAPI:IsLarge()`
-（按住和常驻的大地图都返回真）为真时直接跳过：
-
-```lua
-local original = MinimapAPI.renderRoomShadows
-MinimapAPI.renderRoomShadows = function(self, use_cutoff)
-  if MinimapAPI:IsLarge() then return end          -- 大地图：不画轮廓
-  return original(self, use_cutoff)
-end
-```
-
-用包装而不是直接改 MinimapAPI 的文件，有两个理由：工坊内容会被 Steam 校验/更新还原；
-而且改别人的文件会扩大「未授权上游代码」的面积（见第十一节）。
-
-一个实现细节：本模组目录名 `goodtripplus` 按字母序排在 `minimapi` **之前**，
-加载时 `MinimapAPI` 这个全局还不存在，所以接管是在 `MC_POST_UPDATE` 里**懒执行**的
-（每帧检查一次，接管后立即置位，之后不再检查）。
-
-### 如果你想要不同的效果
-
-- **想让黑边在小地图上也消失**：直接关掉 MinimapAPI 菜单里的
-  **"Show Room Outlines"**（路径：Mod Config Menu → Minimap API → Map(1)），
-  一秒生效、不用重启（它的说明是 "If true, the dark room outlines will show."）。
-  顺带一提，关掉它还会让「未探索隐藏房」始终以黑块绘制，等于把上游那个闪白问题也绕过去了。
-- **想把轮廓颜色改得没那么显眼**：同菜单下的 "Outline Color Red/Green/Blue"。
-
-### 自查手段
-
-控制台输入 `gtpdiag`，会多出：
-
-```
-mapOutline.wrapped=true isLarge=false skipped=0
-mapOutline.lastResult=已接管（大地图尚未打开过）
-mapOutline.minimapShowRoomOutlines=true
-```
-
-`skipped` 是累计跳过的轮廓绘制次数；按住或常驻大地图时它会增长，
-`isLarge=true` 表示当前正处在大地图状态。
+技术细节存档：门槛在 `MinimapAPI:renderRoomShadows()` 开头的
+`GetTransparency() == 1` 判断；修法可参考当年做法——包装该函数、`IsLarge()` 时跳过。
 
 ---
 
@@ -333,77 +270,28 @@ skullRoom.rooms={42}
 
 ---
 
-## 六、战斗时隐藏小地图（可选，默认关闭）
+## 六、战斗时地图隐藏（交给 MinimapAPI）
 
-开启后，**当前房间未清理时右上角的小地图会消失**；按住地图键（默认 TAB）仍然能唤出大地图，
-传送光标和各路标记照常可用。
+战斗时地图要不要隐藏，**由 MinimapAPI 自带的 "Hide Map in Combat" 决定**
+（MCM → Minimap API，`1 = Never` / `2 = Bosses Only` / `3 = Always`，默认 1）。
 
-开关：**MCM → GoodTripPlus → 「战斗时隐藏小地图」**，或 `gtconfig.lua` 里 `gt.HideMinimapInCombat = true`。
+MinimapAPI 的实现是在渲染回调**开头直接 `return`**——条件命中时整块地图
+（含按住 TAB 的大地图）都不画：Mega Satan 战与 Beast 战无条件隐藏，
+boss 开场过场隐藏，`2` 档在未清理的 boss 房、`3` 档在任意未清理房间隐藏。
 
-### 为什么不用 MinimapAPI 自带的 "Hide Map in Combat"
+### 本模组的自绘元素如何跟随
 
-MinimapAPI 自己确实有一个 `HideInCombat` 选项（`1 = Never` / `2 = Bosses Only` / `3 = Always`），
-但它的实现是在渲染回调**开头直接 `return`** —— 也就是整块都不画，**连按住 TAB 的大地图一起没**。
-那不符合「小图藏起来、大地图照常」的需求，所以这里另做了一套。
+MinimapAPI 藏地图时管不到**本模组自己画的**元素。各元素的情况：
 
-### 本模组的做法：只覆盖「小地图」的透明度
+| 自绘元素 | 战斗中的行为 |
+| --- | --- |
+| 传送光标 / 光标房间高亮 | 无需处理——光标只在当前房已清理时激活，战斗中本就不绘制 |
+| 隐藏房候选标记（Lazy Delver） | **需要跟随**：`delver/render.lua` 的 `minimapapi_hides_map()` 逐条镜像 MinimapAPI 的隐藏条件（含 Mega Satan/Beast 战、boss 开场过场、StageAPI 层间过场），命中任一条件时不画标记 |
+| 骷髅房图标 | MinimapAPI 自己的房间图标，随地图一起消失，无需处理 |
 
-MinimapAPI 的所有绘制都通过 `MinimapAPI:GetTransparency()` 取透明度，而这个函数是**分模式**的：
-
-```lua
-function MinimapAPI:GetTransparency()
-    if MinimapAPI:IsLarge() then          -- 按住地图键时 mapheldframes > 0
-        -- 大地图：Options.MapOpacity 或 TransparencyLargeMap（还带渐显）
-    end
-    return MinimapAPI:GetConfig("TransparencySmallMap")   -- 小地图
-end
-```
-
-而 `GetConfig` 优先读运行时覆盖表：`OverrideConfig[键] ~= nil and OverrideConfig[键] or Config[键]`。
-
-所以本模块只是把 **`OverrideConfig.TransparencySmallMap` 设为 0**：房间底色、房间图标、
-地图边框、地图标志全都拿这个值当 alpha，于是小地图整体不可见；
-按住地图键切到大地图时用的是另一个键，**完全不受影响**。
-
-这样做的三个好处：
-
-- **不改玩家在 MinimapAPI 里的配置** —— `OverrideConfig` 只存在于内存，退出游戏即还原；
-- **不接管任何渲染、不和 MinimapAPI 抢回调**，所以不会画坏别的东西；
-- 关掉开关或战斗结束时立刻撤销覆盖，恢复成玩家自己的设置。
-
-### 本模组自己画的元素要让路
-
-MinimapAPI 的元素都跟着 `GetTransparency()` 走，但**本模组自己画的**不受影响。
-目前只有一处是无条件绘制的：`gtrep.lua` 的 `gt:render_map_highlights()`——**初始房间的绿色高亮**。
-它由 `gt:render_cursor()` 每帧调用、没有按键门控（传送光标与隐藏房标记都有，见
-`gtrep.lua` 的 `if mmp_ctrl then` 与 `delver/render.lua` 的 `ACTION_MAP` 判定），
-所以小地图藏起来之后它还会留在屏幕上。
-
-处理方式：在本模块里把它包一层，小地图被隐藏、且玩家没在看大地图时直接跳过。
-**用包装而不是去改 `gtrep.lua`**，是为了让「战斗隐藏」这件事的代码集中在本模块内。
-按住地图键看大地图时，高亮照常显示。
-
-「战斗中」的判定与 MinimapAPI 的 `Always` 一致：`Game():GetRoom():IsClear()` 为假，
-即**当前房间还没清理干净**（不区分是否 boss 房）。
-
-### 自查手段
-
-控制台输入 `gtpdiag`，会多出：
-
-```
-combatMap.enabled=true inCombat=true hidden=true smallMapHidden=true
-combatMap.overrides=3 lastResult=战斗中已隐藏小地图（第 3 次）
-combatMap.overrideValue=0
-```
-
-`hidden=true` 表示覆盖正在生效；`smallMapHidden=true` 表示此刻连本模组自己的高亮也一并跳过
-（按住地图键时会变回 false）；`overrideValue` 为 `nil` 表示已撤销、用的是你自己的配置。
-
-### 一个已知的小瑕疵
-
-受**迷失诅咒**时 MinimapAPI 会在小地图位置画一个问号（`renderQuestionMark`），
-那处绘制没有设置颜色、不经过 `GetTransparency()`，所以开启本功能后那个问号可能仍然显示。
-这是 MinimapAPI 自身的问题，本模块不去改动它。
+历史上曾有一个专门的 `gtp_combatmap.lua` 负责这类跟随（2026-10-03 移除）：
+它当时跟随的是初始房高亮，该高亮删除后模块一度整个撤去；
+后来发现隐藏房候选标记同样需要跟随，就把镜像逻辑内联进了 `delver/render.lua`。
 
 ---
 
@@ -463,7 +351,7 @@ bash pack.sh        # 产出 dist/goodtripplus-<版本>.zip
 ```
 issacMod/                       ← 工作区 git 仓库（可容纳多个 mod）
 └── goodtripplus/               ← 本 mod 的源码目录（自包含，可独立打包/拆出）
-    ├── main.lua                ← 入口：加载 gtrep + gtp_rewindfix + gtp_delver + gtp_skullroom + gtp_combatmap + gtp_mapoutline
+    ├── main.lua                ← 入口：加载 gtrep + gtp_rewindfix + gtp_delver + gtp_skullroom
     ├── metadata.xml            ← mod 元数据（name / directory / id）
     ├── gtconfig.lua            ← 静态默认值（可被 MCM 覆盖）
     ├── deploy.sh               ← 同步到游戏 mods/goodtripplus（开发机用）
@@ -478,8 +366,6 @@ issacMod/                       ← 工作区 git 仓库（可容纳多个 mod�
         ├── gtp_rewindfix.lua   ← rewind 掉落物图标修复（不依赖具体回调的帧末监视）
         ├── gtp_delver.lua      ← 隐藏房候选标记的回调接线 + MCM 开关
         ├── gtp_skullroom.lua   ← 深牢 II 愚者骷髅房标记（读房间生成表 → MinimapAPI 房间图标）
-        ├── gtp_combatmap.lua   ← 战斗时隐藏小地图（覆盖 MinimapAPI 的小图透明度）
-        ├── gtp_mapoutline.lua  ← 大地图不再绘制 MinimapAPI 的房间轮廓（黑边）
         └── delver/             ← 移植自 Lazy Delver（MIT），仅改了 require 路径
             ├── const.lua       ← 常量表
             ├── geometry.lua    ← 形状占据格、相邻格、门槽映射
@@ -502,12 +388,10 @@ issacMod/                       ← 工作区 git 仓库（可容纳多个 mod�
 
 | 位置 | 改动 |
 | --- | --- |
-| `scripts/gtrep.lua` | `RegisterMod` 名、ModConfigMenu 配置键 / 标题全部改为 `GoodTripPlus`；新增 MCM 开关 `ShowSecretMarkers`、`AllowUnexploredNeighbor`、`FoolsSkullRoom`、`HideMinimapInCombat`，并放宽 `check_teleble()` 的准入判定；其余逻辑与 MLX's Tweak 完全一致 |
+| `scripts/gtrep.lua` | `RegisterMod` 名、ModConfigMenu 配置键 / 标题全部改为 `GoodTripPlus`；新增 MCM 开关 `ShowSecretMarkers`、`AllowUnexploredNeighbor`、`FoolsSkullRoom`，并放宽 `check_teleble()` 的准入判定；其余逻辑与 MLX's Tweak 完全一致 |
 | `scripts/gtp_rewindfix.lua` | 新增文件，rewind 图标修复 |
 | `scripts/gtp_delver.lua` | 新增文件，隐藏房候选标记的回调接线 |
 | `scripts/gtp_skullroom.lua` | 新增文件，深牢 II 愚者骷髅房标记（自己写的，未参考任何 mod 的实现代码） |
-| `scripts/gtp_combatmap.lua` | 新增文件，战斗时隐藏小地图（运行时覆盖 MinimapAPI 的 `TransparencySmallMap`，不改它的存档配置） |
-| `scripts/gtp_mapoutline.lua` | 新增文件，大地图不绘制 MinimapAPI 的房间轮廓（包装 `MinimapAPI.renderRoomShadows`，不改它的文件） |
 | `scripts/delver/*` | 从 Lazy Delver 原样移植（仅改写 `require` 路径），`render.lua` 重写了定位部分 |
 | `resources/gfx/goodtripplus/*` | `marker.*` 从 Lazy Delver 复制（换到自己的路径避免与它本体冲突）；`TintedSkull.*` 是本模组自有的骷髅图标（16x16） |
 | `main.lua` / `metadata.xml` / `gtconfig.lua` / `deploy.sh` | 新增 / 重写 |

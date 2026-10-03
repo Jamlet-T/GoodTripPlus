@@ -1,17 +1,19 @@
 -- GoodTripPlus
 -- 基于 Goodtrip MLX's Tweak（workshop 3749565569）修改的 minimap 传送模组。
+-- 定位：MinimapAPI 的外置传送插件（2026-10-03 起），只搭 GoodTrip 的传送玩法。
 --
 -- 与 MLX's Tweak 的差别：
 --   1. 修复了控制台 rewind 之后小地图掉落物图标全部消失的问题（scripts/gtp_rewindfix.lua）
 --   2. 合并了 Lazy Delver 的隐藏房候选标记功能，并把标记对齐到 MinimapAPI 的真实布局
 --      （scripts/gtp_delver.lua + scripts/delver/，MIT，见 scripts/delver/LICENSE-lazy-delver.txt）
 --   3. 标记深牢 II 里那个炸掉固定掉愚者卡牌的特殊骷髅所在的房间（scripts/gtp_skullroom.lua）
---   4. 可选：战斗时隐藏右上角小地图，按住地图键仍可唤出大地图（scripts/gtp_combatmap.lua）
---   5. 修复了大地图四周那圈突兀的黑边（MinimapAPI 的房间轮廓，scripts/gtp_mapoutline.lua）
+--   4. （已移除）初始房高亮与战斗跟随逻辑：初始房高亮改用 MinimapAPI 自带的
+--      HighlightStartRoom（原 gtp_combatmap.lua 的存在意义随之消失）；
+--      其余自绘元素（光标/光标房高亮/标记）均有按键与清房门控，战斗中本就不绘制
+--   5. （已移除）大地图黑边修复 gtp_mapoutline.lua——2026-10-03 定位收缩时删去，
+--      遇黑边请关 MinimapAPI 菜单里的 "Show Room Outlines"
 
 require("scripts.gtrep")
 require("scripts.gtp_rewindfix")
 require("scripts.gtp_delver")
 require("scripts.gtp_skullroom")
-require("scripts.gtp_combatmap")
-require("scripts.gtp_mapoutline")
