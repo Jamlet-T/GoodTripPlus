@@ -117,7 +117,15 @@ function gt:check_teleble(gid)
       if trd.VisitedCount == 0 then
         -- 未探索的房间：默认不允许。开启 AllowUnexploredNeighbor 后，
         -- 只要它紧挨着某个「已探索 + 从当前房间可达」的房间就放行。
-        if not gt:get_config_bool("AllowUnexploredNeighbor", false)
+        --
+        -- 例外：隐藏房（普通 / 超级 / 究极）必须炸开墙才能进去。
+        -- 蓝地图之类会把这些房间显示到地图上，此时若旁边已有探索过的房间，
+        -- 上面的「相邻放行」规则就会让你穿墙直接进屋，所以这里一律拦掉。
+        -- （已经进去过的隐藏房不受影响：那是 VisitedCount > 0 的另一个分支。）
+        local unexplored_type = trd.Data and trd.Data.Type
+        local is_secret_room = unexplored_type == 7 or unexplored_type == 8 or unexplored_type == 29
+        if is_secret_room
+        or not gt:get_config_bool("AllowUnexploredNeighbor", false)
         or not gt:has_reachable_explored_neighbor(gid, requireExploredPath) then
           return false
         end
@@ -980,7 +988,7 @@ local GT_STRINGS = {
     secret_markers_name = "Secret Room Candidate Markers",
     secret_markers_desc = "Marks where Secret / Super Secret / Ultra Secret rooms could be while holding the map key. Merged from Lazy Delver (MIT). Disable Lazy Delver itself to avoid drawing two sets of markers. Default: enabled",
     unexplored_name = "Teleport Into Unexplored Rooms",
-    unexplored_desc = "Allow teleporting into a room you have never entered, as long as it sits next to an explored room that is reachable from your current room (only when 'Disable Unconnected Teleport' is on does that reachability matter). Default: disabled",
+    unexplored_desc = "Allow teleporting into a room you have never entered, as long as it sits next to an explored room that is reachable from your current room (only when 'Disable Unconnected Teleport' is on does that reachability matter). Secret rooms are excluded: those still have to be blown open. Default: disabled",
     fools_skull_name = "Mark The Fool Skull Room",
     fools_skull_desc = "In Depths II a special skull always drops The Fool card when destroyed. This puts a skull icon on the room that contains it, so you can find it again. Only shown for rooms you have already visited, so it never spoils the layout. Default: enabled",
     hide_combat_name = "Hide Minimap In Combat",
@@ -1001,7 +1009,7 @@ local GT_STRINGS = {
     secret_markers_name = "显示隐藏房候选标记",
     secret_markers_desc = "按住地图键时标出隐藏房 / 超级隐藏房 / 究极隐藏房的可能位置（合并自 Lazy Delver，MIT）。请同时禁用 Lazy Delver 本体，否则会画出两套标记。默认开启。",
     unexplored_name = "允许传送到未探索的相邻房间",
-    unexplored_desc = "开启后可以传送到还没进去过、但紧邻某个已探索房间的位置；若同时开着「禁用未连通房间传送」，那个相邻的已探索房间还需要能从当前房间沿已探索路径抵达。默认关闭。",
+    unexplored_desc = "开启后可以传送到还没进去过、但紧邻某个已探索房间的位置；若同时开着「禁用未连通房间传送」，那个相邻的已探索房间还需要能从当前房间沿已探索路径抵达。隐藏房不在这个范围内——它们仍然必须炸开墙才能进去。默认关闭。",
     fools_skull_name = "标记深牢 II 的愚者骷髅房",
     fools_skull_desc = "深牢 II 里有一个特殊骷髅，炸掉后固定掉落愚者卡牌。开启后会在地图上给它所在的房间加一个骷髅图标，方便回头再找。只在你已经进过该房间后才显示，不会剧透本层布局。默认开启。",
     hide_combat_name = "战斗时隐藏小地图",
