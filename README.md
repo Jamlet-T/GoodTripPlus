@@ -106,24 +106,26 @@ MinimapAPI 的房间表（几十个房间，远小于 MinimapAPI 自己每帧的
 每次判定为清空时的 `rebuilt/lost/sameFloor` 与前后层身份、恢复了多少个房间）。
 
 > **诊断输出怎么看（2026-10-03 实测）**：
-> - **控制台命令在「不用 REPENTOGON 启动」时不可用**：本机实测，直接启动 `isaac-ng.exe`
->   （不带忏悔龙）时控制台就是原版 Rep+ 的「Repentance+ Console」，输入 `gtpdiag`、
->   乃至别的 mod 的命令（如 MinimapAPI 的 `mapitel`）**都不会触发 mod 的回调**
->   （`log.txt` 里连"命令触发了"的留痕都没有）→ 这是原版 Rep+ 控制台的行为，
->   不是本 mod 的问题。用 REPENTOGON 启动器进游戏时，它的控制台会正常派发自定义命令。
 > - **主力入口：按住地图键 + F4**（两种环境都可用）→ 判定直接画在**屏幕左上角**
 >   （15 秒后自动消失），同时写进 `log.txt`。（光标没启用时用当前房间作为目标；连按限流 20 帧）
 > - 把 `gtconfig.lua` 里 `gt.DebugMod` 改成 `true`：按住地图键瞄一下隐藏房再松手，
 >   会自动弹出同一份浮层，连按键都不用。**（默认关闭：不改这个开关时，正式游玩不会
 >   往 `log.txt` 写任何诊断行）**
-> - 命令仍然注册着（REPENTOGON 启动器 / 其它会派发的环境可用）：`gtpdiag [格子编号]`、
->   简写 `gtpd`；签名是 `(Mod, command, args)`——参数在第三个参数里，不是塞在 `command` 里；
+> - **控制台命令**（`gtpdiag [格子编号]`、`gtpd`）只在「用 REPENTOGON 启动器启动」时可用：
+>   实测不用它启动时，控制台是原版 Rep+ 的「Repentance+ Console」，**不把自定义命令
+>   派发给 mod**（我们的命令、别人的 `mapitel` 都零反应）。用 rgon 启动器时派发正常。
+> - ⚠️ **`MC_EXECUTE_CMD` 的回调不要返回字符串**：返回值会被引擎逐行打印到控制台，
+>   而本机环境下**返回多行字符串会当场闪退**（2026-10-03 实测：我们的输出打印完立刻
+>   `Lua stack trace:`（空栈）→ `Caught exception, writing minidump...`；同环境里
+>   MinimapAPI 的 `mapitel` 返回 nil 就正常）。所以本 mod 所有 `gtpdiag` 回调一律
+>   `return nil`，输出只走 `Isaac.ConsoleOutput`（逐行直写）与 `Isaac.DebugString`（落 log）；
+>   浮层延到下一帧渲染阶段再弹，避免在命令处理阶段碰字体资源。
+> - 命令签名是 `(Mod, command, args)`——参数在第三个参数里，不是塞在 `command` 里；
 >   大小写、前后空格、整行都做了容错。
 > - 启动打两行：`[GoodTripPlus] vX.Y.Z loaded (console command: gtpdiag)` 与
 >   `[GoodTripPlus] ready: repentogon=<是否在跑> postHudRender=<有没有> render=<走的哪条回调>`
 >   —— 确认「改完重启了没、哪一版、在哪个环境」看这两行。
-> - 三个通道（屏幕浮层 / 控制台 `ConsoleOutput` / `log.txt` 的 `DebugString`）都给，
->   诊断回调统统包了 `pcall`，诊断自身出错只打一行 ERROR，不会把游戏带崩。
+> - 诊断回调统统包了 `pcall`：Lua 侧出错只打一行 ERROR，不会把游戏带崩。
 
 命中修复时控制台会直接打印：
 

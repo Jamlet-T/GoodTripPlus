@@ -1,7 +1,7 @@
 gt = RegisterMod("GoodTripPlus", 1)
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "1.5.6"
+gt.VERSION = "1.5.7"
 pcall(function()
   Isaac.ConsoleOutput("[GoodTripPlus] v" .. gt.VERSION ..
     " loaded (console command: gtpdiag)\n")
@@ -1182,6 +1182,11 @@ function gt:tab_action()
 end
 --
 function gt:step()
+    -- 控制台命令请求的浮层延到这一帧（渲染阶段）才弹：命令处理阶段不碰 Font/资源
+    if gt.diag_pending_overlay then
+      gt:show_diag_overlay(gt.diag_pending_overlay)
+      gt.diag_pending_overlay = nil
+    end
     --a wall can open under the player's feet (bomb, red key), so sweep every
     --tick; but not mid-transition, when the live room and the cached descriptor disagree
     if level:GetCurrentRoomDesc().SafeGridIndex == crid then
@@ -1677,11 +1682,36 @@ function gt:console_dump_diag(gid, tag)
   return result
 end
 
+-- 统一诊断出口：控制台命令、TAB+F4、DebugMod 自动 dump 都走这里。
+-- ⚠️ 返回值一律 nil：MC_EXECUTE_CMD 的返回值会被引擎逐行打印到控制台，
+-- 而本机（REPENTOGON 的 ImGui 控制台）**返回多行字符串会当场闪退**
+-- （2026-10-03 实测：日志里我们的输出打印完立刻 "Lua stack trace:"（空栈）+
+-- "Caught exception, writing minidump..."；同一环境里 MinimapAPI 的 mapitel
+-- 返回 nil 就能正常工作）。所以只走 ConsoleOutput（逐行直写，安全）+ DebugString，
+-- 不碰返回值。defer_overlay：控制台回调里不立刻建 Font（免得在命令处理阶段
+-- 碰资源），改成下一帧走渲染阶段再弹浮层。
+function gt:console_dump_diag(gid, tag, defer_overlay)
+  local ok, result = pcall(gt.dump_tele_diag, gt, gid)
+  if not ok then
+    result = "teleDiag ERROR: " .. tostring(result)
+  end
+  local name = "GoodTripPlus " .. (tag or "gtpdiag")
+  result = "===== " .. name .. " BEGIN =====\n" .. tostring(result) ..
+    "\n===== " .. name .. " END ====="
+  gt_console_out(result)
+  Isaac.DebugString(result)
+  if defer_overlay then
+    gt.diag_pending_overlay = result
+  else
+    gt:show_diag_overlay(result)
+  end
+end
+
 -- 控制台诊断命令：gtpdiag [格子编号]（缺省 = 光标所在格子）、gtmapdiag；gtpd 是简写。
--- 三个输出通道一起用，照顾不同控制台：
---   return 串      —— 原版控制台会回显（REPENTOGON 的 ImGui 控制台不回显返回串）
---   ConsoleOutput  —— 逐行直写控制台输出（MinimapAPI 的 mapitel 也是这么做的）
---   DebugString    —— 落 log.txt，控制台看不到时也能查（最可靠的一条）
+-- 输出通道（**不要返回字符串**，见上）：
+--   ConsoleOutput  —— 逐行直写控制台输出（MinimapAPI 的 mapitel 也是这么做的，安全）
+--   DebugString    —— 落 log.txt（最可靠的一条）
+--   （浮层延到下一帧渲染阶段弹，见 defer_overlay）
 -- 两个坑：①回调签名是 (Mod, command, args)，command 只有命令词，格子编号在 args 里；
 -- ②原版控制台要**再按一次回车 / 输入别的**才会把这批行刷出来，看到「没输出」先别急。
 gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command, args)
@@ -1697,16 +1727,17 @@ gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command, args)
   -- 「没输出」时无从判断到底是没触发还是没显示
   Isaac.DebugString("[GoodTripPlus] v" .. tostring(gt.VERSION) ..
     " console command: '" .. tostring(command) .. "' args=" .. tostring(args))
+  -- 全部 return nil：返回值会被引擎拿去打印，多行串在本机环境会闪退
   if cmd == "gtmapdiag" then
     local ok, result = pcall(gt.dump_map_diagnostics, gt)
     local text = ok and "gtmapdiag: done (details in log.txt)"
       or ("gtmapdiag ERROR: " .. tostring(result))
     gt_console_out(text)
     Isaac.DebugString(text)
-    return text
+    return
   end
   local gid = rest ~= "" and tonumber(rest) or nil
-  return gt:console_dump_diag(gid, "gtpdiag v" .. tostring(gt.VERSION))
+  gt:console_dump_diag(gid, "gtpdiag v" .. tostring(gt.VERSION), true)
 end)
 --
 -- Draw the cursor on whichever render callback MinimapAPI itself draws its

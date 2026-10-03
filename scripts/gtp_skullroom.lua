@@ -301,10 +301,18 @@ gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command)
   lines[#lines + 1] = "skullRoom.rooms={" .. table.concat(ids, ",") .. "}"
   return table.concat(lines, "\n")
   end)
+  -- ⚠️ 不返回字符串：MC_EXECUTE_CMD 的返回值会被引擎逐行打印到控制台，
+  -- 多行串在本机（REPENTOGON 的 ImGui 控制台）会当场闪退（2026-10-03 实测：
+  -- 输出打印完立刻 "Lua stack trace:"（空栈）+ "Caught exception, writing minidump..."；
+  -- 同环境 MinimapAPI 的 mapitel 返回 nil 就正常）。改逐行 ConsoleOutput + DebugString，
+  -- 回调返回 nil。
   if not ok then
-    return "skullRoom ERROR: " .. tostring(diag)
+    diag = "skullRoom ERROR: " .. tostring(diag)
   end
-  return diag
+  for line in tostring(diag):gmatch("[^\n]+") do
+    Isaac.ConsoleOutput("[GoodTripPlus] " .. line .. "\n")
+    Isaac.DebugString("[GoodTripPlus] " .. line)
+  end
 end)
 
 GTP_SKULL.stats = stats
