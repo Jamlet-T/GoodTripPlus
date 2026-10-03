@@ -32,3 +32,7 @@ gt.ShowSecretMarkers = true
 
 -- 深牢 II 的「标记骷髅」房间标记（炸掉固定掉愚者卡牌的那个骷髅）
 gt.FoolsSkullRoom = true
+
+-- 当前房间里有「牌意解读 / 天堂阶梯」生成的入口（传送门 / 台阶）时禁止传送
+-- （这两个入口一离开房间就消失，禁传送免得误触顶掉效果；房间里的入口没了自动解除）
+gt.LockStartRoomItems = true

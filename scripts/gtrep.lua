@@ -1,7 +1,7 @@
 gt = RegisterMod("GoodTripPlus", 1)
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "1.6.0"
+gt.VERSION = "1.6.1"
 pcall(function()
   Isaac.ConsoleOutput("[GoodTripPlus] v" .. gt.VERSION ..
     " loaded (console command: gtpdiag)\n")
@@ -43,6 +43,9 @@ local mmp_highlight_gid = nil
 local secret_diag_logged = {}
 -- 上一次手动 dump 的帧号（F4 连按限流，避免刷屏）
 local last_diag_frame = -1000
+-- 注：牌意解读 / 天堂阶梯 的传送禁令早期版本靠「本层是否离开过初始房间」的状态判断，
+-- 2026-10-03 起改成直接看房间里有没有它们的入口实体（gt:has_start_room_entrance），
+-- 不再需要任何层/房间状态。
 -- ===== 门图与邻接基础设施：忠实移植自 GoodTrip [Fixed]（scripts/floor.lua）=====
 -- door graph, learned one room at a time: grid adjacency alone cannot tell a
 -- doorway from a secret room's unbombed wall. Per dimension: the mirror world
@@ -451,6 +454,61 @@ function gt:curse_toll_free(gid, by_inner_door, room_reloads)
     return bare == true
 end
 
+-- 牌意解读 / 天堂阶梯 生成的「入口」实体（2026-10-03 按用户建议改成直接看实体）：
+--   · 牌意解读（Card Reading，660）的彩色传送门：
+--       ENTITY_EFFECT + EffectVariant.PORTAL_TELEPORT(161)
+--       （subtype 编码目标 —— 1=boss 红、宝箱黄、隐藏蓝、商店绿；这里不细分）
+--   · 天堂阶梯（Stairway，586）的高台阶：ENTITY_EFFECT + EffectVariant.TALL_LADDER(156)
+-- 这两个实体**只在道具生成了入口的那个房间里存在，玩家一离开房间就随房间一起销毁** ——
+-- 所以「房间里有没有这个实体」就是最直接、也最准的判据：不必再去判断哪间算初始房间、
+-- 也不必记录本层有没有离开过（离开=实体没了=自动放行），而且天然覆盖回溯线（回溯线里
+-- 门生成在「通往下一层的那个起始房间」，不是玩家进门的那间 boss 房）。
+local START_ROOM_ENTRANCES = {
+  [EffectVariant.PORTAL_TELEPORT] = true,
+  [EffectVariant.TALL_LADDER] = true,
+}
+
+-- 房间里是否存在「离开就会消失的道具入口」
+function gt:has_start_room_entrance()
+    local r = Game():GetRoom()
+    if not r then
+      return false
+    end
+    local list = r:GetEntities()
+    if not list then
+      return false
+    end
+    for i = 0, list.Size - 1 do
+      local e = list:Get(i)
+      if e and e.Type == EntityType.ENTITY_EFFECT
+          and START_ROOM_ENTRANCES[e.Variant] then
+        return true
+      end
+    end
+    return false
+end
+
+-- 持有「牌意解读 / 天堂阶梯」、且当前房间里真有一枚它们的入口实体时，禁止传送：
+-- 这个入口就是这两个道具的核心效果，玩家一离开房间它就会消失，禁传送只是不让误触
+-- 把它顶掉。离开房间后实体消失，禁令自动解除，不需要任何层/房间状态。
+-- 可用 MCM 的 LockStartRoomItems 关闭（默认开）。
+function gt:start_room_lock()
+    if not gt:get_config_bool("LockStartRoomItems", true) then
+      return false
+    end
+    -- 先说持有道具：房间里出现同名特效（例如玩家自己传送时的漩涡）时，
+    -- 这一条能挡掉误判，也省下一次实体遍历。想纯按实体判定就把这段删掉。
+    local p = player or Isaac.GetPlayer(0)
+    if not p then
+      return false
+    end
+    if not (p:HasCollectible(CollectibleType.COLLECTIBLE_CARD_READING)
+        or p:HasCollectible(CollectibleType.COLLECTIBLE_STAIRWAY)) then
+      return false
+    end
+    return gt:has_start_room_entrance()
+end
+
 function gt:check_teleble(gid)
     if gid == -99
     or (gt:get_config_bool("FollowCurseOfLost", true)
@@ -458,6 +516,9 @@ function gt:check_teleble(gid)
       return false
     elseif debug and grid_room[gid] then
       return true
+    elseif gt:start_room_lock() then
+      -- 牌意解读 / 天堂阶梯：刚进层、还没离开初始房间 → 禁止传送（别顶掉道具效果）
+      return false
     end
     local cid = crd.SafeGridIndex
     if grid_room[cid] == nil or not crd.Clear then
@@ -570,7 +631,14 @@ function gt:teleport_to_grid_index(gid)
         return
 			end
 		end
-    if crd.Data.Name == "Mom" or crd.Data.Name == "Ultra Greed" then
+    -- Mom / Ultra Greed 房：Fixed 里一律禁传（连清完怪之后也禁），防的是它们清怪后的
+    -- 后续流程被传送打断（Mom 房的门、Ultra Greed 房的奖杯）。但**回溯线（The Ascent）里
+    -- 的 Mom 房只是路过** —— boss 早在正着走时就打完了（Clear=true），房间里没有任何后续
+    -- 流程，拦它反而把正常传送拦掉（用户 2026-10-03 实测：回溯线 Depths II 的 boss 房能
+    -- 呼出光标、能移到格子，松手却只响失败音；dump 显示 startRoomLock=false / clear=true /
+    -- type=5 / 房间里没有 867，唯一命中的就是这一条）。所以回溯线上放行这一条。
+    if not level:IsAscent()
+        and (crd.Data.Name == "Mom" or crd.Data.Name == "Ultra Greed") then
       gt:tele_failed()
       return
     elseif grid_room[gid].Data.Type == 11 and not grid_room[gid].ChallengeDone then
@@ -1307,6 +1375,8 @@ local GT_STRINGS = {
     secret_markers_desc = "Marks where Secret / Super Secret / Ultra Secret rooms could be while holding the map key. Merged from Lazy Delver (MIT). Disable Lazy Delver itself to avoid drawing two sets of markers. Default: enabled",
     fools_skull_name = "Mark The Fool Skull Room",
     fools_skull_desc = "In Depths II a special skull always drops The Fool card when destroyed. This puts a skull icon on the room that contains it, so you can find it again. Only shown for rooms you have already visited, so it never spoils the layout. Default: enabled",
+    lock_start_room_name = "Lock Teleport While A Card Reading / Stairway Entrance Is Here",
+    lock_start_room_desc = "Card Reading portals and Stairway ladders are destroyed the instant you leave the room they were created in. While such an entrance is present in your current room, teleporting is disabled so a stray press cannot waste it. Nothing else is affected, and leaving the room lifts the lock immediately. Default: enabled",
   },
   zh_hans = {
     title = "GoodTripPlus",
@@ -1330,6 +1400,8 @@ local GT_STRINGS = {
     secret_markers_desc = "按住地图键时标出隐藏房 / 超级隐藏房 / 究极隐藏房的可能位置（合并自 Lazy Delver，MIT）。请同时禁用 Lazy Delver 本体，否则会画出两套标记。默认开启。",
     fools_skull_name = "标记深牢 II 的愚者骷髅房",
     fools_skull_desc = "深牢 II 里有一个特殊骷髅，炸掉后固定掉落愚者卡牌。开启后会在地图上给它所在的房间加一个骷髅图标，方便回头再找。只在你已经进过该房间后才显示，不会剧透本层布局。默认开启。",
+    lock_start_room_name = "房间里有牌意解读 / 天堂阶梯入口时禁用传送",
+    lock_start_room_desc = "牌意解读生成的传送门、天堂阶梯生成的台阶，会在你离开它们所在房间的瞬间消失。只要当前房间里还有这种入口，传送就整体禁用，避免误触把它顶掉；一离开房间（入口没了）立刻恢复正常。默认开启。",
   },
 }
 -- A few plausible spellings/casings for each supported language, since the
@@ -1437,6 +1509,13 @@ gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
       L.fools_skull_name,
       L.fools_skull_desc
     )
+    ModConfigMenu.AddBooleanSetting(
+      "GoodTripPlus", nil,
+      "LockStartRoomItems",
+      true,
+      L.lock_start_room_name,
+      L.lock_start_room_desc
+    )
   end
 end)
 gt:AddCallback(ModCallbacks.MC_POST_RENDER, gt.step)
@@ -1467,10 +1546,59 @@ function gt:dump_tele_diag(gid)
     tostring(gt:is_grid_room_displayed(gid)) ..
     " minapiFlags=" .. tostring(gt:get_minapi_display_flags(trd.ListIndex)))
   p(string.format(
-    "  current room: sgi=%d clear=%s swept=%s doorsRead=%s",
-    crd.SafeGridIndex, tostring(crd.Clear),
+    "  current room: sgi=%d name=%s clear=%s swept=%s doorsRead=%s",
+    crd.SafeGridIndex, tostring(crd.Data and crd.Data.Name), tostring(crd.Clear),
     tostring(dswept[crd.SafeGridIndex]),
     tostring(dlink[crd.SafeGridIndex] ~= nil)))
+  -- 「准入判定过了、松手却响失败音」的预检：把 gt:teleport_to_grid_index() 开头那两条
+  -- 静态失败规则在这里点名（Mom/Ultra Greed 房名规则、Mother's Shadow 在场规则），
+  -- 免得只看到 verdict=可传送 却传不动（用户 2026-10-03 就是被 Mom 房名规则拦的）。
+  -- 只覆盖这两条；挑战房血量、FairTripTime 距离那两条不在内。
+  do
+    local why = nil
+    if not level:IsAscent()
+        and (crd.Data.Name == "Mom" or crd.Data.Name == "Ultra Greed") then
+      why = "Mom/Ultra Greed room rule"
+    end
+    for _, en in pairs(Isaac.GetRoomEntities()) do
+      if en.Type == EntityType.ENTITY_MOTHERS_SHADOW then
+        why = (why and (why .. " + ") or "") .. "Mother's Shadow (867) is in this room"
+        break
+      end
+    end
+    p("  tripPrecheck: " ..
+      (why and ("BLOCKED at landing by " .. why) or "no landing-block rule matched"))
+  end
+  -- 道具入口禁令（牌意解读 / 天堂阶梯）：每一项都拆开打，方便看出是哪一步拦下的
+  p("  startRoomLock=" .. tostring(gt:start_room_lock()) ..
+    " (hasEntrance=" .. tostring(gt:has_start_room_entrance()) ..
+    " curType=" .. tostring(crd.Data and crd.Data.Type) ..
+    " startGid=" .. tostring(level:GetStartingRoomIndex()) ..
+    " ascent=" .. tostring(level:IsAscent()) ..
+    " cardReading=" .. tostring(player and player:HasCollectible(
+      CollectibleType.COLLECTIBLE_CARD_READING)) ..
+    " stairway=" .. tostring(player and player:HasCollectible(
+      CollectibleType.COLLECTIBLE_STAIRWAY)) .. ")")
+  -- 房间里出现过哪些实体（type/variant，去重，最多 16 项）：既能看清初始房里道具入口
+  -- 长什么样（牌意解读的传送门 / 天堂阶梯的台阶），也是以后改「按实体判定」的第一手数据
+  do
+    local list = room:GetEntities()
+    local seen, uniq = {}, {}
+    if list then
+      for i = 0, list.Size - 1 do
+        local e = list:Get(i)
+        if e then
+          local k = tostring(e.Type) .. "/" .. tostring(e.Variant)
+          if not seen[k] then
+            seen[k] = true
+            uniq[#uniq + 1] = k
+            if #uniq >= 16 then break end
+          end
+        end
+      end
+    end
+    p("  room entity types=" .. (#uniq > 0 and table.concat(uniq, " ") or "none"))
+  end
   -- 当前房间的每一扇门：隐藏门炸开后 variant 会从 7 变成 8、busted 变 true，
   -- 这一行既是「洞口开没开」的现场证据，也是判断门图该不该记录它的依据
   for i = 0, 7 do
