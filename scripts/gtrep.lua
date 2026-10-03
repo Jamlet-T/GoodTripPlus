@@ -31,6 +31,8 @@ local n_room_num = 0
 local mmp_ctrl = false
 local mmp_ctrl_pos = Vector(0, 0)
 local mmp_highlight_gid = nil
+-- 隐藏房现场诊断的去重表（按「层 + 目标格」，new_level 清空）
+local secret_diag_logged = {}
 -- ===== 门图与邻接基础设施：忠实移植自 GoodTrip [Fixed]（scripts/floor.lua）=====
 -- door graph, learned one room at a time: grid adjacency alone cannot tell a
 -- doorway from a secret room's unbombed wall. Per dimension: the mirror world
@@ -119,6 +121,52 @@ local function door_graph()
     return door_link[d], door_swept[d]
 end
 
+-- 本 mod 对 Fixed 的一处偏离（2026-10-03，带理由）：
+-- 隐藏房的墙在游戏里也是一扇门（variant = DoorVariant.DOOR_HIDDEN），而且
+-- **炸开之后变体不变**，只有门自己的 busted 状态能区分「墙还在」与「已炸开」。
+-- Fixed 只看 variant，于是已炸开的洞口永远进不了门图 → 隐藏房连带它的四条边
+-- 全被判成「没有通路」→ 进不去。这里补上 busted 这一条判据：门是隐藏门但已经
+-- 被炸开（或已经不能被再炸开）时也算通路。语义与 Fixed 的意图一致（它自己的
+-- 注释写着「a wall bombed since entering would still read as solid」），只是
+-- 把「已炸开」这个状态真的读了出来。
+local function hidden_door_open(door)
+    -- 「这面墙已经开了」的判据（两个信号，任一成立即可，但都要有旁证）：
+    --   busted == true                      —— 门已经被炸开；
+    --   isOpen == true 且 canBlowOpen == false —— 洞口是开着的、而且再也炸不出
+    --   东西了（TryBlowOpen 可以连调两次，炸开分两段，所以不能只看 busted）。
+    -- 单独一个信号都可能误报（误报会把没炸开的墙当成通路，v1.3.2 修掉的
+    -- 「穿墙传进隐藏房」就会回来），所以第二个信号要求两条同时成立。
+    -- 拿不到这些属性（老版本 / 调用报错）时退回只看 busted。
+    local busted, can_blow, is_open = false, nil, nil
+    pcall(function()
+      if door.IsBusted then
+        busted = door:IsBusted()
+      else
+        busted = door.Busted
+      end
+      if door.CanBlowOpen then
+        can_blow = door:CanBlowOpen()
+      end
+      if door.IsOpen then
+        is_open = door:IsOpen()
+      end
+    end)
+    if busted == true then
+      return true
+    end
+    return is_open == true and can_blow == false
+end
+
+-- 必须炸开（或用钥匙打开）墙才能进的三种隐藏房：
+-- 7 = ROOM_SECRET、8 = ROOM_SUPERSECRET、29 = ROOM_ULTRASECRET（红钥匙房）
+function gt:is_secret_room(rd)
+    if not rd or not rd.Data then
+      return false
+    end
+    local t = rd.Data.Type
+    return t == 7 or t == 8 or t == 29
+end
+
 --read the current room's doors (the only room the game answers for) into the
 --graph both ways. DOOR_HIDDEN is an unbombed wall, so no passage; everything
 --else, locked included, is walkable. All read live so nothing is from different moments.
@@ -131,20 +179,24 @@ function gt:sweep_doors()
     swept[here] = true
     for i = 0, 7 do
       local door = live:GetDoor(i)
-      if door and door.Desc.Variant ~= DoorVariant.DOOR_HIDDEN then
-        local there = lvl:GetRoomByIdx(door.TargetRoomIndex, -1).SafeGridIndex
-        --curse-room spikes are read off the door itself: Flat File strips them
-        --once and for good, so the trinket in hand says nothing about this door
-        if door.TargetRoomType == RoomType.ROOM_CURSE then
-          curse_bare_outside[there] = door.VarData ~= 0
-        elseif live:GetType() == RoomType.ROOM_CURSE then
-          curse_bare_inside[here] = door.VarData ~= 0
-        end
-        if there ~= here then
-          --this end knows its slot; the far end gets a bare mark until its own turn
-          link[here][there] = i
-          link[there] = link[there] or {}
-          if link[there][here] == nil then link[there][here] = true end
+      --DOOR_HIDDEN is an unbombed wall -- unless a bomb has since opened it
+      if door and (door.Desc.Variant ~= DoorVariant.DOOR_HIDDEN or hidden_door_open(door)) then
+        local tdes = lvl:GetRoomByIdx(door.TargetRoomIndex, -1)
+        if tdes then
+          local there = tdes.SafeGridIndex
+          --curse-room spikes are read off the door itself: Flat File strips them
+          --once and for good, so the trinket in hand says nothing about this door
+          if door.TargetRoomType == RoomType.ROOM_CURSE then
+            curse_bare_outside[there] = door.VarData ~= 0
+          elseif live:GetType() == RoomType.ROOM_CURSE then
+            curse_bare_inside[here] = door.VarData ~= 0
+          end
+          if there ~= here then
+            --this end knows its slot; the far end gets a bare mark until its own turn
+            link[here][there] = i
+            link[there] = link[there] or {}
+            if link[there][here] == nil then link[there][here] = true end
+          end
         end
       end
     end
@@ -205,8 +257,11 @@ function gt:check_neigh_connected(trd, cond)
     local tid = trd.SafeGridIndex
     if (trd.DisplayFlags & 1) ~= 0 then
       --a red-key room stands open already, whatever it turned out to hold
+      --隐藏房也放进来：进门的那道墙开没开由调用方的门图（rooms_linked）说了算，
+      --所以「已炸开的洞口可以进、还封着的墙进不去」两件事各自成立
       if (trd.VisitedCount == 0 or not trd.Clear) and
         trd.Flags & RoomDescriptor.FLAG_RED_ROOM == 0 and
+        not gt:is_secret_room(trd) and
         trd.Data.Type ~= 1 and trd.Data.Type ~= 5 and
         trd.Data.Type ~= 6 and trd.Data.Type ~= 13 and
         not (((stage == 1 and level:GetStageType() < StageType.STAGETYPE_REPENTANCE) or room:IsMirrorWorld())
@@ -441,6 +496,18 @@ function gt:check_teleble(gid)
           and (not reach or reach[trd.SafeGridIndex] == true) then
         --AllowNeighborRoom only widens this: an Emperor'd start room has no cleared neighbour
         return true
+      elseif gt:is_secret_room(trd) and trd.VisitedCount > 0 and trd.Clear then
+        -- 本 mod 对 Fixed 的偏离（2026-10-03）：进过、已清的隐藏房。
+        -- 它的墙肯定已经炸开了一个口，但那个口子未必在门图里（隐藏门炸开后
+        -- variant 不变，见 hidden_door_open），于是上面的洪泛走不进去、房间也
+        -- 就永远不在 reach 岛上。游戏自己的落点不看你是从哪面墙进来的（Fixed
+        -- 自己的注释：「an unbombed secret room's included」），所以只要有一个
+        -- 已探索+已清+可达的房间贴着它，就放行。
+        -- 没进去过的隐藏房不走这条路：它们仍要求门图里有真实通路（洞口已开）。
+        return gt:check_neigh_connected(trd, function(rd)
+          return (rd.DisplayFlags & 1 ~= 0) and rd.VisitedCount > 0 and rd.Clear
+            and (not reach or reach[rd.SafeGridIndex] == true)
+        end)
       elseif not gt:get_config_bool("AllowNeighborRoom", true) then
         return false
       end
@@ -1147,6 +1214,7 @@ function gt:step()
         mmp_ctrl = false
         mmp_highlight_gid = nil
         local mgid = gt:get_pos_grid_index(mmp_ctrl_pos)
+        gt:auto_log_secret_diag(mgid)
         if (gt:check_teleble(mgid) and tele_cd < 1) then
           if crd.Data.Type == 7 or (crd.Data.Type == 8 and Game():IsGreedMode()) then
             gt:pre_secret_room()
@@ -1210,6 +1278,7 @@ function gt:new_level()
     gt:get_room_neighbours()
     n_room_num = (level:GetRooms()).Size
     secret_pre_room_id = {}
+    secret_diag_logged = {}
     --a new floor: everything learned about the old one goes
     door_link = {}
     door_swept = {}
@@ -1378,9 +1447,196 @@ end)
 gt:AddCallback(ModCallbacks.MC_POST_RENDER, gt.step)
 gt:AddCallback(ModCallbacks.MC_POST_NEW_ROOM, gt.new_room)
 gt:AddCallback(ModCallbacks.MC_POST_NEW_LEVEL, gt.new_level)
+-- 传送准入逐关卡诊断：gtpdiag [格子编号]（缺省 = 光标所在格子）。
+-- 站在当前房间、把光标移到传不进去的房间上，跑 gtpdiag，
+-- 输出会标出目标死在哪一道判定上。
+function gt:dump_tele_diag(gid)
+  local L = {}
+  local function p(s) L[#L + 1] = s end
+  if not gid or grid_room[gid] == nil then
+    gid = gt:get_pos_grid_index(mmp_ctrl_pos)
+  end
+  p("teleDiag: target gid=" .. tostring(gid))
+  local trd = grid_room[gid]
+  if not trd then
+    p("  NOT in grid_room (cursor not on any displayed room cell)")
+    return table.concat(L, "\n")
+  end
+  local dlink, dswept = door_graph()
+  p(string.format(
+    "  target: type=%d shape=%d visited=%d clear=%s dispFlags=0x%x bit1=%s sgi=%d gi=%d list=%d",
+    trd.Data.Type, trd.Data.Shape, trd.VisitedCount, tostring(trd.Clear),
+    trd.DisplayFlags, (trd.DisplayFlags & 1) ~= 0 and 1 or 0,
+    trd.SafeGridIndex, trd.GridIndex, trd.ListIndex))
+  p("  displayed(cursor can hit)=" ..
+    tostring(gt:is_grid_room_displayed(gid)) ..
+    " minapiFlags=" .. tostring(gt:get_minapi_display_flags(trd.ListIndex)))
+  p(string.format(
+    "  current room: sgi=%d clear=%s swept=%s doorsRead=%s",
+    crd.SafeGridIndex, tostring(crd.Clear),
+    tostring(dswept[crd.SafeGridIndex]),
+    tostring(dlink[crd.SafeGridIndex] ~= nil)))
+  -- 当前房间的每一扇门：隐藏门炸开后 variant 仍是 7，只有 busted 能区分
+  -- 「墙还在」与「已炸开」，这一行就是判断洞口开没开的现场证据
+  for i = 0, 7 do
+    local door = room:GetDoor(i)
+    if door then
+      local busted, canblow, isopen = "-", "-", "-"
+      pcall(function()
+        busted = tostring(door.IsBusted and door:IsBusted() or door.Busted)
+        canblow = tostring(door.CanBlowOpen and door:CanBlowOpen())
+        isopen = tostring(door:IsOpen())
+      end)
+      p("  door slot=" .. i ..
+        " variant=" .. tostring(door.Desc and door.Desc.Variant) ..
+        " busted=" .. busted .. " canBlowOpen=" .. canblow ..
+        " isOpen=" .. isopen ..
+        " targetIdx=" .. tostring(door.TargetRoomIndex) ..
+        " targetType=" .. tostring(door.TargetRoomType))
+    end
+  end
+  -- 本层全部隐藏房
+  for g, rd in pairs(grid_room) do
+    if gt:is_secret_room(rd) then
+      p("  secret room gid=" .. tostring(g) ..
+        " list=" .. tostring(rd.ListIndex) ..
+        " sgi=" .. tostring(rd.SafeGridIndex) ..
+        " visited=" .. tostring(rd.VisitedCount) ..
+        " clear=" .. tostring(rd.Clear) ..
+        " flags=" .. tostring(rd.Flags) ..
+        " dispFlags=" .. tostring(rd.DisplayFlags))
+    end
+  end
+  -- 可达岛
+  local reach = gt:get_config_bool("FairTripPath", true) and gt:get_reachable_rooms() or nil
+  if reach then
+    local n = 0
+    for _ in pairs(reach) do n = n + 1 end
+    p("  reach island: size=" .. n ..
+      " startInReach=" .. tostring(reach[crd.SafeGridIndex] == true) ..
+      " targetInReach=" .. tostring(reach[trd.SafeGridIndex] == true) ..
+      " (target needs VisitedCount>0+Clear+door-path to be an island member)")
+  else
+    p("  reach island: OFF (FairTripPath=false)")
+  end
+  -- 目标四邻逐个体检（widen 通道 C 的证据链）
+  local tid = trd.SafeGridIndex
+  local col = tid % 13
+  local offs = {tid - 13, tid + 13}
+  if col > 0 then offs[#offs + 1] = tid - 1 end
+  if col < 12 then offs[#offs + 1] = tid + 1 end
+  for _, nid in ipairs(offs) do
+    local rd = grid_room[nid]
+    if rd then
+      p(string.format(
+        "  neighbor gid=%d: type=%d visited=%d clear=%s dispBit1=%s inReach=%s linkedToTarget=%s",
+        nid, rd.Data.Type, rd.VisitedCount, tostring(rd.Clear),
+        (rd.DisplayFlags & 1) ~= 0 and 1 or 0,
+        reach and tostring(reach[rd.SafeGridIndex] == true) or "-",
+        tostring(gt:rooms_linked(rd.SafeGridIndex, trd.SafeGridIndex))))
+    end
+  end
+  -- 按当前配置给出结论
+  if gt:get_config_bool("AllowAnyRoom", false) then
+    p("  verdict: AllowAnyRoom=on -> should be teleportable")
+  elseif trd.VisitedCount > 0 and trd.Clear
+      and (not reach or reach[trd.SafeGridIndex] == true) then
+    p("  verdict: visited+clear+inReach -> should be teleportable (channel B)")
+  elseif gt:is_secret_room(trd) and trd.VisitedCount > 0 and trd.Clear then
+    local ok = gt:check_neigh_connected(trd, function(rd)
+      return (rd.DisplayFlags & 1 ~= 0) and rd.VisitedCount > 0 and rd.Clear
+        and (not reach or reach[rd.SafeGridIndex] == true)
+    end)
+    p("  verdict: secret room already entered -> " .. tostring(ok) ..
+      (ok and " should be teleportable (secret-room branch: any cleared reachable neighbour)"
+          or " NOT teleportable -- no cleared, reachable room touches it at all"))
+  elseif not gt:get_config_bool("AllowNeighborRoom", true) then
+    p("  verdict: AllowNeighborRoom=off -> NOT teleportable (this is the blocking gate)")
+  else
+    local ok = gt:check_neigh_connected(trd, function(rd)
+      return (rd.DisplayFlags & 1 ~= 0) and rd.VisitedCount > 0 and rd.Clear
+        and (not reach or (reach[rd.SafeGridIndex]
+          and gt:rooms_linked(rd.SafeGridIndex, trd.SafeGridIndex)))
+    end)
+    p("  verdict: check_neigh_connected=" .. tostring(ok) ..
+      (ok and " -> should be teleportable (channel C)" or " -> NOT teleportable (channel C failed; see neighbor evidence above)"))
+  end
+  return table.concat(L, "\n")
+end
+
+-- 传送现场自动落盘：光标停在隐藏房上（或干脆落不到任何格子上）时，把一次完整的
+-- 准入判定写进 log.txt。复现「炸开的隐藏房传不进去」只需按住 TAB 瞄一下、松手，
+-- 不必手输控制台命令；按「层 + 目标格」去重，不会刷屏。
+-- 本房间紧邻的隐藏房格子（光标落不到格子时用它当目标，报告才有内容）
+function gt:adjacent_secret_gid()
+  local cells = {}
+  for cell, rd in pairs(grid_room) do
+    if rd.ListIndex == crd.ListIndex then
+      cells[cell] = true
+    end
+  end
+  for cell in pairs(cells) do
+    local col = cell % 13
+    for _, step in ipairs({ -13, 13, -1, 1 }) do
+      if not ((step == -1 and col == 0) or (step == 1 and col == 12)) then
+        if gt:is_secret_room(grid_room[cell + step]) then
+          return cell + step
+        end
+      end
+    end
+  end
+  return nil
+end
+
+function gt:auto_log_secret_diag(gid)
+  if gid == -99 then
+    gid = gt:adjacent_secret_gid()
+    if not gid then return end
+  end
+  if not gt:is_secret_room(grid_room[gid]) then
+    return
+  end
+  local key = tostring(level:GetStage()) .. "_" .. tostring(crd.SafeGridIndex) ..
+    "_" .. tostring(gid)
+  if secret_diag_logged[key] then
+    return
+  end
+  secret_diag_logged[key] = true
+  local ok, result = pcall(gt.dump_tele_diag, gt, gid)
+  Isaac.DebugString("[GoodTripPlus][secretDiag] " ..
+    (ok and result or ("ERROR: " .. tostring(result))))
+end
+
+-- MinimapAPI 对某 ListIndex 房间的显示旗标（诊断用；查不到返回 nil）
+function gt:get_minapi_display_flags(listIndex)
+  if not MinimapAPI then return nil end
+  local map = MinimapAPI:GetLevel(gt:get_current_dimension())
+  if not map then return nil end
+  for _, mapRoom in ipairs(map) do
+    if mapRoom.Descriptor and mapRoom.Descriptor.ListIndex == listIndex then
+      return mapRoom:GetDisplayFlags()
+    end
+  end
+  return nil
+end
+
 gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command)
-  if command:lower() == "gtmapdiag" then
+  if command and command:lower() == "gtmapdiag" then
     gt:dump_map_diagnostics()
+  elseif command then
+    local arg = command:match("^gtpdiag%s+(-?%d+)$")
+    if command:lower() == "gtpdiag" or arg then
+      --pcall 包住：诊断自身出错时把错误打出来，而不是整段输出静默消失。
+      --REPENTOGON 的控制台不回显 EXECUTE_CMD 的返回串，所以除了 return
+      --还要 ConsoleOutput 直写控制台、DebugString 落到 log.txt，双保险。
+      local ok, result = pcall(gt.dump_tele_diag, gt, arg and tonumber(arg) or nil)
+      if not ok then
+        result = "teleDiag ERROR: " .. tostring(result)
+      end
+      Isaac.ConsoleOutput(tostring(result) .. "\n")
+      Isaac.DebugString(tostring(result))
+      return result
+    end
   end
 end)
 --
