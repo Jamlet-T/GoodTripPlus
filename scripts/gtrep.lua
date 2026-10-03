@@ -1,7 +1,7 @@
 gt = RegisterMod("GoodTripPlus", 1)
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "1.5.3"
+gt.VERSION = "1.5.4"
 pcall(function()
   Isaac.ConsoleOutput("[GoodTripPlus] v" .. gt.VERSION ..
     " loaded (console command: gtpdiag)\n")
@@ -41,6 +41,8 @@ local mmp_ctrl_pos = Vector(0, 0)
 local mmp_highlight_gid = nil
 -- 隐藏房现场诊断的去重表（按「层 + 目标格」，new_level 清空）
 local secret_diag_logged = {}
+-- 上一次手动 dump 的帧号（F4 连按限流，避免刷屏）
+local last_diag_frame = -1000
 -- ===== 门图与邻接基础设施：忠实移植自 GoodTrip [Fixed]（scripts/floor.lua）=====
 -- door graph, learned one room at a time: grid adjacency alone cannot tell a
 -- doorway from a secret room's unbombed wall. Per dimension: the mirror world
@@ -1125,6 +1127,7 @@ end
 -- minimap art was painted on top of it afterwards, making the cursor appear
 -- to be stuck underneath the map with REPENTOGON installed.
 function gt:render_cursor()
+    gt:render_diag_overlay() -- 诊断浮层（画在 HUD 之上，与地图是否按住无关）
     if mmp_ctrl then
       if gt:get_config_bool("HighlightCursorRoom", true) and mmp_highlight_gid then
         local desc = grid_room[mmp_highlight_gid]
@@ -1150,8 +1153,12 @@ function gt:tab_action()
     scpos = cp + cp
     --
     -- 免控制台诊断入口：按住地图键 + F4 → 把光标所在格（光标没启用时用当前房间）
-    -- 的完整判定打到控制台与 log.txt。控制台命令在某些环境看不到输出时的备用路。
-    if Input.IsButtonTriggered(Keyboard.KEY_F4, player.ControllerIndex) then
+    -- 的完整判定打到屏幕左上角 + 控制台 + log.txt。
+    -- （控制台命令在 REPENTOGON 的 ImGui 控制台里不分发给 mod，所以这条是主力入口；
+    -- 20 帧内连按只算一次，避免长按/连点刷屏）
+    if Input.IsButtonTriggered(Keyboard.KEY_F4, player.ControllerIndex)
+        and Game():GetFrameCount() - last_diag_frame > 20 then
+      last_diag_frame = Game():GetFrameCount()
       local cell = mmp_ctrl and gt:get_pos_grid_index(mmp_ctrl_pos)
         or gt:get_current_room_cursor_gid()
       gt:console_dump_diag(cell, "gtpdiag TAB+F4")
@@ -1601,6 +1608,50 @@ function gt:get_minapi_display_flags(listIndex)
   return nil
 end
 
+-- ===== 屏幕诊断浮层 =====
+-- 控制台命令在部分环境（REPENTOGON 的 ImGui「Repentance+ Console」）里不会
+-- 分发给 MC_EXECUTE_CMD —— 实测输入 gtpdiag 触发不了我们的回调（log 里连
+-- 「命令触发了」的留痕都没有），所以再给一条**一定看得见**的输出路：
+-- 把最近一次 dump 直接画在屏幕左上角（15 秒后自动消失），同时照旧写 log.txt。
+local diag_font = nil
+local diag_overlay_lines = nil
+local diag_overlay_until = 0
+
+function gt:show_diag_overlay(text, frames)
+  if not diag_font then
+    local ok, font = pcall(function()
+      local f = Font()
+      f:Load("font/terminus.fnt")
+      return f
+    end)
+    if not ok or not font then
+      return
+    end
+    diag_font = font
+  end
+  local lines = {}
+  for line in tostring(text):gmatch("[^\n]+") do
+    lines[#lines + 1] = line
+  end
+  diag_overlay_lines = lines
+  diag_overlay_until = Game():GetFrameCount() + (frames or 900)
+end
+
+function gt:render_diag_overlay()
+  if not diag_overlay_lines or not diag_font then
+    return
+  end
+  if Game():GetFrameCount() > diag_overlay_until then
+    diag_overlay_lines = nil
+    return
+  end
+  local y = 34
+  for i = 1, #diag_overlay_lines do
+    diag_font:DrawString(diag_overlay_lines[i], 16, y, KColor(1, 1, 0.35, 1), 0, false)
+    y = y + 11
+  end
+end
+
 -- 逐行把诊断文本写进控制台输出缓冲（Isaac.ConsoleOutput 不认多行字符串，
 -- 整段丢进去容易只看到一行，所以自己按 \n 拆）
 local function gt_console_out(text)
@@ -1622,6 +1673,8 @@ function gt:console_dump_diag(gid, tag)
     "\n===== " .. name .. " END ====="
   gt_console_out(result)
   Isaac.DebugString(result)
+  -- 屏幕浮层：控制台不可见时的保底输出，用户当场就能看到
+  gt:show_diag_overlay(result)
   return result
 end
 
