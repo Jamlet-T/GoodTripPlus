@@ -29,8 +29,8 @@
   它自己标镜子房 / 矿车房用的就是这个机制（`t.VisitedIcons = {"MirrorRoom"}`）。
 
   所以这里做两件事：
-    1. 启动时用 `MinimapAPI:AddIcon` 注册一个自己的图标 `GTPMarkedSkull`
-       （素材 `resources/gfx/goodtripplus/skull.png`，16x16，随本模组走）；
+    1. 启动时用 `MinimapAPI:AddIcon` 注册一个自己的图标 `TintedSkull`
+       （素材 `resources/gfx/goodtripplus/TintedSkull.png`，16x16，随本模组走）；
     2. 把那个图标 ID 塞进对应房间的 `VisitedIcons`。
   好处是：
     * 坐标、缩放、大小图切换、地图滑动全部由 MinimapAPI 自己算，天然对齐；
@@ -54,11 +54,11 @@ local GTP_SKULL = {}
 -- 等价于 GridEntityType.GRID_ROCK_ALT2（= 26，原版 enums.lua 注释「special skull in Depths 2」）
 local MARKED_SKULL_SPAWN_TYPE = 1008
 
--- 自己的标记图标：resources/gfx/goodtripplus/skull.png（16x16，随本模组分发）
+-- 自己的标记图标：resources/gfx/goodtripplus/TintedSkull.png（16x16，随本模组分发）
 -- 通过 MinimapAPI:AddIcon 注册进它的图标表，之后就能像内置图标一样塞进 room.VisitedIcons。
 -- 尺寸必须与 MinimapAPI 的图标一致（16x16、pivot 0,0），否则它的图标位置计算会错位。
-local MARKER_ICON_ID = "GTPMarkedSkull"
-local MARKER_ICON_ANIM = "GTPMarkedSkull"
+local MARKER_ICON_ID = "TintedSkull"
+local MARKER_ICON_ANIM = "TintedSkull"
 
 -- 兜底图标：万一 MinimapAPI 太老没有 AddIcon、或精灵加载失败，
 -- 退回它自带的卡牌图标（语义相近，功能不至于整个失效）
@@ -103,7 +103,7 @@ local function register_marker_icon()
 
   local ok, sprite = pcall(function()
     local s = Sprite()
-    s:Load("gfx/goodtripplus/skull.anm2", true)
+    s:Load("gfx/goodtripplus/TintedSkull.anm2", true)
     return s
   end)
 
