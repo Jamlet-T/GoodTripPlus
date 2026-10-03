@@ -138,6 +138,20 @@ MinimapAPI 的房间表（几十个房间，远小于 MinimapAPI 自己每帧的
 
 ---
 
+### 迷失诅咒下仍然显示隐藏房候选（v1.7.1 修复）
+
+**现象**：先看过完整地图（隐藏房候选已经算出来），之后因为药丸 / 道具突然被赋予迷失诅咒时，
+长按 TAB 仍会画出候选标记；换一次房间之后才正常消失。
+
+**根因**：本功能移植自 Lazy Delver，上游把「本层是否迷失诅咒」缓存成 `lost_cursed`，
+只在 `M.check()` 跑到末尾时才更新，而 `state.check()` 只挂在 `MC_POST_NEW_ROOM`（换房间）上
+（`gtp_delver.lua`）。吃药丸不换房，缓存就一直停在 `false`。诅咒是**运行中可以变化**的状态，
+按「换房间」为节奏缓存本身就选错了时机。
+
+**修法**：在 `gtp_delver.lua` 里把 `state.is_lost_cursed` 覆盖为**实时读取**
+（`level:GetCurses() & LevelCurse.CURSE_OF_THE_LOST`）—— 只覆盖这一个访问器，
+不动上游移植文件 `delver/state.lua`；`GetCurses()` 每帧查一次的开销可忽略。
+
 ## 二、大地图四周的黑边（修复已移除）
 
 2026-10-03 项目定位收缩为「MinimapAPI 的外置传送插件」时，`scripts/gtp_mapoutline.lua`

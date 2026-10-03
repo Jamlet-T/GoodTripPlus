@@ -36,6 +36,18 @@ local map = require("scripts.delver.map")
 local room = require("scripts.delver.room")
 local render = require("scripts.delver.render")
 
+-- 本项目修 bug（2026-10-03，用户报）：上游 delver/state.lua 里的 lost_cursed 是**缓存值**，
+-- 只在 M.check() 跑到末尾时才更新，而 state.check() 只挂在 MC_POST_NEW_ROOM 上 ——
+-- 于是「地图先完整显示过（候选已算好）、之后才被塞进迷失诅咒（药丸 P25 / 道具）」时，
+-- 诅咒状态一直停在 false，长按 TAB 仍画出隐藏房候选，直到换一次房间（check() 重跑）才消失。
+-- 这里把该访问器换成**实时读取**：GetCurses() 随时可查，每帧一次的开销可忽略；
+-- 只覆盖这一个函数，不动上游移植文件 delver/state.lua。
+state.is_lost_cursed = function()
+  local level = Game():GetLevel()
+  return level ~= nil
+    and (level:GetCurses() & LevelCurse.CURSE_OF_THE_LOST) ~= 0
+end
+
 local function enabled()
   return gt:get_config_bool("ShowSecretMarkers", true)
 end
