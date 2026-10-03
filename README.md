@@ -105,23 +105,21 @@ MinimapAPI 的房间表（几十个房间，远小于 MinimapAPI 自己每帧的
 以及最近 16 条事件（`POST_NEW_LEVEL` / `POST_NEW_ROOM` / `POST_GAME_STARTED` 的触发、
 每次判定为清空时的 `rebuilt/lost/sameFloor` 与前后层身份、恢复了多少个房间）。
 
-> **控制台命令的两个坑**（2026-10-03 排查）：
-> 1. `MC_EXECUTE_CMD` 的回调签名是 `(Mod, command, args)` —— `command` 只有命令词，
->    参数在 `args` 里。要带格子编号得写 `gtpdiag <格子编号>`，且必须读第三个参数。
-> 2. 原版控制台**要再按一次回车 / 输入别的**才会把这一批输出刷出来；
->    看不到输出时先去 `log.txt` 搜 `GoodTripPlus`，那里一定有（`Isaac.DebugString` 兜底）。
-> 输出同时走 `return` 串、`Isaac.ConsoleOutput`（逐行直写，MinimapAPI 也这么做）与
-> `Isaac.DebugString`（落 log.txt），三个通道总有一个能看见。
-> 模块内各诊断回调都包了 `pcall`：诊断自己出错只打印一行 ERROR，不会把控制台命令带崩。
-> 命令名大小写 / 前后空格 / 整行塞进 `command` 都已兼容，另有简写 `gtpd`。
->
-> **控制台里死活看不到输出时，还有两条不用打字的备用路**：
-> - 按住地图键 + **F4**：把光标所在格（光标没启用时用当前房间）的完整判定打到控制台与 `log.txt`；
-> - 把 `gtconfig.lua` 里 `gt.DebugMod` 改成 `true`：之后按住地图键瞄一下隐藏房再松手，
->   判定会自动进控制台与 `log.txt`，连命令都不用输。
->
-> 每次启动都会打印 `[GoodTripPlus] vX.Y.Z loaded (console command: gtpdiag)` ——
-> 想确认「改完到底重启了没、现在跑的是哪一版」，看这一行。
+> **诊断输出怎么看（2026-10-03 实测）**：
+> - 本机控制台是 REPENTOGON 的 ImGui「Repentance+ Console」，**输入 `gtpdiag` 不会触发
+>   mod 的命令回调**（log 里连"命令触发了"的留痕都没有；而加载横幅能显示，说明
+>   `ConsoleOutput` 本身是通的）→ 这条路上不通，别靠它。
+> - **主力入口：按住地图键 + F4** → 判定直接画在**屏幕左上角**（15 秒后自动消失），
+>   同时写进 `log.txt`。（光标没启用时用当前房间作为目标；连按限流 20 帧）
+> - 把 `gtconfig.lua` 里 `gt.DebugMod` 改成 `true`：按住地图键瞄一下隐藏房再松手，
+>   会自动弹出同一份浮层，连按键都不用。
+> - 命令仍然注册着（原版控制台 / 别的环境可用）：`gtpdiag [格子编号]`、简写 `gtpd`；
+>   签名是 `(Mod, command, args)`——参数在第三个参数里，不是塞在 `command` 里；
+>   大小写、前后空格、整行都做了容错。
+> - 每次启动都会打印 `[GoodTripPlus] vX.Y.Z loaded (console command: gtpdiag)`：
+>   确认「改完到底重启了没、现在跑的是哪一版」看这一行。
+> - 三个通道（屏幕浮层 / 控制台 `ConsoleOutput` / `log.txt` 的 `DebugString`）都给，
+>   诊断回调统统包了 `pcall`，诊断自身出错只打一行 ERROR，不会把游戏带崩。
 
 命中修复时控制台会直接打印：
 
