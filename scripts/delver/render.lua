@@ -71,6 +71,10 @@ local function minimapapi_hides_map()
   return false
 end
 
+-- 暴露给本模组的其它模块：gtp_mapbounds.lua（地图边界高亮）也要在地图被隐藏时
+-- 跟着藏，共用这一份镜像条件，避免两处各写一份将来走偏。
+M.minimapapi_hides_map = minimapapi_hides_map
+
 
 local function check_real_and_clear_fake()
   local rooms = Game():GetLevel():GetRooms()
@@ -173,10 +177,23 @@ function M.tab_hold_check()
 
   local controller_id = Isaac.GetPlayer(0).ControllerIndex
   if Input.IsActionPressed(ButtonAction.ACTION_MAP, controller_id) then
+    -- 淡入保留：按住时逐帧 +1，直到 TAB_HOLD_MAX
     tab_hold_cnt = math.min(tab_hold_cnt + 1, TAB_HOLD_MAX)
   else
-    tab_hold_cnt = math.max(tab_hold_cnt - 2, -TAB_HOLD_THRESHOLD)
+    -- 松开地图键**立即**归零（用户 2026-10-03 要求：不要淡出，松手就消失）。
+    -- 直接跳到下限，而不是逐帧 -2；这样隐藏房标记与地图边界高亮一起瞬间消失。
+    tab_hold_cnt = -TAB_HOLD_THRESHOLD
   end
+end
+
+-- 供本模组其它模块使用：地图边界高亮（gtp_mapbounds.lua）与隐藏房候选标记共用
+-- **同一份**淡入节奏，所以直接读这里的计数，而不是自己再数一遍。
+-- 返回淡入系数 [0, 1]；0 表示现在不该画（没按住地图键 / 还没淡入 / 层被忽略）。
+function M.get_fade()
+  if state.is_ignored() or tab_hold_cnt <= 0 then
+    return 0
+  end
+  return tab_hold_cnt / TAB_HOLD_MAX
 end
 
 local function refresh()
