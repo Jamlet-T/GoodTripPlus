@@ -15,6 +15,7 @@
 4. **新增**了「传送到未探索的相邻房间」功能，默认关闭（见第四节）。
 5. **新增**了深牢 II 愚者骷髅房的标记，默认开启（见第五节）。
 6. **战斗时地图隐藏**：跟随 MinimapAPI 自带的 "Hide Map in Combat"，让本模组自绘的标记一起隐藏（见第六节）。
+7. **新增**了「房间里出现奖励房间的门（恶魔房 / 天使房 / Boss Rush / 死寂）时禁止传送」，**常开**（见第四节末尾）。
 
 ---
 
@@ -217,9 +218,9 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 | `ArriveAtDoor` | 关 | 落地在走路会走进来的门口（跨屏大房间远途会先经过前一格） |
 | `FairTripTime` | 关 | 按传送距离与移速补回游戏时间 |
 | `FastTransition` | 关 | 跳过传送动画 |
-| `LockStartRoomItems` | 开 | **本项目新增（非 Fixed 项）**：**判据＝当前房间里有没有道具生成的入口实体** —— 牌意解读（660）的传送门 = `EntityEffect` + `EffectVariant.PORTAL_TELEPORT`(161)、天堂阶梯（586）的台阶 = `EntityEffect` + `EffectVariant.TALL_LADDER`(156)。持有这两个道具之一、且房间里还有这枚入口时**禁止传送**（两者都是"一离开房间就销毁"，禁传送避免误触顶掉）；入口消失（即离开过）立刻恢复。不依赖任何"初始房间 / 本层离开过没有"的状态，所以回溯线等特殊路线也不会误禁。`gt.DebugMod` 调试模式仍可绕过 |
+| —（常开，无开关） | 常开 | **本项目新增（非 Fixed 项）**：**判据＝当前房间里有没有道具生成的入口实体** —— 牌意解读（660）的传送门 = `EntityEffect` + `EffectVariant.PORTAL_TELEPORT`(161)、天堂阶梯（586）的台阶 = `EntityEffect` + `EffectVariant.TALL_LADDER`(156)。持有这两个道具之一、且房间里还有这枚入口时**禁止传送**（两者都是"一离开房间就销毁"，禁传送避免误触顶掉）；入口消失（即离开过）立刻恢复。不依赖任何"初始房间 / 本层离开过没有"的状态，所以回溯线等特殊路线也不会误禁。`gt.DebugMod` 调试模式仍可绕过 |
 
-**`LockStartRoomItems` 的判据（2026-10-03，回溯线实测后重做）**：早期版本靠
+**道具入口禁传的判据（2026-10-03，回溯线实测后重做）**：早期版本靠
 `Level:GetStartingRoomIndex()` + 房间类型去猜"初始房间"，但**回溯线（The Ascent）里这个索引
 指向的是玩家进门的那间 boss 房**，会在 boss 房把传送误禁（用户实测）。现在直接看**房间里有没有
 道具生成的入口实体**：牌意解读（660）的传送门 = `EntityEffect` + `EffectVariant.PORTAL_TELEPORT`
@@ -243,6 +244,22 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 核心机制（门图）：网格相邻分不清「门洞」和「隐藏房没炸开的墙」，所以按维度维护
 一张逐房间学出来的门图（`sweep_doors` 只读当前房的门、跳过 `DOOR_HIDDEN`、双向记录，
 换层清空），BFS 寻路与相邻放宽的最后一跳都要求**真实门**。
+
+### 房间里出现「奖励房间的门」时禁用传送（常开）
+
+打完 boss 后，游戏可能给 boss 房开出一扇通往**奖励房间**的门（恶魔房 / 天使房 / Boss Rush / 死寂）。
+此时误触传送出房可能把它错过，所以：**当前房间里存在这类门时，传送整体禁用**；没有这样的门就
+完全不拦 —— 正常打完 boss、没开出奖励门的房间照常可以传送。门还在房间里就一直拦，
+因为奖励确实还摆在那儿。
+
+- 判据读**门自己的目标房间**（遍历 `DoorSlot.NUM_DOOR_SLOTS` 个门槽，任一命中即拦）：
+  `door.TargetRoomType == RoomType.ROOM_DEVIL`(14) / `ROOM_ANGEL`(15) / `ROOM_BOSSRUSH`(17)，
+  或 `door.TargetRoomIndex == GridRooms.ROOM_BOSSRUSH_IDX`(-5) / `ROOM_BLUE_WOOM_IDX`(-8，死寂/Hush)。
+  **注意 `DoorVariant` 里没有这些门型**（只有 0~8 九个普通值），所以必须看门的目标房间。
+- **回溯线（The Ascent）不参与** —— 那里进门的就是 boss 房、只是路过，没有奖励门。
+- 实现是独立模块 `scripts/gtp_bosswindow.lua`，**包一层 `gt.check_teleble()`**（不改 `gtrep.lua`），
+  所以表现与其它准入拒绝完全一致：光标不高亮、按 TAB 不启用、松手也不会传。
+- **常开、无开关**（用户 2026-10-03 要求：这类保护不给可选配置）；只有 `gt.DebugMod` 调试模式能绕过。
 
 ## 五、深牢 II 的愚者骷髅房标记（默认开启）
 
@@ -424,6 +441,7 @@ issacMod/                       ← 工作区 git 仓库（可容纳多个 mod�
 | `scripts/gtp_rewindfix.lua` | 新增文件，rewind 图标修复 |
 | `scripts/gtp_delver.lua` | 新增文件，隐藏房候选标记的回调接线 |
 | `scripts/gtp_skullroom.lua` | 新增文件，深牢 II 愚者骷髅房标记（自己写的，未参考任何 mod 的实现代码） |
+| `scripts/gtp_bosswindow.lua` | 新增文件，房间里出现「奖励房间的门」（恶魔房 / 天使房 / Boss Rush / 死寂）时禁用传送，常开（**包装 `gt.check_teleble`** 实现，不改 `gtrep.lua`） |
 | `scripts/delver/*` | 从 Lazy Delver 原样移植（仅改写 `require` 路径），`render.lua` 重写了定位部分 |
 | `resources/gfx/goodtripplus/*` | `marker.*` 从 Lazy Delver 复制（换到自己的路径避免与它本体冲突）；`TintedSkull.*` 是本模组自有的骷髅图标（16x16） |
 | `main.lua` / `metadata.xml` / `gtconfig.lua` / `deploy.sh` | 新增 / 重写 |

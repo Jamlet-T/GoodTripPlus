@@ -1,7 +1,7 @@
 gt = RegisterMod("GoodTripPlus", 1)
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "1.6.1"
+gt.VERSION = "1.7.0"
 pcall(function()
   Isaac.ConsoleOutput("[GoodTripPlus] v" .. gt.VERSION ..
     " loaded (console command: gtpdiag)\n")
@@ -491,11 +491,8 @@ end
 -- 持有「牌意解读 / 天堂阶梯」、且当前房间里真有一枚它们的入口实体时，禁止传送：
 -- 这个入口就是这两个道具的核心效果，玩家一离开房间它就会消失，禁传送只是不让误触
 -- 把它顶掉。离开房间后实体消失，禁令自动解除，不需要任何层/房间状态。
--- 可用 MCM 的 LockStartRoomItems 关闭（默认开）。
+-- **常开、没有开关**（用户 2026-10-03 明确要求：这类保护不给可选配置）。
 function gt:start_room_lock()
-    if not gt:get_config_bool("LockStartRoomItems", true) then
-      return false
-    end
     -- 先说持有道具：房间里出现同名特效（例如玩家自己传送时的漩涡）时，
     -- 这一条能挡掉误判，也省下一次实体遍历。想纯按实体判定就把这段删掉。
     local p = player or Isaac.GetPlayer(0)
@@ -1375,8 +1372,6 @@ local GT_STRINGS = {
     secret_markers_desc = "Marks where Secret / Super Secret / Ultra Secret rooms could be while holding the map key. Merged from Lazy Delver (MIT). Disable Lazy Delver itself to avoid drawing two sets of markers. Default: enabled",
     fools_skull_name = "Mark The Fool Skull Room",
     fools_skull_desc = "In Depths II a special skull always drops The Fool card when destroyed. This puts a skull icon on the room that contains it, so you can find it again. Only shown for rooms you have already visited, so it never spoils the layout. Default: enabled",
-    lock_start_room_name = "Lock Teleport While A Card Reading / Stairway Entrance Is Here",
-    lock_start_room_desc = "Card Reading portals and Stairway ladders are destroyed the instant you leave the room they were created in. While such an entrance is present in your current room, teleporting is disabled so a stray press cannot waste it. Nothing else is affected, and leaving the room lifts the lock immediately. Default: enabled",
   },
   zh_hans = {
     title = "GoodTripPlus",
@@ -1400,8 +1395,6 @@ local GT_STRINGS = {
     secret_markers_desc = "按住地图键时标出隐藏房 / 超级隐藏房 / 究极隐藏房的可能位置（合并自 Lazy Delver，MIT）。请同时禁用 Lazy Delver 本体，否则会画出两套标记。默认开启。",
     fools_skull_name = "标记深牢 II 的愚者骷髅房",
     fools_skull_desc = "深牢 II 里有一个特殊骷髅，炸掉后固定掉落愚者卡牌。开启后会在地图上给它所在的房间加一个骷髅图标，方便回头再找。只在你已经进过该房间后才显示，不会剧透本层布局。默认开启。",
-    lock_start_room_name = "房间里有牌意解读 / 天堂阶梯入口时禁用传送",
-    lock_start_room_desc = "牌意解读生成的传送门、天堂阶梯生成的台阶，会在你离开它们所在房间的瞬间消失。只要当前房间里还有这种入口，传送就整体禁用，避免误触把它顶掉；一离开房间（入口没了）立刻恢复正常。默认开启。",
   },
 }
 -- A few plausible spellings/casings for each supported language, since the
@@ -1509,13 +1502,6 @@ gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
       L.fools_skull_name,
       L.fools_skull_desc
     )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
-      "LockStartRoomItems",
-      true,
-      L.lock_start_room_name,
-      L.lock_start_room_desc
-    )
   end
 end)
 gt:AddCallback(ModCallbacks.MC_POST_RENDER, gt.step)
@@ -1617,6 +1603,11 @@ function gt:dump_tele_diag(gid)
         " targetIdx=" .. tostring(door.TargetRoomIndex) ..
         " targetType=" .. tostring(door.TargetRoomType))
     end
+  end
+  -- 奖励门（恶魔房 / 天使房 / Boss Rush / 死寂）：命中即禁传，见 gtp_bosswindow.lua
+  -- （模块在 gtrep 之后加载，这里运行时取，取不到就跳过）
+  if gt.has_reward_door then
+    p("  rewardDoor=" .. tostring(gt:has_reward_door()))
   end
   -- 本层全部隐藏房
   for g, rd in pairs(grid_room) do
