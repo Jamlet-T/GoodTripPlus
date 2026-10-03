@@ -281,6 +281,8 @@ gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command)
   if not command or command:lower() ~= "gtpdiag" then
     return
   end
+  -- 诊断自身出错也不能拖垮控制台命令：整段包一层 pcall
+  local ok, diag = pcall(function()
   local lines = {}
   lines[#lines + 1] = "skullRoom.enabled=" .. tostring(is_enabled()) ..
     " stage=" .. tostring(Game():GetLevel() and Game():GetLevel():GetStage())
@@ -298,6 +300,11 @@ gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command)
   table.sort(ids)
   lines[#lines + 1] = "skullRoom.rooms={" .. table.concat(ids, ",") .. "}"
   return table.concat(lines, "\n")
+  end)
+  if not ok then
+    return "skullRoom ERROR: " .. tostring(diag)
+  end
+  return diag
 end)
 
 GTP_SKULL.stats = stats

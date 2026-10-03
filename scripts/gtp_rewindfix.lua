@@ -267,6 +267,8 @@ gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command)
   if not command or command:lower() ~= "gtpdiag" then
     return
   end
+  -- 诊断自身出错也不能拖垮控制台命令：整段包一层 pcall
+  local diag_ok, diag_err = pcall(function()
 
   out("REWIND FIX DIAGNOSTICS BEGIN")
   out("identity=" .. tostring(level_identity()))
@@ -298,6 +300,10 @@ gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command)
     out("  " .. event)
   end
   out("REWIND FIX DIAGNOSTICS END")
+  end)
+  if not diag_ok then
+    out("REWIND FIX DIAGNOSTICS ERROR: " .. tostring(diag_err))
+  end
 end)
 
 return GTP

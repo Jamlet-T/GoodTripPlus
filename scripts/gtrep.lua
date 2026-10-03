@@ -121,44 +121,17 @@ local function door_graph()
     return door_link[d], door_swept[d]
 end
 
--- 本 mod 对 Fixed 的一处偏离（2026-10-03，带理由）：
--- 隐藏房的墙在游戏里也是一扇门（variant = DoorVariant.DOOR_HIDDEN），而且
--- **炸开之后变体不变**，只有门自己的 busted 状态能区分「墙还在」与「已炸开」。
--- Fixed 只看 variant，于是已炸开的洞口永远进不了门图 → 隐藏房连带它的四条边
--- 全被判成「没有通路」→ 进不去。这里补上 busted 这一条判据：门是隐藏门但已经
--- 被炸开（或已经不能被再炸开）时也算通路。语义与 Fixed 的意图一致（它自己的
--- 注释写着「a wall bombed since entering would still read as solid」），只是
--- 把「已炸开」这个状态真的读了出来。
-local function hidden_door_open(door)
-    -- 「这面墙已经开了」的判据（两个信号，任一成立即可，但都要有旁证）：
-    --   busted == true                      —— 门已经被炸开；
-    --   isOpen == true 且 canBlowOpen == false —— 洞口是开着的、而且再也炸不出
-    --   东西了（TryBlowOpen 可以连调两次，炸开分两段，所以不能只看 busted）。
-    -- 单独一个信号都可能误报（误报会把没炸开的墙当成通路，v1.3.2 修掉的
-    -- 「穿墙传进隐藏房」就会回来），所以第二个信号要求两条同时成立。
-    -- 拿不到这些属性（老版本 / 调用报错）时退回只看 busted。
-    local busted, can_blow, is_open = false, nil, nil
-    pcall(function()
-      if door.IsBusted then
-        busted = door:IsBusted()
-      else
-        busted = door.Busted
-      end
-      if door.CanBlowOpen then
-        can_blow = door:CanBlowOpen()
-      end
-      if door.IsOpen then
-        is_open = door:IsOpen()
-      end
-    end)
-    if busted == true then
-      return true
-    end
-    return is_open == true and can_blow == false
-end
-
 -- 必须炸开（或用钥匙打开）墙才能进的三种隐藏房：
 -- 7 = ROOM_SECRET、8 = ROOM_SUPERSECRET、29 = ROOM_ULTRASECRET（红钥匙房）
+--
+-- 实测（2026-10-03，gtpdiag 门表，用户现场复现）：
+--   墙还在   → variant=7(DOOR_HIDDEN) busted=false canBlowOpen=true  isOpen=false
+--   已炸开   → variant=8(DOOR_UNLOCKED) busted=true  canBlowOpen=false isOpen=true
+-- 也就是说炸开之后**变体确实会变**，Fixed 门图里那句
+-- `door.Desc.Variant ~= DoorVariant.DOOR_HIDDEN` 是对的（已炸开的洞口本来就会被记进门图），
+-- 所以这里不需要、也不该再加别的「已炸开」判据（曾经加过 hidden_door_open，已删）。
+-- 真正卡住传送的是 check_neigh_connected 里那份「已显示但未探索目标」的类型白名单：
+-- 隐藏房不在名单里 → 还没进去过的隐藏房一律拦，哪怕洞口已经炸开。
 function gt:is_secret_room(rd)
     if not rd or not rd.Data then
       return false
@@ -179,8 +152,10 @@ function gt:sweep_doors()
     swept[here] = true
     for i = 0, 7 do
       local door = live:GetDoor(i)
-      --DOOR_HIDDEN is an unbombed wall -- unless a bomb has since opened it
-      if door and (door.Desc.Variant ~= DoorVariant.DOOR_HIDDEN or hidden_door_open(door)) then
+      --DOOR_HIDDEN is an unbombed wall, so no passage; everything
+      --else, locked included, is walkable. All read live so nothing is from different moments.
+      --（实测：炸开之后 variant 会变成 8，所以这行判据本身就够用，别再加「已炸开」判据）
+      if door and door.Desc.Variant ~= DoorVariant.DOOR_HIDDEN then
         local tdes = lvl:GetRoomByIdx(door.TargetRoomIndex, -1)
         if tdes then
           local there = tdes.SafeGridIndex
@@ -257,8 +232,12 @@ function gt:check_neigh_connected(trd, cond)
     local tid = trd.SafeGridIndex
     if (trd.DisplayFlags & 1) ~= 0 then
       --a red-key room stands open already, whatever it turned out to hold
-      --隐藏房也放进来：进门的那道墙开没开由调用方的门图（rooms_linked）说了算，
-      --所以「已炸开的洞口可以进、还封着的墙进不去」两件事各自成立
+      -- 本 mod 对 Fixed 的一处偏离（2026-10-03，理由 + 实测）：
+      -- Fixed 这份「已显示但未探索目标」的类型白名单只放普通房(1)/boss(5)/小 boss(6)/
+      -- 献祭(13)，隐藏房(7/8/29)不在里面 —— 于是**洞口已经炸开**的隐藏房照样被拦
+      -- （用户报的「炸开隐藏房传不进去」就是这个）。放行后安全性由调用方保证：
+      -- 最后一步还要求 rooms_linked(邻居, 目标)，而实测炸开洞口在门图里有真门
+      -- （variant 7 -> 8），没炸开的墙没有 → 「已炸开的能进、还封着的进不去」。
       if (trd.VisitedCount == 0 or not trd.Clear) and
         trd.Flags & RoomDescriptor.FLAG_RED_ROOM == 0 and
         not gt:is_secret_room(trd) and
@@ -496,18 +475,6 @@ function gt:check_teleble(gid)
           and (not reach or reach[trd.SafeGridIndex] == true) then
         --AllowNeighborRoom only widens this: an Emperor'd start room has no cleared neighbour
         return true
-      elseif gt:is_secret_room(trd) and trd.VisitedCount > 0 and trd.Clear then
-        -- 本 mod 对 Fixed 的偏离（2026-10-03）：进过、已清的隐藏房。
-        -- 它的墙肯定已经炸开了一个口，但那个口子未必在门图里（隐藏门炸开后
-        -- variant 不变，见 hidden_door_open），于是上面的洪泛走不进去、房间也
-        -- 就永远不在 reach 岛上。游戏自己的落点不看你是从哪面墙进来的（Fixed
-        -- 自己的注释：「an unbombed secret room's included」），所以只要有一个
-        -- 已探索+已清+可达的房间贴着它，就放行。
-        -- 没进去过的隐藏房不走这条路：它们仍要求门图里有真实通路（洞口已开）。
-        return gt:check_neigh_connected(trd, function(rd)
-          return (rd.DisplayFlags & 1 ~= 0) and rd.VisitedCount > 0 and rd.Clear
-            and (not reach or reach[rd.SafeGridIndex] == true)
-        end)
       elseif not gt:get_config_bool("AllowNeighborRoom", true) then
         return false
       end
@@ -1476,8 +1443,8 @@ function gt:dump_tele_diag(gid)
     crd.SafeGridIndex, tostring(crd.Clear),
     tostring(dswept[crd.SafeGridIndex]),
     tostring(dlink[crd.SafeGridIndex] ~= nil)))
-  -- 当前房间的每一扇门：隐藏门炸开后 variant 仍是 7，只有 busted 能区分
-  -- 「墙还在」与「已炸开」，这一行就是判断洞口开没开的现场证据
+  -- 当前房间的每一扇门：隐藏门炸开后 variant 会从 7 变成 8、busted 变 true，
+  -- 这一行既是「洞口开没开」的现场证据，也是判断门图该不该记录它的依据
   for i = 0, 7 do
     local door = room:GetDoor(i)
     if door then
@@ -1542,14 +1509,6 @@ function gt:dump_tele_diag(gid)
   elseif trd.VisitedCount > 0 and trd.Clear
       and (not reach or reach[trd.SafeGridIndex] == true) then
     p("  verdict: visited+clear+inReach -> should be teleportable (channel B)")
-  elseif gt:is_secret_room(trd) and trd.VisitedCount > 0 and trd.Clear then
-    local ok = gt:check_neigh_connected(trd, function(rd)
-      return (rd.DisplayFlags & 1 ~= 0) and rd.VisitedCount > 0 and rd.Clear
-        and (not reach or reach[rd.SafeGridIndex] == true)
-    end)
-    p("  verdict: secret room already entered -> " .. tostring(ok) ..
-      (ok and " should be teleportable (secret-room branch: any cleared reachable neighbour)"
-          or " NOT teleportable -- no cleared, reachable room touches it at all"))
   elseif not gt:get_config_bool("AllowNeighborRoom", true) then
     p("  verdict: AllowNeighborRoom=off -> NOT teleportable (this is the blocking gate)")
   else
@@ -1620,24 +1579,56 @@ function gt:get_minapi_display_flags(listIndex)
   return nil
 end
 
-gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command)
-  if command and command:lower() == "gtmapdiag" then
-    gt:dump_map_diagnostics()
-  elseif command then
-    local arg = command:match("^gtpdiag%s+(-?%d+)$")
-    if command:lower() == "gtpdiag" or arg then
-      --pcall 包住：诊断自身出错时把错误打出来，而不是整段输出静默消失。
-      --REPENTOGON 的控制台不回显 EXECUTE_CMD 的返回串，所以除了 return
-      --还要 ConsoleOutput 直写控制台、DebugString 落到 log.txt，双保险。
-      local ok, result = pcall(gt.dump_tele_diag, gt, arg and tonumber(arg) or nil)
-      if not ok then
-        result = "teleDiag ERROR: " .. tostring(result)
-      end
-      Isaac.ConsoleOutput(tostring(result) .. "\n")
-      Isaac.DebugString(tostring(result))
-      return result
+-- 控制台诊断命令：gtpdiag [格子编号]（缺省 = 光标所在格子）、gtmapdiag。
+-- 三个输出通道一起用，照顾不同控制台：
+--   return 串      —— 原版控制台会回显（REPENTOGON 的 ImGui 控制台不回显返回串）
+--   ConsoleOutput  —— 逐行直写控制台输出（MinimapAPI 的 mapitel 也是这么做的）
+--   DebugString    —— 落 log.txt，控制台看不到时也能查
+-- 两个坑：①回调签名是 (Mod, command, args)，command 只有命令词，格子编号在 args 里；
+-- ②原版控制台要**再按一次回车 / 输入别的**才会把这批行刷出来，看到「没输出」先别急。
+local function gt_console_out(text)
+  for line in tostring(text):gmatch("[^\n]+") do
+    Isaac.ConsoleOutput(line .. "\n")
+  end
+end
+
+gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command, args)
+  if not command then
+    return
+  end
+  local cmd = command:lower()
+  local rest = args
+  if type(rest) ~= "string" then
+    -- 兜底：有的环境把整行塞进 command（"gtpdiag 98"）
+    local head, tail = cmd:match("^(%S+)%s+(.*)$")
+    if head then
+      cmd, rest = head, tail
     end
   end
+  if cmd ~= "gtpdiag" and cmd ~= "gtmapdiag" then
+    return
+  end
+  -- 先把「命令确实触发了」写进 log.txt，免得再出现「没输出」时无从判断
+  Isaac.DebugString("[GoodTripPlus] console command: " .. tostring(command) ..
+    " args=" .. tostring(args))
+  if cmd == "gtmapdiag" then
+    local ok, result = pcall(gt.dump_map_diagnostics, gt)
+    local text = ok and "gtmapdiag: done (details in log.txt)"
+      or ("gtmapdiag ERROR: " .. tostring(result))
+    gt_console_out(text)
+    Isaac.DebugString(text)
+    return text
+  end
+  local gid = tonumber(rest)
+  local ok, result = pcall(gt.dump_tele_diag, gt, gid)
+  if not ok then
+    result = "teleDiag ERROR: " .. tostring(result)
+  end
+  result = "===== GoodTripPlus gtpdiag BEGIN =====\n" .. tostring(result) ..
+    "\n===== GoodTripPlus gtpdiag END ====="
+  gt_console_out(result)
+  Isaac.DebugString(result)
+  return result
 end)
 --
 -- Draw the cursor on whichever render callback MinimapAPI itself draws its
