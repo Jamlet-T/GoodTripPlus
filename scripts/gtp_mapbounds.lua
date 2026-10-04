@@ -12,8 +12,16 @@
   --------
   * **边界判定**：网格 13×13，格号 gid → col = gid % 13、row = floor(gid / 13)；
     col == 0 / 12 或 row == 0 / 12 即贴边，角房两条边都画。
-  * **大房间占多格**：用 delver/geometry.lua 的 SHAPE_OFFSETS 取出它占据的所有格
-    逐格判断，最靠外的那格自然会被画到（就是需求里说的「取最靠外的格画边」）。
+  * **大房间占多格**：用本文件的 SAFE_SHAPE_OFFSETS（形状 → 各占据格相对
+    SafeGridIndex 的偏移）逐格画。⚠️ 锚点坑：SafeGridIndex 并不总是包围盒
+    左上角——ROOMSHAPE_LTL（缺左上角）的 SafeGridIndex 是「最靠左上那个
+    真实格」（= 包围盒左上 + 1），所以**不能**直接用 delver/geometry.lua 的
+    SHAPE_OFFSETS（那张表锚点是 GridIndex=包围盒左上，正确用法见 delver/map.lua）；
+    否则 LTL 三格整体右移一列、跨行回绕画到别的格（2026-10-04 用户实测：
+    L 形房贴边只显示一格的边界线）。本表 LTL={0,12,13} 与 MinimapAPI 的
+    RoomShapePositions（data.lua，锚点同为 SafeGridIndex）逐项核对过。
+    性能：房间形状整层不变，**不要**每帧 GetRoomByIdx 逐格回验（曾这么写过，
+    每帧约 360 次引擎调用，用户实测掉帧）；draw_cell 里也只对贴边格算投影。
   * **只画已探索的房间**：`RoomDescriptor.DisplayFlags & 1`（游戏自己的「这个房间
     已在地图上显示」标志），所以不会剧透还没探索的区域。
   * **坐标**：直接用 `gt:gid_to_rtmap_pos()` —— 传送光标与隐藏房标记用的同一套投影
@@ -32,7 +40,6 @@
   上面的「显示条件」与标记是共用的。
 ]]--
 
-local geo = require("scripts.delver.geometry")
 local state = require("scripts.delver.state")
 local delver_render = require("scripts.delver.render")
 
@@ -68,6 +75,29 @@ local function draw_line(cx, cy, w, h)
   line_sprite:Render(Vector(cx - w / 2, cy - h / 2))
 end
 
+-- 房间形状 → 各占据格相对 SafeGridIndex 的格号偏移。
+-- ⚠️ 锚点是 SafeGridIndex，**不要**直接用 delver/geometry.lua 的 SHAPE_OFFSETS
+-- （那张表锚点是 GridIndex=包围盒左上角）。对除 LTL 外的所有形状两者相等；
+-- 唯独 ROOMSHAPE_LTL（缺左上角）的 SafeGridIndex = 包围盒左上 + 1，
+-- 本表 LTL = {0, 12, 13} 是按 MinimapAPI 的 RoomShapePositions
+-- （data.lua：LTL = {(0,0),(-1,1),(0,1)}，锚点同为 SafeGridIndex）换算来的。
+-- 用表而不用 GetRoomByIdx 逐格回验：房间形状整层不变，每帧 360 次引擎调用
+-- 是纯浪费（2026-10-04 用户实测掉帧）。
+local SAFE_SHAPE_OFFSETS = {
+  [RoomShape.ROOMSHAPE_1x1] = { 0 },
+  [RoomShape.ROOMSHAPE_IH]  = { 0 },
+  [RoomShape.ROOMSHAPE_IV]  = { 0 },
+  [RoomShape.ROOMSHAPE_1x2] = { 0, COLS },
+  [RoomShape.ROOMSHAPE_IIV] = { 0, COLS },
+  [RoomShape.ROOMSHAPE_2x1] = { 0, 1 },
+  [RoomShape.ROOMSHAPE_IIH] = { 0, 1 },
+  [RoomShape.ROOMSHAPE_2x2] = { 0, 1, COLS, COLS + 1 },
+  [RoomShape.ROOMSHAPE_LTL] = { 0, COLS - 1, COLS },
+  [RoomShape.ROOMSHAPE_LTR] = { 0, COLS, COLS + 1 },
+  [RoomShape.ROOMSHAPE_LBL] = { 0, 1, COLS + 1 },
+  [RoomShape.ROOMSHAPE_LBR] = { 0, 1, COLS },
+}
+
 -- 单个格子：贴哪条边就画哪条（角房两条）
 local function draw_cell(gid)
   local col = gid % COLS
@@ -75,15 +105,20 @@ local function draw_cell(gid)
   if row < 0 or row >= ROWS then
     return
   end
+  local left, right = col == 0, col == COLS - 1
+  local top, bottom = row == 0, row == ROWS - 1
+  if not (left or right or top or bottom) then
+    return -- 内部格：不算投影（gid_to_rtmap_pos 里有全图角房扫描，不便宜）
+  end
   local pos = gt:gid_to_rtmap_pos(gid)
-  if col == 0 then
+  if left then
     draw_line(pos.X - CELL_W / 2, pos.Y, LINE_T, LINE_H)
-  elseif col == COLS - 1 then
+  elseif right then
     draw_line(pos.X + CELL_W / 2, pos.Y, LINE_T, LINE_H)
   end
-  if row == 0 then
+  if top then
     draw_line(pos.X, pos.Y - CELL_H / 2, LINE_W, LINE_T)
-  elseif row == ROWS - 1 then
+  elseif bottom then
     draw_line(pos.X, pos.Y + CELL_H / 2, LINE_W, LINE_T)
   end
 end
@@ -127,8 +162,7 @@ function M.render()
   for i = 0, rooms.Size - 1 do
     local rd = rooms:Get(i)
     if rd and rd.Data and (rd.DisplayFlags & 1) ~= 0 then
-      local offsets = geo.SHAPE_OFFSETS[rd.Data.Shape] or { 0 }
-      for _, off in ipairs(offsets) do
+      for _, off in ipairs(SAFE_SHAPE_OFFSETS[rd.Data.Shape] or { 0 }) do
         draw_cell(rd.SafeGridIndex + off)
       end
     end
