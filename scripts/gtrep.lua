@@ -1,7 +1,7 @@
 gt = RegisterMod("GoodTripPlus", 1)
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "1.8.3"
+gt.VERSION = "1.8.4"
 pcall(function()
   Isaac.ConsoleOutput("[GoodTripPlus] v" .. gt.VERSION ..
     " loaded (console command: gtpdiag)\n")
@@ -86,7 +86,7 @@ gt.TravelMode = 2
 gt.FairTripPath = true
 gt.ArriveAtDoor = false
 gt.FairTripTime = false
-gt.FastTransition = false
+gt.FastTransition = true
 gt.HighlightCursorRoom = true
 gt.ShowSecretMarkers = true
 local _, err = pcall(require, "gtconfig")
@@ -733,9 +733,9 @@ function gt:teleport_to_grid_index(gid)
         end
       tele_cd = 45
       if not gt:get_config_bool("TeleportAnimation", true) then tele_cd = 10 end
-      if debug or gt:get_config_bool("FastTransition", false) then tele_cd = 1 end
+      if debug or gt:get_config_bool("FastTransition", true) then tele_cd = 1 end
     end
-    if gt:get_config_bool("FastTransition", false) or debug then
+    if gt:get_config_bool("FastTransition", true) or debug then
       Game():ChangeRoom(arrive,-1)
       Game():GetRoom():PlayMusic()
       return
@@ -1381,8 +1381,6 @@ local GT_STRINGS = {
     arrivedoor_desc = "Arrive standing at the exact door a walk would have come in by. A far trip into a room bigger than the screen passes through the room before it, which shows for a moment. Default: disabled",
     fairtime_name = "Fair Trip Time",
     fairtime_desc = "Fairly increase game time according to player move speed and distance. Default: disabled",
-    highlight_cursor_name = "Highlight Cursor Room",
-    highlight_cursor_desc = "Highlights a teleportable room under the cursor. Default: enabled",
     secret_markers_name = "Secret Room Candidate Markers",
     secret_markers_desc = "Marks where Secret / Super Secret / Ultra Secret rooms could be while holding the map key. Merged from Lazy Delver (MIT). Disable Lazy Delver itself to avoid drawing two sets of markers. Default: enabled",
     fools_skull_name = "Mark The Fool Skull Room",
@@ -1403,8 +1401,6 @@ local GT_STRINGS = {
     arrivedoor_desc = "传送到走路会走进来的那扇门门口；跨屏大房间的远途传送会先经过房间前部，会短暂看到一瞬。默认关闭。",
     fairtime_name = "按距离增加游戏时间",
     fairtime_desc = "按传送距离和玩家移速公平地补回游戏时间（Boss Rush 计时用它）。默认关闭。",
-    highlight_cursor_name = "高亮光标下房间",
-    highlight_cursor_desc = "高亮显示光标下可传送的房间。默认开启。",
     secret_markers_name = "显示隐藏房候选标记",
     secret_markers_desc = "按住地图键时标出隐藏房 / 超级隐藏房 / 究极隐藏房的可能位置（合并自 Lazy Delver，MIT）。请同时禁用 Lazy Delver 本体，否则会画出两套标记。默认开启。",
     fools_skull_name = "标记深牢 II 的愚者骷髅房",
@@ -1482,20 +1478,8 @@ gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
       L.fairtime_name,
       L.fairtime_desc
     )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
-      "FastTransition",
-      false,
-      "Fast Transition",
-      "Skip the teleport animation entirely. Default: disabled"
-    )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
-      "HighlightCursorRoom",
-      true,
-      L.highlight_cursor_name,
-      L.highlight_cursor_desc
-    )
+    -- FastTransition / HighlightCursorRoom 不注册 MCM 菜单项（2026-10-04 用户决定）：
+    -- 两者默认常开，仅可在 gtconfig.lua 里用文件覆盖。
     ModConfigMenu.AddBooleanSetting(
       "GoodTripPlus", nil,
       "ShowSecretMarkers",

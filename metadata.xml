@@ -24,7 +24,7 @@ Also in this build:
 - New: on The Void, the boss room that belongs to Delirium is marked with a dedicated icon. The Void has several boss rooms but only one of them is Delirium; the marker appears as soon as that room is revealed on the map, so you can loot the other bosses first. (MCM: Mark the Delirium Room in The Void / gtconfig: DeliriumRoom, off by default.)
 - Diagnostics: hold the map key and press F4 for a full dump of the current teleport decision (drawn on screen and written to log.txt).
 
-Settings in the MCM menu or the config file: TravelMode, FollowCurseOfLost, FairTripPath, ArriveAtDoor, FairTripTime, FastTransition, HighlightCursorRoom, ShowSecretMarkers, FoolsSkullRoom, ShowMapBounds, DeliriumRoom, CursorSpeed.
+Settings in the MCM menu or the config file: TravelMode, FollowCurseOfLost, FairTripPath, ArriveAtDoor, FairTripTime, ShowSecretMarkers, FoolsSkullRoom, ShowMapBounds, DeliriumRoom, CursorSpeed. FastTransition and HighlightCursorRoom are on by default and only configurable in gtconfig.lua (no MCM entry).
 
 Please uninstall or disable goodtrip_mlxtweak (and the original Goodtrip) before use: all three share the same globals and cannot run at the same time.
 Required: MinimapAPI
@@ -32,7 +32,7 @@ Required: MinimapAPI
 Optional: Mod Config Menu (for in-game settings)
 
 Credits: original GoodTrip by tarako; this build is based on Goodtrip MLX's Tweak; Secret Room candidate markers are ported from Lazy Delver by dokee (MIT). See LICENSE and THIRD_PARTY.md for details.</description>
-    <version>1.8.3</version>
+    <version>1.8.4</version>
     <visibility>Public</visibility>
     <tag id="Lua"/>
     <tag id="Tweaks"/>

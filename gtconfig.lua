@@ -1,11 +1,15 @@
 -- GoodTripPlus - 静态默认值覆盖（优先级低于游戏内 Mod Config Menu）
--- 这里的每一项都可以被 MCM 里的设置覆盖。
+-- 这里的每一项都可以被 MCM 里的设置覆盖（有对应菜单项的话）。
+-- 例外：FastTransition / HighlightCursorRoom 自 2026-10-04 起**不进 MCM 菜单**，
+-- 只能在本文件里覆盖（两者默认常开）。
 -- 传送准入逻辑为 GoodTrip [Fixed] 的忠实移植，选项与 Fixed 同名同默认值
 -- （唯一例外：传送范围把 Fixed 的 AllowNeighborRoom + AllowAnyRoom 两项合并成
 --   一个三选一的 TravelMode，默认值等价于 Fixed 的原默认组合）。
 gt.FastRestartEnable = true
 gt.TeleportAnimation = false
 gt.DebugMod = false
+
+-- 高亮光标下可传送的房间（不进 MCM 菜单，仅本文件可覆盖）
 gt.HighlightCursorRoom = true
 
 -- 迷失诅咒下禁用传送（Fixed: FollowCurseOfLost）
@@ -26,8 +30,9 @@ gt.ArriveAtDoor = false
 -- 按距离公平增加游戏时间（Fixed: FairTripTime）
 gt.FairTripTime = false
 
--- 跳过传送动画（Fixed: FastTransition）
-gt.FastTransition = false
+-- 跳过传送动画（Fixed: FastTransition；不进 MCM 菜单，仅本文件可覆盖。
+-- 注意：默认值 true 是对 Fixed 的一处偏离，Fixed 默认为 false）
+gt.FastTransition = true
 
 -- 隐藏房候选标记（合并自 Lazy Delver）
 gt.ShowSecretMarkers = true

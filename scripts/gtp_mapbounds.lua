@@ -12,18 +12,21 @@
   --------
   * **边界判定**：网格 13×13，格号 gid → col = gid % 13、row = floor(gid / 13)；
     col == 0 / 12 或 row == 0 / 12 即贴边，角房两条边都画。
-  * **大房间占多格**：用本文件的 SAFE_SHAPE_OFFSETS（形状 → 各占据格相对
-    SafeGridIndex 的偏移）逐格画。⚠️ 锚点坑：SafeGridIndex 并不总是包围盒
-    左上角——ROOMSHAPE_LTL（缺左上角）的 SafeGridIndex 是「最靠左上那个
-    真实格」（= 包围盒左上 + 1），所以**不能**直接用 delver/geometry.lua 的
-    SHAPE_OFFSETS（那张表锚点是 GridIndex=包围盒左上，正确用法见 delver/map.lua）；
-    否则 LTL 三格整体右移一列、跨行回绕画到别的格（2026-10-04 用户实测：
-    L 形房贴边只显示一格的边界线）。本表 LTL={0,12,13} 与 MinimapAPI 的
-    RoomShapePositions（data.lua，锚点同为 SafeGridIndex）逐项核对过。
-    性能：房间形状整层不变，**不要**每帧 GetRoomByIdx 逐格回验（曾这么写过，
-    每帧约 360 次引擎调用，用户实测掉帧）；draw_cell 里也只对贴边格算投影。
-  * **只画已探索的房间**：`RoomDescriptor.DisplayFlags & 1`（游戏自己的「这个房间
-    已在地图上显示」标志），所以不会剧透还没探索的区域。
+  * **大房间占多格 / 显示形状为准**：遍历 MinimapAPI 的房间对象，显示格 =
+    (DisplayPosition or Position) + RoomShapePositions[Shape]，逐格画。
+    关键是**不读房间底层数据（Data.Shape / SafeGridIndex）**，因为「显示出来
+    的房间块」和「实际房间块」可能不一致——虚空层（STAGE7）的所有大 boss 房
+    （含精神错乱房）底层是 2×2，但 MinimapAPI 会把它们显示成 1×1
+    （main.lua「Hide delirium room」段：Shape 改 1x1，显示基准格按门的连通
+    情况挪到 DisplayPosition）。按底层形状画贴边线的话，2×2 的线框会向
+    没开 Delirium 图标的玩家泄露「这间是 2×2 房」＝标出精神错乱房
+    （2026-10-04 用户提出）。用显示形状后该问题不存在，普通楼层行为不变
+    （显示形状==实际形状，且 L 形房的 SafeGridIndex 锚点坑也天然规避——
+    RoomShapePositions 的锚点约定和 SafeGridIndex 一致）。
+    性能：纯表查找，无逐格引擎回验；draw_cell 只对贴边格算投影。
+  * **只画已探索的房间**：MinimapAPI 房间对象的 `IsVisible()`
+    （显示标志 & 1 且未被隐藏），与投影所用的「已显示」判定同源，
+    不会剧透还没探索的区域。
   * **坐标**：直接用 `gt:gid_to_rtmap_pos()` —— 传送光标与隐藏房标记用的同一套投影
     （逐项复刻 MinimapAPI 的布局数学，含镜像世界的负缩放），因此天然对齐。
   * **画线**：Isaac 的 Lua 没有画矩形的 API（本机所有 mod 都靠 Sprite），所以用一张
@@ -74,29 +77,6 @@ local function draw_line(cx, cy, w, h)
   line_sprite.Scale = Vector(w / 8, h / 8)
   line_sprite:Render(Vector(cx - w / 2, cy - h / 2))
 end
-
--- 房间形状 → 各占据格相对 SafeGridIndex 的格号偏移。
--- ⚠️ 锚点是 SafeGridIndex，**不要**直接用 delver/geometry.lua 的 SHAPE_OFFSETS
--- （那张表锚点是 GridIndex=包围盒左上角）。对除 LTL 外的所有形状两者相等；
--- 唯独 ROOMSHAPE_LTL（缺左上角）的 SafeGridIndex = 包围盒左上 + 1，
--- 本表 LTL = {0, 12, 13} 是按 MinimapAPI 的 RoomShapePositions
--- （data.lua：LTL = {(0,0),(-1,1),(0,1)}，锚点同为 SafeGridIndex）换算来的。
--- 用表而不用 GetRoomByIdx 逐格回验：房间形状整层不变，每帧 360 次引擎调用
--- 是纯浪费（2026-10-04 用户实测掉帧）。
-local SAFE_SHAPE_OFFSETS = {
-  [RoomShape.ROOMSHAPE_1x1] = { 0 },
-  [RoomShape.ROOMSHAPE_IH]  = { 0 },
-  [RoomShape.ROOMSHAPE_IV]  = { 0 },
-  [RoomShape.ROOMSHAPE_1x2] = { 0, COLS },
-  [RoomShape.ROOMSHAPE_IIV] = { 0, COLS },
-  [RoomShape.ROOMSHAPE_2x1] = { 0, 1 },
-  [RoomShape.ROOMSHAPE_IIH] = { 0, 1 },
-  [RoomShape.ROOMSHAPE_2x2] = { 0, 1, COLS, COLS + 1 },
-  [RoomShape.ROOMSHAPE_LTL] = { 0, COLS - 1, COLS },
-  [RoomShape.ROOMSHAPE_LTR] = { 0, COLS, COLS + 1 },
-  [RoomShape.ROOMSHAPE_LBL] = { 0, 1, COLS + 1 },
-  [RoomShape.ROOMSHAPE_LBR] = { 0, 1, COLS },
-}
 
 -- 单个格子：贴哪条边就画哪条（角房两条）
 local function draw_cell(gid)
@@ -151,19 +131,28 @@ function M.render()
 
   line_sprite.Color = Color(1, 1, 1, BASE_ALPHA * fade, 0, 0, 0)
 
-  local level = Game():GetLevel()
-  if not level then
+  -- 以「地图上实际显示的房间块」为准逐格画，而不是房间底层数据
+  -- （level:GetRooms() 的 Data.Shape）。原因见文件头「大房间占多格」：
+  -- 虚空层大 boss 房在地图上只显示 1×1、且显示格可能偏离锚点格，
+  -- 按底层形状画会泄露精神错乱房的位置。MinimapAPI 的房间对象已经
+  -- 把「显示形状 / 显示位置」算好了（Shape 被改成 1x1、DisplayPosition
+  -- 是显示基准格），直接拿来用：显示格 = (DisplayPosition or Position)
+  -- + RoomShapePositions[Shape]，与它的渲染代码（renderUnboundedMinimap）
+  -- 完全同源，画出来的边界永远和玩家看到的地图块一致。
+  local map = MinimapAPI:GetLevel(gt:get_current_dimension())
+  if not map then
     return
   end
-  local rooms = level:GetRooms()
-  if not rooms then
-    return
-  end
-  for i = 0, rooms.Size - 1 do
-    local rd = rooms:Get(i)
-    if rd and rd.Data and (rd.DisplayFlags & 1) ~= 0 then
-      for _, off in ipairs(SAFE_SHAPE_OFFSETS[rd.Data.Shape] or { 0 }) do
-        draw_cell(rd.SafeGridIndex + off)
+  local zero = Vector(0, 0)
+  for _, mr in ipairs(map) do
+    if mr.Shape and mr.Position and mr:IsVisible() then
+      local base = mr.DisplayPosition or mr.Position
+      for _, off in ipairs(MinimapAPI:GetRoomShapePositions(mr.Shape) or { zero }) do
+        local col = base.X + off.X
+        local row = base.Y + off.Y
+        if col >= 0 and col < COLS and row >= 0 and row < ROWS then
+          draw_cell(math.floor(row * COLS + col + 0.5))
+        end
       end
     end
   end
