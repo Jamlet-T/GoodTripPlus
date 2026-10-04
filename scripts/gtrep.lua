@@ -1,7 +1,7 @@
 gt = RegisterMod("GoodTripPlus", 1)
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "1.8.4"
+gt.VERSION = "1.8.5"
 pcall(function()
   Isaac.ConsoleOutput("[GoodTripPlus] v" .. gt.VERSION ..
     " loaded (console command: gtpdiag)\n")
@@ -775,6 +775,46 @@ function gt:get_minapi_offset_vec()
     return Vector(topRightX - posX, topRightY + posY)
 end
 --
+-- MinimapAPI 大地图锚点（maxx, miny）：逐项照抄其 UpdateUnboundedMapOffset
+-- （minimapapi/main.lua:1471）——遍历它自己的房间对象，用 DisplayPosition or
+-- Position 和可能被改过的 Shape（虚空层 boss 房被显示成 1×1 且 DisplayPosition
+-- 可能挪一格）算右缘/顶缘。⚠️ 不能用「扫 grid_room 真实占据格」的 get_corner_room
+-- 代替：虚空层 boss 房大概率贴边，其显示格比真实格小一列/一行时两边锚点差一格，
+-- 整张大地图与我们的光标/边界叠加层错位（2026-10-04 用户实测，虚空层/XL）。
+-- 按帧缓存：一帧内所有叠加格共用同一锚点，不必每格重算。
+gt._map_anchor_cache = { frame = -1, maxx = nil, miny = nil }
+function gt:get_minapi_map_anchor()
+    local frame = Game():GetFrameCount()
+    local cache = gt._map_anchor_cache
+    if cache.frame == frame then
+        return cache.maxx, cache.miny
+    end
+    cache.frame = frame
+    cache.maxx, cache.miny = nil, nil
+    local map = MinimapAPI:GetLevel(gt:get_current_dimension())
+    if not map then
+        return nil, nil
+    end
+    local gsx = MinimapAPI.GlobalScaleX or 1
+    for _, room in ipairs(map) do
+        if room:GetDisplayFlags() > 0 then
+            local position = room.DisplayPosition or room.Position
+            -- 其他 mod 注册的自定义形状理论上 AddRoomShape 会补这两张表；缺表时按 1×1 防御
+            local pivot = MinimapAPI.RoomShapeGridPivots[room.Shape] or Vector(0, 0)
+            local gridsize = MinimapAPI:GetRoomShapeGridSize(room.Shape) or Vector(1, 1)
+            local maxxval = (position.X - pivot.X +
+                (gsx >= 0 and gridsize.X or 0)) * gsx
+            if not cache.maxx or maxxval > cache.maxx then
+                cache.maxx = maxxval
+            end
+            if not cache.miny or position.Y < cache.miny then
+                cache.miny = position.Y
+            end
+        end
+    end
+    return cache.maxx, cache.miny
+end
+--
 function gt:get_config_bool(key, default)
     if ModConfigMenu and ModConfigMenu.Config["GoodTripPlus"] then
       local value = ModConfigMenu.Config["GoodTripPlus"][key]
@@ -849,29 +889,29 @@ function gt:dump_map_diagnostics()
       return
     end
 
-    local maxx, miny = nil, nil
+    -- 锚点直接复用投影同款的 get_minapi_map_anchor（照抄 UpdateUnboundedMapOffset，
+    -- 含无 Descriptor 的红钥匙房）；这里额外把每个显示房间逐条列出方便对照
+    local maxx, miny = gt:get_minapi_map_anchor()
     local visibleCount = 0
     for _, mapRoom in ipairs(map) do
-      if mapRoom.Descriptor and mapRoom:GetDisplayFlags() > 0 then
+      if mapRoom:GetDisplayFlags() > 0 then
         visibleCount = visibleCount + 1
         local position = mapRoom.DisplayPosition or mapRoom.Position
-        local pivot = MinimapAPI.RoomShapeGridPivots[mapRoom.Shape]
-        local size = MinimapAPI:GetRoomShapeGridSize(mapRoom.Shape)
-        local maxxval = (position.X - pivot.X + (gsx >= 0 and size.X or 0)) * gsx
-        maxx = not maxx and maxxval or math.max(maxx, maxxval)
-        miny = not miny and position.Y or math.min(miny, position.Y)
         local render = mapRoom.RenderOffset
         local target = mapRoom.TargetRenderOffset
-        out("room safe=" .. tostring(mapRoom.Descriptor.SafeGridIndex) .. " list=" ..
-          tostring(mapRoom.Descriptor.ListIndex) .. " shape=" .. tostring(mapRoom.Shape) ..
-          " pos=" .. tostring(position.X) .. "," .. tostring(position.Y) .. " flags=" ..
+        out("room safe=" .. tostring(mapRoom.Descriptor and mapRoom.Descriptor.SafeGridIndex) ..
+          " list=" .. tostring(mapRoom.Descriptor and mapRoom.Descriptor.ListIndex) ..
+          " shape=" .. tostring(mapRoom.Shape) ..
+          " pos=" .. tostring(position.X) .. "," .. tostring(position.Y) ..
+          " disp=" .. tostring(mapRoom.DisplayPosition) .. " flags=" ..
           tostring(mapRoom:GetDisplayFlags()) .. " render=" ..
           (render and (tostring(render.X) .. "," .. tostring(render.Y)) or "nil") ..
           " target=" .. (target and (tostring(target.X) .. "," .. tostring(target.Y)) or "nil"))
       end
     end
-    out("visible=" .. tostring(visibleCount) .. " MinimapAPI unbounded maxX=" ..
-      tostring(maxx) .. " minY=" .. tostring(miny))
+    out("visible=" .. tostring(visibleCount) .. " anchor maxX=" ..
+      tostring(maxx) .. " minY=" .. tostring(miny) ..
+      " (old corner anchor maxX=" .. tostring(rt.X + 1) .. " minY=" .. tostring(lt.Y) .. ")")
     out("MAP DIAGNOSTICS END")
 end
 --
@@ -885,22 +925,11 @@ end
 --
 function gt:get_pos_grid_index(pos)
     if MinimapAPI then
-      local offsetVec = gt:get_minapi_offset_vec()
-      local ltroom = gt:get_corner_room(1)
-      local rtroom = gt:get_corner_room(2)
-      local gsx = MinimapAPI.GlobalScaleX or 1
+      -- 与 gid_to_rtmap_pos 同一套投影（含同一锚点），直接复用
       for gid, rd in pairs(grid_room) do
         if gt:is_grid_room_displayed(gid) then
-          local col = gid % 13
-          local row = math.floor(gid / 13)
-          local rx, ry
-          if gsx >= 0 then
-            rx = offsetVec.X + (col - rtroom.X - 1) * 17 + 9
-          else
-            rx = offsetVec.X + (ltroom.X - col) * 17 - 17
-          end
-          ry = offsetVec.Y + (row - ltroom.Y) * 15 + 8
-          if math.abs(pos.X - rx) < 8.5 and math.abs(pos.Y - ry) < 7.5 then
+          local p = gt:gid_to_rtmap_pos(gid)
+          if math.abs(pos.X - p.X) < 8.5 and math.abs(pos.Y - p.Y) < 7.5 then
             return gid
           end
         end
@@ -918,18 +947,30 @@ end
 function gt:gid_to_rtmap_pos(gid)
     if MinimapAPI then
       local offsetVec = gt:get_minapi_offset_vec()
-      local ltroom = gt:get_corner_room(1)
-      local rtroom = gt:get_corner_room(2)
       local gsx = MinimapAPI.GlobalScaleX or 1
       local col = gid % 13
       local row = math.floor(gid / 13)
+      local maxx, miny = gt:get_minapi_map_anchor()
       local rx, ry
-      if gsx >= 0 then
-        rx = offsetVec.X + (col - rtroom.X - 1) * 17 + 9
+      if maxx and miny then
+        -- 与 renderUnboundedMinimap 同锚点：roomOffset = (gsx*pos - maxx) * 房宽
+        if gsx >= 0 then
+          rx = offsetVec.X + (col * gsx - maxx) * 17 + 9
+        else
+          rx = offsetVec.X + (col * gsx - maxx) * 17 - 17
+        end
+        ry = offsetVec.Y + (row - miny) * 15 + 8
       else
-        rx = offsetVec.X + (ltroom.X - col) * 17 - 17
+        -- 还没有任何显示房间（大地图本就什么都不画）时的旧回退
+        local ltroom = gt:get_corner_room(1)
+        local rtroom = gt:get_corner_room(2)
+        if gsx >= 0 then
+          rx = offsetVec.X + (col - rtroom.X - 1) * 17 + 9
+        else
+          rx = offsetVec.X + (ltroom.X - col) * 17 - 17
+        end
+        ry = offsetVec.Y + (row - ltroom.Y) * 15 + 8
       end
-      ry = offsetVec.Y + (row - ltroom.Y) * 15 + 8
       return Vector(rx, ry)
     end
     local ltx, lty = gt:get_rtmap_info()
