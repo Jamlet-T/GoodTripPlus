@@ -1446,7 +1446,7 @@ local GT_STRINGS = {
     secret_markers_name = "显示隐藏房候选标记",
     secret_markers_desc = "按住地图键时标出隐藏房 / 超级隐藏房 / 究极隐藏房的可能位置（合并自 Lazy Delver，MIT）。请同时禁用 Lazy Delver 本体，否则会画出两套标记。默认开启。",
     fools_skull_name = "标记深牢 II 的愚者骷髅房",
-    fools_skull_desc = "深牢 II 里有一个特殊骷髅，炸掉后固定掉落愚者卡牌。开启后会在地图上给它所在的房间加一个骷髅图标，方便回头再找。只在你已经进过该房间后才显示，不会剧透本层布局。默认开启。",
+    fools_skull_desc = "深牢 II 里有一个特殊骷髅，炸掉后固定掉落愚者卡牌。开启后会在地图上给它所在的房间加一个骷髅图标，方便回头再找。只在你已经进过该房间后才显示，不会剧透本层布局；骷髅被炸掉后图标自动消失。默认开启。",
   },
 }
 -- A few plausible spellings/casings for each supported language, since the
