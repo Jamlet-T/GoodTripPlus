@@ -39,21 +39,12 @@
   2x2 boss 房被按 1x1 显示时的坑，这里用不上）。
   图标注册失败**不退回**语义不符的内置图标（宁可没有），与骷髅房退回 Card 不同。
 
-  已踩下的按钮自动撤图标
+  图标一经标注就永久保留
   ----------------------
-  生成表是静态的，看不出按钮是否已被踩下。玩家身处标记房时（节流 30 帧）：
-  1. `RoomDescriptor.PressurePlatesTriggered`（布尔量，官方 API 文档明确列出，
-     对应 enums.lua 第 5085 行 `FLAG_PRESSURE_PLATES_TRIGGERED = 1<<1`）——
-     只把 **true** 当「已踩下」的证据（轨道按钮不保证置位，false 不否决）；
-  2. 主判：扫一遍当前房间的网格实体：存在
-     GRID_PRESSURE_PLATE(20)/变体 3 且 `GridEntity.State ~= 0`
-     （PressurePlateState.UNPRESSED = 0）即视为已踩下。
-  都拿不到就维持图标（可接受的退化）。撤标同时从 MinimapAPI 房间对象的
-  图标表里移除图标，`marked_rooms` 里也不再补（rewind 重建也不会复标）。
-  ⚠️ v2.0.x 修复：撤标前提是「认得出人在标记房」。此前用
-  `room:GetGridIndex(player.Position)`（房间内局部索引）对比按楼层网格索引
-  （SafeGridIndex）建的 `marked_rooms` 键，两套坐标系对不上，撤标从未触发过；
-  现改用 `level:GetCurrentRoomDesc()`（仓库内 gtrep/delver 的既有姿势）。
+  按用户拍板（2026-10-04）：不做「已踩自动撤标」——标过的房间图标一直保留到
+  换层。（v2.0.x 曾做过自动撤标：先因「Room:GetGridIndex 的房间内局部索引 vs
+  marked_rooms 的楼层系 SafeGridIndex 键，两套坐标系对不上」从未触发过，修好
+  后需求又取消，整套机制已移除。留下的教训：这两套网格索引不能互比。）
 
   为什么每帧都要「确保」：同骷髅房——MinimapAPI 在换层 / rewind 时会整表重建
   房间对象，重建后图标表回到它自己的初值，每帧补一次可自愈，开销可忽略。
@@ -70,14 +61,9 @@ local GTP_MINEBUTTONS = {}
 local STAGE_MINES_1 = (LevelStage and LevelStage.STAGE2_1) or 3
 local STAGE_MINES_2 = (LevelStage and LevelStage.STAGE2_2) or 4
 
--- 生成表（StbGridType）与运行时（GridEntityType / PressurePlateVariant）里的按钮身份
+-- 生成表（StbGridType）里的按钮身份
 local SPAWN_TYPE_PLATE = 4500    -- StbGridType.PRESSURE_PLATE
 local PLATE_VARIANT_RAIL = 3     -- PressurePlateVariant.MINES_PUZZLE / RAIL_PLATE
-local GRID_TYPE_PLATE = 20       -- GridEntityType.GRID_PRESSURE_PLATE
-local PLATE_STATE_UNPRESSED = 0  -- PressurePlateState.UNPRESSED
-
--- 节流：人在标记房里时，每隔多少帧复查一次按钮是否已踩下
-local RESCAN_INTERVAL = 30
 
 -- 自己的标记图标：resources/gfx/goodtripplus/MineButton.png（16x16，随本模组分发）
 local MARKER_ICON_ID = "MineButton"
@@ -87,16 +73,12 @@ local stats = {
   scans = 0,          -- 重新扫描生成表的次数（每层一次）
   found_rooms = 0,    -- 最近一次扫描找到的按钮房数量
   applied = 0,        -- 累计往房间图标表里补了多少次
-  resolved = 0,       -- 检测到「按钮已踩下」并撤标的次数
-  resolved_how = "",  -- 最近一次撤标用的判据（flag / grid）
   last_result = "尚未触发",
 }
 
 -- 本层「含黄色按钮」的房间集合，键为网格索引；层身份变化时重建
 local marked_rooms = {}
 local marked_key = nil
--- 节流计数器（用 Game():GetFrameCount() 做基准）
-local last_check_frame = -999999
 
 local function log(message)
   if gt.DebugMod then
@@ -235,23 +217,6 @@ local function rebuild_marked_rooms(level)
   log("矿洞按钮：本层找到 " .. stats.found_rooms .. " 个按钮房")
 end
 
--- 把图标从 MinimapAPI 房间对象的图标表里撤掉；返回是否真的撤了
-local function remove_icon(room)
-  local removed = false
-  for _, key in ipairs({ "PermanentIcons", "VisitedIcons" }) do
-    local icons = room[key]
-    if type(icons) == "table" then
-      for i = #icons, 1, -1 do
-        if icons[i] == MARKER_ICON_ID then
-          table.remove(icons, i)
-          removed = true
-        end
-      end
-    end
-  end
-  return removed
-end
-
 -- 确保房间的 VisitedIcons 里有我们的图标（append；语义与骷髅房一致：
 -- 只标进过的房间）；返回是否真的补上了
 local function ensure_icon(room, descriptor)
@@ -277,99 +242,6 @@ local function ensure_icon(room, descriptor)
   return true
 end
 
--- 后备判据：扫当前房间网格，有 GRID_PRESSURE_PLATE(20)/变体 3 且 State ~= 0 的
--- 压力板 = 已踩下。返回 true/false；接口全挂时返回 nil（保守：不撤标）
-local function grid_says_pressed()
-  local ok, pressed = pcall(function()
-    local room = Game():GetRoom()
-    if not room then return nil end
-
-    local found_any = false
-    local size = room:GetGridSize()
-    for i = 0, size - 1 do
-      local ge = room:GetGridEntity(i)
-      if ge and ge:GetType() == GRID_TYPE_PLATE and ge:GetVariant() == PLATE_VARIANT_RAIL then
-        found_any = true
-        local state = ge.State
-        if type(state) == "number" and state ~= PLATE_STATE_UNPRESSED then
-          return true -- 有按钮且已不是「未踩下」状态
-        end
-      end
-    end
-    if not found_any then
-      return nil -- 一个 20/3 都没扫到：信息不足，交给上层保守处理
-    end
-    return false -- 按钮还在、都是未踩下
-  end)
-  if not ok then
-    return nil
-  end
-  return pressed
-end
-
--- 人在标记房里时，节流地复查按钮是否已踩下；已踩下就撤标。
--- 判据：先看 RoomDescriptor.PressurePlatesTriggered（只信 true，轨道按钮可能不置位），
--- 主判是扫当前房网格找 20/3 且 State ~= 0。
--- ⚠️ 当前房间身份必须用 level:GetCurrentRoomDesc()（楼层系坐标）来取；
--- 不能用 room:GetGridIndex(player.Position)（那是房间内局部索引，跟 marked_rooms
--- 的楼层系 SafeGridIndex 键根本对不上——v2.0.x 之前的撤标因此从未触发过）。
-local function check_current_room(frame)
-  if frame - last_check_frame < RESCAN_INTERVAL then
-    return
-  end
-  last_check_frame = frame
-
-  local level = Game():GetLevel()
-  if not level then return end
-
-  -- 当前房间的 RoomDescriptor（楼层系身份；SafeGridIndex 与 marked_rooms 的键同系）
-  local ok_desc, descriptor = pcall(function() return level:GetCurrentRoomDesc() end)
-  if not ok_desc or not descriptor then
-    return
-  end
-  local gid = descriptor.SafeGridIndex or descriptor.GridIndex
-  if not gid or not marked_rooms[gid] then
-    return
-  end
-
-  -- 1) 官方布尔量：只把 true 当「已踩下」的证据；false 不否决（留网格扫描主判）
-  local resolved, how
-  local ok_flag, flag = pcall(function() return descriptor.PressurePlatesTriggered end)
-  if ok_flag and flag == true then
-    resolved, how = true, "flag"
-  end
-  -- 2) 主判：扫网格找 20/3 且 State ~= 0
-  if resolved == nil then
-    local pressed = grid_says_pressed()
-    if pressed == true then
-      resolved, how = true, "grid"
-    end
-    -- pressed == false（按钮都在、未踩）/ nil（信息不足）→ 维持图标
-  end
-
-  if resolved then
-    marked_rooms[gid] = nil
-    stats.resolved = stats.resolved + 1
-    stats.resolved_how = how or "flag"
-    stats.last_result = string.format("房间 %s 的按钮已踩下（判据 %s，累计撤标 %d 次）",
-      tostring(gid), stats.resolved_how, stats.resolved)
-    log("矿洞按钮：房间 " .. tostring(gid) .. " 的按钮已踩下，撤掉图标")
-
-    -- 立刻从当前层 MinimapAPI 的房间里撤掉图标（不等下轮 ensure）
-    local rooms = MinimapAPI and MinimapAPI.GetLevel and MinimapAPI:GetLevel()
-    if rooms then
-      for _, r in ipairs(rooms) do
-        local d = r.Descriptor
-        local r_gid = d and (d.SafeGridIndex or d.GridIndex)
-        if r_gid == gid then
-          remove_icon(r)
-          break
-        end
-      end
-    end
-  end
-end
-
 local function update()
   if not is_enabled() then return end
   if not MinimapAPI or not MinimapAPI.Levels or not MinimapAPI.GetLevel then return end
@@ -387,11 +259,6 @@ local function update()
     marked_key = key
     rebuild_marked_rooms(level)
   end
-
-  if next(marked_rooms) == nil then return end
-
-  -- 人在标记房里时，低频复查按钮是否已踩下
-  check_current_room(Game():GetFrameCount())
 
   if next(marked_rooms) == nil then return end
 
@@ -437,8 +304,8 @@ gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
     "MineButtonRoom",
     true,
     zh and "标记矿洞 II 的轨道按钮房" or "Mark the Rail Button Rooms in Mines II",
-    zh and "在矿洞 II（Mines/Ashpit）地图上，把有黄色轨道按钮的房间用按钮图标标出——全层共 3 个按钮，全部踩下后放下通往刀片碎片 2 的轨道桥（腐妈支线必经）。只有进入过的房间才会标注（与标记骷髅一致，不剧透未探索的房间）；按钮踩下后图标自动消失。默认开启。"
-       or "On the Mines II (Ashpit) map, mark the rooms holding the yellow Rail Plates with a button icon. There are 3 buttons per floor; pressing all of them lowers the rail bridge to Knife Piece 2 (the path to Mother). Only rooms you have entered are marked (same as the Fool's skull marker, so unexplored rooms are never spoiled); the icon drops automatically once the button is pressed. Default: enabled"
+    zh and "在矿洞 II（Mines/Ashpit）地图上，把有黄色轨道按钮的房间用按钮图标标出——全层共 3 个按钮，全部踩下后放下通往刀片碎片 2 的轨道桥（腐妈支线必经）。只有进入过的房间才会标注（与标记骷髅一致，不剧透未探索的房间）；图标一经标注就会一直保留。默认开启。"
+       or "On the Mines II (Ashpit) map, mark the rooms holding the yellow Rail Plates with a button icon. There are 3 buttons per floor; pressing all of them lowers the rail bridge to Knife Piece 2 (the path to Mother). Only rooms you have entered are marked (same as the Fool's skull marker, so unexplored rooms are never spoiled); once marked, an icon stays for the rest of the floor. Default: enabled"
   )
 end)
 
@@ -456,8 +323,7 @@ gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command)
       " isMines=" .. tostring(level and is_mines_stage(level) or false)
     lines[#lines + 1] = "mineButtons.scans=" .. stats.scans ..
       " foundRooms=" .. stats.found_rooms ..
-      " applied=" .. stats.applied ..
-      " resolved=" .. stats.resolved
+      " applied=" .. stats.applied
     lines[#lines + 1] = "mineButtons.lastResult=" .. stats.last_result
     lines[#lines + 1] = "mineButtons.icon=" ..
       (marker_icon_state == true and MARKER_ICON_ID .. " (custom)"
