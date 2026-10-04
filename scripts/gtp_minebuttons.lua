@@ -286,28 +286,9 @@ gt:AddCallback(ModCallbacks.MC_POST_NEW_LEVEL, function()
   marked_key = nil
 end)
 
--- MCM 开关（默认开）
---
--- ⚠️ 必须只注册一次：MCM 的 `AddSetting` 无脑 append、不按键去重，而
--- `MC_POST_GAME_STARTED` **每次 rewind 都会再触发一次** → 不设 once 标记的话，
--- 用几次 rewind 配置菜单里就多几份重复项（见 gtp_mapbounds.lua 同处注释）。
-local mcm_registered = false
-gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
-  if mcm_registered or not ModConfigMenu then
-    return
-  end
-  mcm_registered = true
-  local zh = type(Options.Language) == "string"
-    and Options.Language:lower():sub(1, 2) == "zh"
-  ModConfigMenu.AddBooleanSetting(
-    "GoodTripPlus", nil,
-    "MineButtonRoom",
-    true,
-    zh and "标记矿洞 II 的轨道按钮房" or "Mark the Rail Button Rooms in Mines II",
-    zh and "在矿洞 II（Mines/Ashpit）地图上，把有黄色轨道按钮的房间用按钮图标标出——全层共 3 个按钮，全部踩下后放下通往刀片碎片 2 的轨道桥（腐妈支线必经）。只有进入过的房间才会标注（与标记骷髅一致，不剧透未探索的房间）；图标一经标注就会一直保留。默认开启。"
-       or "On the Mines II (Ashpit) map, mark the rooms holding the yellow Rail Plates with a button icon. There are 3 buttons per floor; pressing all of them lowers the rail bridge to Knife Piece 2 (the path to Mother). Only rooms you have entered are marked (same as the Fool's skull marker, so unexplored rooms are never spoiled); once marked, an icon stays for the rest of the floor. Default: enabled"
-  )
-end)
+-- MCM 开关：不在本模块注册——2026-10-04 起全部 MCM 项集中在 gtrep.lua 的
+-- 统一注册块里按用户指定顺序注册（本功能配置键 = MineButtonRoom，默认开；
+-- 文案在 gtrep.lua 的 GT_STRINGS.minebutton_*）。
 
 -- 把统计并入统一的 gtpdiag 输出（MC_EXECUTE_CMD 的返回串会自动拼接）
 gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command)
