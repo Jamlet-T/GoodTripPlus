@@ -18,6 +18,9 @@
 --      （scripts/gtp_mapbounds.lua，默认开启；素材 resources/gfx/goodtripplus/bounds.*）
 --   8. 虚空层标记精神错乱的 boss 房（scripts/gtp_delirium.lua，默认关闭；
 --      素材 resources/gfx/goodtripplus/Delirium.*）
+--   9. 矿洞 II 标记黄色轨道按钮（Rail Plate）所在的房间：踩下全层 3 个按钮才
+--      放行刀片碎片 2 的轨道桥；房间一显示在地图上就标注，按钮踩下后图标自动消失
+--      （scripts/gtp_minebuttons.lua，默认开启；素材 resources/gfx/goodtripplus/MineButton.*）
 
 require("scripts.gtrep")
 require("scripts.gtp_rewindfix")
@@ -27,3 +30,4 @@ require("scripts.gtp_skullroom")
 require("scripts.gtp_bosswindow")
 require("scripts.gtp_mapbounds")
 require("scripts.gtp_delirium")
+require("scripts.gtp_minebuttons")

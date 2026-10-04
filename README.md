@@ -14,12 +14,13 @@
 3. **合并**了 Lazy Delver 的隐藏房候选标记，并把标记对齐到 MinimapAPI 的真实布局（见第三节）。
 4. **准入与传送判定整体移植**自 GoodTrip [Fixed]（选项同名同默认值，见第四节）。
 5. **新增**了深牢 II 愚者骷髅房的标记，默认开启（见第五节）。
-6. **战斗时地图隐藏**：跟随 MinimapAPI 自带的 "Hide Map in Combat"，让本模组自绘的标记一起隐藏（见第六节）。
+6. **战斗时地图隐藏**：跟随 MinimapAPI 自带的 "Hide Map in Combat"，让本模组自绘的标记一起隐藏（见第八节）。
 7. **新增**了「房间里出现奖励房间的门（恶魔房 / 天使房 / Boss Rush / 死寂）时禁止传送」，**常开**（见第四节末尾）。
-8. **新增**了「地图边界房间高亮」：按住地图键时画出贴着 13×13 边界的房间外沿，默认开启（见第六节）。
+8. **新增**了「地图边界房间高亮」：按住地图键时画出贴着 13×13 边界的房间外沿，默认开启（见第七节）。
 9. **（v1.8.2）合并**了传送范围的设置：把 Fixed 的 `AllowNeighborRoom` + `AllowAnyRoom` 两项
    合成一个三选一 `TravelMode`，MCM 里显示为「可以传送到」——「任意房间 / 相邻房间 / 已探索房间」，
    默认「相邻房间」（行为等价于原来的默认组合），见第四节。
+10. **新增**了矿洞 II 黄色轨道按钮（Rail Plate）所在房间的标记，默认开启（见第六节）。
 
 ---
 
@@ -337,9 +338,46 @@ skullRoom.rooms={42}
 `foundRooms=0` 说明本层生成表里没找到该骷髅（正常——不是每层都有）；
 `rooms={...}` 是识别到的网格索引列表；`icon=` 后面 `(custom)` 表示用的是自绘骷髅图标。
 
+## 六、矿洞 II 的黄色轨道按钮房标记（默认开启）
+
+**背景**：矿洞 II（Mines II / Ashpit，腐妈支线的第 2 层）里散布着 **3 个黄色轨道按钮**
+（Rail Plate）。全踩下后才会放下列车轨道桥、放行去拿**刀片碎片 2**——这是通往腐妈
+（Mother）的必经一步。开启后，按钮所在的房间一显示在地图上就会画一个黄色按钮图标，
+按钮被踩下的房间会**自动撤掉图标**（过期情报不如没有）。
+
+开关：**MCM → GoodTripPlus → 「标记矿洞 II 的轨道按钮房」**，或 `gtconfig.lua` 里 `gt.MineButtonRoom = false`。
+
+识别依据（全部有正式出处，并用原版房间数据实测验证）：
+
+| 依据 | 内容 |
+| --- | --- |
+| REPENTOGON 的 `enums_ex.lua` 第 1729 行 | `PressurePlateVariant` 里 `MINES_PUZZLE = 3, RAIL_PLATE = 3` —— 矿洞黄色按钮的运行时变体 |
+| 同文件第 1697 行 | `StbGridType` 里 `PRESSURE_PLATE = 4500, BUTTON = 4500` —— 房间布局（`.stb`）里压力板的类型 ID |
+| **原版数据实测** | 用 gibbed 式读取器解开本机 `resources/packed/rooms.a` 的 `resources/rooms/29.mines.stb` 与 `30.ashpit.stb`：所有名为 "Button Room" 的房间（variant 5000+，与社区 mod guidepost 按房间名识别的结论互相印证）每间恰好 1 条 `type=4500 / variant=3` 的生成条目；其它楼层没有任何 4500/3 |
+| 层判定 | `STAGE2_1`（Mines I）与 `STAGE2_2`（Mines II）都扫；生成表本身就是准入门——按钮只在持刀片碎片 1 时生成，别的层扫出来是空集；贪婪模式与回溯线不参与 |
+
+实现是独立模块 `scripts/gtp_minebuttons.lua`，与骷髅房同构：读房间**生成表**（不进房扫实体，
+rewind 后也不丢），图标走 `MinimapAPI:AddIcon` 注册的**自有图标** `MineButton`
+（素材 `resources/gfx/goodtripplus/MineButton.png`，16x16）。塞的是 **`PermanentIcons`**
+（房间一显示在地图上就标注，找按钮要的是「还没进的房间」；未显示的房间由 MinimapAPI
+自己防剧透；按钮房是 1x1 普通房、无其它常驻图标，append 即可）。「已踩」判定：
+人在标记房里时每 30 帧复查一次，首选 `RoomDescriptor.PressurePlatesTriggered`
+（官方文档明确列出的布尔量），后备扫当前房网格找 20/3 且 `State ~= 0` 的按钮；
+图标注册失败不退回语义不符的内置图标（宁可没有）。
+
+诊断示例（`gtpdiag` 输出）：
+
+```
+mineButtons.enabled=true stage=4 isMines=true
+mineButtons.scans=1 foundRooms=3 applied=3 resolved=1
+mineButtons.lastResult=房间 42 的按钮已踩下（判据 flag，累计撤标 1 次）
+mineButtons.icon=MineButton (custom)
+mineButtons.rooms={42,95,118}
+```
+
 ---
 
-## 六、地图边界房间高亮（默认开启）
+## 七、地图边界房间高亮（默认开启）
 
 以撒的地图上限是 13×13（初始房为中心，上下左右各 6 格）。按住地图键时，把**贴着地图
 边界**的房间、**靠边的那条边**画出来（角房画两条），一眼就能看出「这一侧外面已经没有
@@ -367,7 +405,7 @@ skullRoom.rooms={42}
 `gt.ShowMapBounds = false`（默认开启）。
 
 
-## 七、战斗时地图隐藏（交给 MinimapAPI）
+## 八、战斗时地图隐藏（交给 MinimapAPI）
 
 战斗时地图要不要隐藏，**由 MinimapAPI 自带的 "Hide Map in Combat" 决定**
 （MCM → Minimap API，`1 = Never` / `2 = Bosses Only` / `3 = Always`，默认 1）。
@@ -392,7 +430,7 @@ MinimapAPI 藏地图时管不到**本模组自己画的**元素。各元素的�
 
 ---
 
-## 八、安装 / 与上游共存
+## 九、安装 / 与上游共存
 
 1. 把本仓库同步到游戏 mods 目录（mod 目录名必须是 `goodtripplus`）：
 
@@ -442,7 +480,7 @@ bash pack.sh        # 产出 dist/goodtripplus-<版本>.zip
 
 ---
 
-## 九、目录结构
+## 十、目录结构
 
 ```
 issacMod/                       ← 工作区 git 仓库（可容纳多个 mod）
@@ -457,11 +495,13 @@ issacMod/                       ← 工作区 git 仓库（可容纳多个 mod�
     ├── THIRD_PARTY.md          ← 各来源的授权状况与发布路线
     ├── resources/gfx/goodtripplus/ ← 标记精灵：marker.*（隐藏房候选，来自 Lazy Delver）
     │                                 TintedSkull.*（愚者骷髅房图标，本模组自有素材）
+    │                                 MineButton.*（矿洞按钮房图标，本模组自有素材）
     └── scripts/
         ├── gtrep.lua           ← 上游 MLX's Tweak 主逻辑（仅改名重写 + 准入判定扩展）
         ├── gtp_rewindfix.lua   ← rewind 掉落物图标修复（不依赖具体回调的帧末监视）
         ├── gtp_delver.lua      ← 隐藏房候选标记的回调接线 + MCM 开关
         ├── gtp_skullroom.lua   ← 深牢 II 愚者骷髅房标记（读房间生成表 → MinimapAPI 房间图标）
+        ├── gtp_minebuttons.lua ← 矿洞 II 黄色按钮房标记（读房间生成表 → MinimapAPI 房间图标）
         └── delver/             ← 移植自 Lazy Delver（MIT），仅改了 require 路径
             ├── const.lua       ← 常量表
             ├── geometry.lua    ← 形状占据格、相邻格、门槽映射
@@ -480,7 +520,7 @@ issacMod/                       ← 工作区 git 仓库（可容纳多个 mod�
 
 ---
 
-## 十、与上游 / 来源的差异清单
+## 十一、与上游 / 来源的差异清单
 
 | 位置 | 改动 |
 | --- | --- |
@@ -488,15 +528,16 @@ issacMod/                       ← 工作区 git 仓库（可容纳多个 mod�
 | `scripts/gtp_rewindfix.lua` | 新增文件，rewind 图标修复 |
 | `scripts/gtp_delver.lua` | 新增文件，隐藏房候选标记的回调接线 |
 | `scripts/gtp_skullroom.lua` | 新增文件，深牢 II 愚者骷髅房标记（自己写的，未参考任何 mod 的实现代码） |
+| `scripts/gtp_minebuttons.lua` | 新增文件，矿洞 II 黄色按钮房标记（同上，自研；识别值 4500/3 用原版 `.stb` 实测验证） |
 | `scripts/gtp_bosswindow.lua` | 新增文件，房间里出现「奖励房间的门」（恶魔房 / 天使房 / Boss Rush / 死寂）时禁用传送，常开（**包装 `gt.check_teleble`** 实现，不改 `gtrep.lua`） |
 | `scripts/gtp_mapbounds.lua` | 新增文件，地图边界房间高亮（默认开；用一张 8×8 纯白贴图缩放画边） |
 | `scripts/delver/*` | 从 Lazy Delver 原样移植（仅改写 `require` 路径），`render.lua` 重写了定位部分 |
-| `resources/gfx/goodtripplus/*` | `marker.*` 从 Lazy Delver 复制（换到自己的路径避免与它本体冲突）；`TintedSkull.*` 是本模组自有的骷髅图标（16x16）；`bounds.*` 是本模组自有的纯白贴图（8×8，画地图边界线用） |
+| `resources/gfx/goodtripplus/*` | `marker.*` 从 Lazy Delver 复制（换到自己的路径避免与它本体冲突）；`TintedSkull.*` 是本模组自有的骷髅图标（16x16）；`MineButton.*` 是本模组自有的按钮图标（16x16）；`bounds.*` 是本模组自有的纯白贴图（8×8，画地图边界线用） |
 | `main.lua` / `metadata.xml` / `gtconfig.lua` / `deploy.sh` | 新增 / 重写 |
 
 ---
 
-## 十一、开发流程
+## 十二、开发流程
 
 ```bash
 # 改完源码后
@@ -510,7 +551,7 @@ git add -A && git commit -m "..."
 
 ---
 
-## 十二、授权与发布
+## 十三、授权与发布
 
 本仓库的内容来自三个来源，授权状况**互不相同**，详见 [`LICENSE`](LICENSE) 与 [`THIRD_PARTY.md`](THIRD_PARTY.md)。
 
