@@ -88,7 +88,7 @@ local function draw_cell(gid)
   local left, right = col == 0, col == COLS - 1
   local top, bottom = row == 0, row == ROWS - 1
   if not (left or right or top or bottom) then
-    return -- 内部格：不算投影（gid_to_rtmap_pos 里有全图角房扫描，不便宜）
+    return -- 内部格：不算投影（gid_to_rtmap_pos 的锚点虽按帧缓存，能不调就不调）
   end
   local pos = gt:gid_to_rtmap_pos(gid)
   if left then
