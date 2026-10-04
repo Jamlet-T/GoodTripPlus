@@ -31,10 +31,12 @@
   --------------------------------------------------------
   懒注册自定义图标 `MineButton`（素材 resources/gfx/goodtripplus/MineButton.png +
   MineButton.anm2，16x16、pivot 0,0，图案约 8x8 偏左上，与 TintedSkull 同规格），
-  塞进房间的 **`PermanentIcons`**——找按钮要的是「还没进的房间」，与 Delirium 一致、
-  与骷髅房（VisitedIcons）不同。按钮房是 1x1 普通房、没有其它常驻图标，
-  append 即可（Delirium 的「插第 1 位」是 2x2 boss 房被按 1x1 显示时的坑，这里用不上）。
-  未探索房间的防剧透规则由 MinimapAPI 自己保证（房间没在地图上显示就不画图标）。
+  塞进房间的 **`VisitedIcons`**——只在玩家**进过房间**后才标注，与骷髅房同语义
+  （v2.0.x 修正：初版误用 `PermanentIcons`，房间一显示在地图上就画，等于剧透了
+  没进过的按钮房；按钮房的位置本该由玩家自己探索发现）。进入判定与骷髅房一致：
+  `descriptor.VisitedCount > 0` 时才补，MinimapAPI 画 `VisitedIcons` 时自己也再判一次。
+  按钮房是 1x1 普通房、没有其它图标，append 即可（Delirium 的「插第 1 位」是
+  2x2 boss 房被按 1x1 显示时的坑，这里用不上）。
   图标注册失败**不退回**语义不符的内置图标（宁可没有），与骷髅房退回 Card 不同。
 
   已踩下的按钮自动撤图标
@@ -246,16 +248,21 @@ local function remove_icon(room)
   return removed
 end
 
--- 确保房间的 PermanentIcons 里有我们的图标（append；按钮房 1x1、无其它常驻图标，
--- 不会撞 1x1 只画第 1 个图标的坑）；返回是否真的补上了
-local function ensure_icon(room)
+-- 确保房间的 VisitedIcons 里有我们的图标（append；语义与骷髅房一致：
+-- 只标进过的房间）；返回是否真的补上了
+local function ensure_icon(room, descriptor)
   if not register_marker_icon() then
     return false
   end
-  local icons = room.PermanentIcons
+  -- 只标记已探索过的房间。没进去过就不该知道里面有按钮（MinimapAPI 画
+  -- VisitedIcons 时也会再判一次，这里判是为了不去改没意义的房间）
+  if not descriptor or (descriptor.VisitedCount or 0) <= 0 then
+    return false
+  end
+  local icons = room.VisitedIcons
   if type(icons) ~= "table" then
     icons = {}
-    room.PermanentIcons = icons
+    room.VisitedIcons = icons
   end
   for i = 1, #icons do
     if icons[i] == MARKER_ICON_ID then
@@ -398,7 +405,7 @@ local function update()
     local descriptor = room.Descriptor
     local grid_index = descriptor and (descriptor.SafeGridIndex or descriptor.GridIndex)
     if grid_index and marked_rooms[grid_index] then
-      if ensure_icon(room) then
+      if ensure_icon(room, descriptor) then
         stats.applied = stats.applied + 1
         stats.last_result = string.format("已标记房间 %s（累计 %d 次）",
           tostring(grid_index), stats.applied)
@@ -433,8 +440,8 @@ gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
     "MineButtonRoom",
     true,
     zh and "标记矿洞 II 的轨道按钮房" or "Mark the Rail Button Rooms in Mines II",
-    zh and "在矿洞 II（Mines/Ashpit）地图上，把有黄色轨道按钮的房间用按钮图标标出——全层共 3 个按钮，全部踩下后放下通往刀片碎片 2 的轨道桥（腐妈支线必经）。房间一显示在地图上就会标注；按钮踩下后图标自动消失。默认开启。"
-       or "On the Mines II (Ashpit) map, mark the rooms holding the yellow Rail Plates with a button icon. There are 3 buttons per floor; pressing all of them lowers the rail bridge to Knife Piece 2 (the path to Mother). Rooms are marked as soon as they show on the map; the icon drops automatically once the button is pressed. Default: enabled"
+    zh and "在矿洞 II（Mines/Ashpit）地图上，把有黄色轨道按钮的房间用按钮图标标出——全层共 3 个按钮，全部踩下后放下通往刀片碎片 2 的轨道桥（腐妈支线必经）。只有进入过的房间才会标注（与标记骷髅一致，不剧透未探索的房间）；按钮踩下后图标自动消失。默认开启。"
+       or "On the Mines II (Ashpit) map, mark the rooms holding the yellow Rail Plates with a button icon. There are 3 buttons per floor; pressing all of them lowers the rail bridge to Knife Piece 2 (the path to Mother). Only rooms you have entered are marked (same as the Fool's skull marker, so unexplored rooms are never spoiled); the icon drops automatically once the button is pressed. Default: enabled"
   )
 end)
 
