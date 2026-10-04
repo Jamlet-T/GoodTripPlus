@@ -53,8 +53,20 @@ local function enabled()
 end
 
 -- 换房间：重算地图数据、做门位检查、标记需要刷新
+--
+-- ⚠️ 状态维护必须在开关闸门**之前**（2026-10-04 用户报的 bug）：
+-- `state.has_changed` 初始为 true、换层时又会置回 true，唯一复位点是
+-- `map.reload()` 末尾的 `state.done()`；而 reload 只在 room.door_check() 开头被调。
+-- 旧代码把它整个放在 `enabled()` 之后，导致关掉 ShowSecretMarkers 时
+-- has_changed 永久卡死 → `state.is_ignored()` 恒为 true →
+-- 地图边界高亮（gtp_mapbounds.lua）读同一份 state，被它拦得永远不画。
+-- 所以「层身份 / 维度 / has_changed 复位」这条共享状态链必须无条件跑；
+-- 门位排除与候选刷新才是标记专属、留在闸门后。
 gt:AddCallback(ModCallbacks.MC_POST_NEW_ROOM, function()
   state.check()
+  if state.has_changed() then
+    map.reload() -- 无条件维护共享状态（内部会 state.update + state.done）
+  end
   if not enabled() then
     return
   end
