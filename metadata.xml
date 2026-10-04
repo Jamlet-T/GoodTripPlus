@@ -33,7 +33,7 @@ Required: MinimapAPI
 Optional: Mod Config Menu (for in-game settings)
 
 Credits: original GoodTrip by tarako; this build is based on Goodtrip MLX's Tweak; Secret Room candidate markers are ported from Lazy Delver by dokee (MIT). See LICENSE and THIRD_PARTY.md for details. If the original author has any concerns about this derivative work, contact me and I will take it down promptly.</description>
-    <version>2.0.2</version>
+    <version>2.0.3</version>
     <visibility>Public</visibility>
     <tag id="Lua"/>
     <tag id="Tweaks"/>
