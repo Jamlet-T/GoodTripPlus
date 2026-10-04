@@ -26,13 +26,13 @@ Also in this build:
 
 Settings in the MCM menu or the config file: TravelMode, FollowCurseOfLost, FairTripPath, ArriveAtDoor, FairTripTime, ShowSecretMarkers, FoolsSkullRoom, ShowMapBounds, DeliriumRoom, CursorSpeed. FastTransition and HighlightCursorRoom are on by default and only configurable in gtconfig.lua (no MCM entry).
 
-Please uninstall or disable goodtrip_mlxtweak (and the original Goodtrip) before use: all three share the same globals and cannot run at the same time.
+Please uninstall or disable goodtrip_mlxtweak, GoodTrip [Fixed] and the original Goodtrip before use: they share the same globals and cannot run at the same time.
 Required: MinimapAPI
 
 Optional: Mod Config Menu (for in-game settings)
 
 Credits: original GoodTrip by tarako; this build is based on Goodtrip MLX's Tweak; Secret Room candidate markers are ported from Lazy Delver by dokee (MIT). See LICENSE and THIRD_PARTY.md for details.</description>
-    <version>1.8.5</version>
+    <version>2.0.0</version>
     <visibility>Public</visibility>
     <tag id="Lua"/>
     <tag id="Tweaks"/>
