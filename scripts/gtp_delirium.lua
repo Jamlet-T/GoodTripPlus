@@ -285,28 +285,9 @@ gt:AddCallback(ModCallbacks.MC_POST_NEW_LEVEL, function()
   marked_key = nil
 end)
 
--- MCM 开关（默认关；显示类功能，与隐藏房标记 / 骷髅房一样给开关）
---
--- ⚠️ 必须只注册一次：MCM 的 `AddSetting` 无脑 append、不按键去重，而
--- `MC_POST_GAME_STARTED` **每次 rewind 都会再触发一次** → 不设 once 标记的话，
--- 用几次 rewind 配置菜单里就多几份重复项（见 gtp_mapbounds.lua 同处注释）。
-local mcm_registered = false
-gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
-  if mcm_registered or not ModConfigMenu then
-    return
-  end
-  mcm_registered = true
-  local zh = type(Options.Language) == "string"
-    and Options.Language:lower():sub(1, 2) == "zh"
-  ModConfigMenu.AddBooleanSetting(
-    "GoodTripPlus", nil,
-    "DeliriumRoom",
-    false,
-    zh and "标记虚空层的精神错乱房" or "Mark the Delirium Room in The Void",
-    zh and "在虚空层（The Void）地图上，把属于精神错乱（Delirium）的那间 boss 房用专属图标标出来——虚空层有好几间 boss 房，只有一间是 Delirium。只要该房间在地图上显示出来就会标注，不必先进去过。默认关闭。"
-       or "On the map of The Void, mark the boss room that belongs to Delirium with a dedicated icon. The Void has several boss rooms but only one of them is Delirium. Shown as soon as the room is revealed on the map, no need to enter it first. Default: disabled"
-  )
-end)
+-- MCM 开关：不在本模块注册——2026-10-04 起全部 MCM 项集中在 gtrep.lua 的
+-- 统一注册块里按用户指定顺序注册（本功能配置键 = DeliriumRoom，默认关；
+-- 文案在 gtrep.lua 的 GT_STRINGS.delirium_*）。
 
 -- 把统计并入统一的 gtpdiag 输出（与骷髅房 / rewind 修复共用同一条命令）
 gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command)

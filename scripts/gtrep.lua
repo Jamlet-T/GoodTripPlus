@@ -1417,7 +1417,7 @@ local GT_STRINGS = {
     travel_mode_name = "Can Teleport To",
     travel_mode_values = {[1] = "Any Room", [2] = "Neighbor Room", [3] = "Explored Rooms"},
     travel_mode_desc = "How far a trip may reach. Any Room: every room shown on the map. Neighbor Room: cleared rooms, plus a shown but not-yet-cleared room next to a cleared one. Explored Rooms: only rooms you have visited and cleared. Default: Neighbor Room",
-    fairpath_name = "Fair Trip Path",
+    fairpath_name = "Only Teleport to Connected Rooms",
     fairpath_desc = "Only allow teleport to rooms reachable through cleared rooms, door by door. Default: enabled",
     arrivedoor_name = "Arrive At Door",
     arrivedoor_desc = "Arrive standing at the exact door a walk would have come in by. A far trip into a room bigger than the screen passes through the room before it, which shows for a moment. Default: enabled",
@@ -1427,6 +1427,12 @@ local GT_STRINGS = {
     secret_markers_desc = "Marks where Secret / Super Secret / Ultra Secret rooms could be while holding the map key. Merged from Lazy Delver (MIT). Disable Lazy Delver itself to avoid drawing two sets of markers. Default: enabled",
     fools_skull_name = "Mark The Fool Skull Room",
     fools_skull_desc = "In Depths II a special skull always drops The Fool card when destroyed. This puts a skull icon on the room that contains it, so you can find it again. Only shown for rooms you have already visited, so it never spoils the layout. Default: enabled",
+    map_bounds_name = "Show Map Bounds",
+    map_bounds_desc = "While holding the map key, highlight the outer edge of rooms that sit on the 13x13 map border, so you can tell which side has no more rooms left. Only explored rooms are drawn. Default: enabled",
+    delirium_name = "Mark the Delirium Room in The Void",
+    delirium_desc = "On the map of The Void, mark the boss room that belongs to Delirium with a dedicated icon. The Void has several boss rooms but only one of them is Delirium. Shown as soon as the room is revealed on the map, no need to enter it first. Default: disabled",
+    minebutton_name = "Mark the Rail Button Rooms in Mines II",
+    minebutton_desc = "On the Mines II (Ashpit) map, mark the rooms holding the yellow Rail Plates with a button icon. There are 3 buttons per floor; pressing all of them lowers the rail bridge to Knife Piece 2 (the path to Mother). Only rooms you have entered are marked (same as the Fool's skull marker, so unexplored rooms are never spoiled); once marked, an icon stays for the rest of the floor. Default: enabled",
   },
   zh_hans = {
     title = "GoodTripPlus",
@@ -1437,7 +1443,7 @@ local GT_STRINGS = {
     travel_mode_name = "可以传送到",
     travel_mode_values = {[1] = "任意房间", [2] = "相邻房间", [3] = "已探索房间"},
     travel_mode_desc = "决定传送能跳多远。任意房间：地图上显示的房间都能传。相邻房间：已清怪的房间，以及已清房旁那间已显示但未清的房间。已探索房间：只有你进过并且已清怪的房间。默认：相邻房间。",
-    fairpath_name = "只能传送到已清房连通的房间",
+    fairpath_name = "只能传送到已连通的房间",
     fairpath_desc = "传送目标必须能从当前房间沿已清怪的房间逐门抵达。默认开启。",
     arrivedoor_name = "传送后站在门口",
     arrivedoor_desc = "传送到走路会走进来的那扇门门口；跨屏大房间的远途传送会先经过房间前部，会短暂看到一瞬。默认开启。",
@@ -1447,6 +1453,12 @@ local GT_STRINGS = {
     secret_markers_desc = "按住地图键时标出隐藏房 / 超级隐藏房 / 究极隐藏房的可能位置（合并自 Lazy Delver，MIT）。请同时禁用 Lazy Delver 本体，否则会画出两套标记。默认开启。",
     fools_skull_name = "标记深牢 II 的愚者骷髅房",
     fools_skull_desc = "深牢 II 里有一个特殊骷髅，炸掉后固定掉落愚者卡牌。开启后会在地图上给它所在的房间加一个骷髅图标，方便回头再找。只在你已经进过该房间后才显示，不会剧透本层布局。默认开启。",
+    map_bounds_name = "显示地图边界",
+    map_bounds_desc = "按住地图键时，把贴着地图边界（13×13 最外圈）的房间、靠边的那条边高亮出来，方便判断哪一侧外面已经没有房间了。只画已经探索到的房间。默认开启。",
+    delirium_name = "标记虚空层的精神错乱房",
+    delirium_desc = "在虚空层（The Void）地图上，把属于精神错乱（Delirium）的那间 boss 房用专属图标标出来——虚空层有好几间 boss 房，只有一间是 Delirium。只要该房间在地图上显示出来就会标注，不必先进去过。默认关闭。",
+    minebutton_name = "标记矿洞 II 的轨道按钮房",
+    minebutton_desc = "在矿洞 II（Mines/Ashpit）地图上，把有黄色轨道按钮的房间用按钮图标标出——全层共 3 个按钮，全部踩下后放下通往刀片碎片 2 的轨道桥（腐妈支线必经）。只有进入过的房间才会标注（与标记骷髅一致，不剧透未探索的房间）；图标一经标注就会一直保留。默认开启。",
   },
 }
 -- A few plausible spellings/casings for each supported language, since the
@@ -1477,19 +1489,17 @@ gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
     mcm_registered = true
     local L = gt_get_lang_strings()
     ModConfigMenu.AddTitle("GoodTripPlus", nil, L.title)
+    -- ⚠️ 菜单顺序 = 下面这些注册调用的书写顺序（MCM 无脑 append）。
+    -- 2026-10-04 起全部 MCM 项集中在这里按序注册（用户指定的顺序），
+    -- 各功能模块（gtp_mapbounds / gtp_minebuttons / gtp_delirium 等）
+    -- 不再各自注册 MCM 项，只留配置键说明。
+    -- 顺序：光标 → 传送行为（Fixed 系）→ 显示类 → 房间标记类。
     ModConfigMenu.AddNumberSetting(
       "GoodTripPlus", nil,
       "CursorSpeed",
       1, 5, 0.25, 2,
       L.cursor_speed_name,
       L.cursor_speed_desc
-    )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
-      "FollowCurseOfLost",
-      true,
-      L.follow_curse_name,
-      L.follow_curse_desc
     )
     ModConfigMenu.AddNumberSetting(
       "GoodTripPlus", nil,
@@ -1520,6 +1530,13 @@ gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
       L.fairtime_name,
       L.fairtime_desc
     )
+    ModConfigMenu.AddBooleanSetting(
+      "GoodTripPlus", nil,
+      "FollowCurseOfLost",
+      true,
+      L.follow_curse_name,
+      L.follow_curse_desc
+    )
     -- FastTransition / HighlightCursorRoom 不注册 MCM 菜单项（2026-10-04 用户决定）：
     -- 两者默认常开，仅可在 gtconfig.lua 里用文件覆盖。
     ModConfigMenu.AddBooleanSetting(
@@ -1531,10 +1548,31 @@ gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
     )
     ModConfigMenu.AddBooleanSetting(
       "GoodTripPlus", nil,
+      "ShowMapBounds",
+      true,
+      L.map_bounds_name,
+      L.map_bounds_desc
+    )
+    ModConfigMenu.AddBooleanSetting(
+      "GoodTripPlus", nil,
       "FoolsSkullRoom",
       true,
       L.fools_skull_name,
       L.fools_skull_desc
+    )
+    ModConfigMenu.AddBooleanSetting(
+      "GoodTripPlus", nil,
+      "MineButtonRoom",
+      true,
+      L.minebutton_name,
+      L.minebutton_desc
+    )
+    ModConfigMenu.AddBooleanSetting(
+      "GoodTripPlus", nil,
+      "DeliriumRoom",
+      false,
+      L.delirium_name,
+      L.delirium_desc
     )
   end
 end)
