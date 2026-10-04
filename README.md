@@ -12,11 +12,14 @@
 1. **修复**了使用控制台 `rewind` 指令后，小地图上所有掉落物图标全部消失的问题（见第一节）。
 2. （已移除）大地图黑边修复：遇黑边请直接关 MinimapAPI 菜单里的 "Show Room Outlines"（见第二节）。
 3. **合并**了 Lazy Delver 的隐藏房候选标记，并把标记对齐到 MinimapAPI 的真实布局（见第三节）。
-4. **新增**了「传送到未探索的相邻房间」功能，默认关闭（见第四节）。
+4. **准入与传送判定整体移植**自 GoodTrip [Fixed]（选项同名同默认值，见第四节）。
 5. **新增**了深牢 II 愚者骷髅房的标记，默认开启（见第五节）。
 6. **战斗时地图隐藏**：跟随 MinimapAPI 自带的 "Hide Map in Combat"，让本模组自绘的标记一起隐藏（见第六节）。
 7. **新增**了「房间里出现奖励房间的门（恶魔房 / 天使房 / Boss Rush / 死寂）时禁止传送」，**常开**（见第四节末尾）。
 8. **新增**了「地图边界房间高亮」：按住地图键时画出贴着 13×13 边界的房间外沿，默认开启（见第六节）。
+9. **（v1.8.2）合并**了传送范围的设置：把 Fixed 的 `AllowNeighborRoom` + `AllowAnyRoom` 两项
+   合成一个三选一 `TravelMode`，MCM 里显示为「可以传送到」——「任意房间 / 相邻房间 / 已探索房间」，
+   默认「相邻房间」（行为等价于原来的默认组合），见第四节。
 
 ---
 
@@ -222,13 +225,13 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 本节原为「传送到未探索的相邻房间」（`AllowUnexploredNeighbor`）的说明。
 2026-10-03 按项目定位变更，**准入与传送判定整体忠实移植自 GoodTrip [Fixed]**
 （其 `rules.lua` 全部 + `floor.lua` 门图/邻接基础设施 + `trip.lua` 传送与诅咒过路费），
-选项与 Fixed 同名同默认值：
+选项与 Fixed 同名同默认值（**唯一例外**：`AllowNeighborRoom` + `AllowAnyRoom` 已在 v1.8.2
+合并为一个三选一设置 `TravelMode`，MCM 里显示为「可以传送到」，默认「相邻房间」＝原默认组合）：
 
 | 选项 | 默认 | 作用 |
 | --- | --- | --- |
 | `FollowCurseOfLost` | 开 | 迷失诅咒下禁用传送 |
-| `AllowNeighborRoom` | 开 | 已清且可达房间旁「已显示但未清/未探索」的房间放行（普通房/boss/小 boss/献祭房除外；红钥匙房、一层与水层镜像的商店/宝箱房豁免；虚空 Delirium boss 房角落特判） |
-| `AllowAnyRoom` | 关 | 所有已显示房间全部放行 |
+| `TravelMode`（MCM 显示「可以传送到」） | 相邻房间 | v1.8.2 由 Fixed 的 `AllowNeighborRoom` + `AllowAnyRoom` **合并**而成的三选一：**任意房间**＝所有已显示房间全部放行（＝原 `AllowAnyRoom` 开）；**相邻房间**＝已清且可达房间旁「已显示但未清/未探索」的房间放行（＝原默认组合；普通房/boss/小 boss/献祭房除外；红钥匙房、一层与水层镜像的商店/宝箱房豁免；虚空 Delirium boss 房角落特判）；**已探索房间**＝只认自己已清怪的房（＝原 `AllowNeighborRoom` 关） |
 | `FairTripPath` | 开 | 目标必须沿「已探索+已清怪」的房间逐真门抵达（门图 BFS） |
 | `ArriveAtDoor` | 关 | 落地在走路会走进来的门口（跨屏大房间远途会先经过前一格） |
 | `FairTripTime` | 关 | 按传送距离与移速补回游戏时间 |
@@ -244,7 +247,7 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 回溯线也自然正确 —— Wiki 写明那里的门生成在"通往下一层的那个起始房间"，不是进门那间 boss 房。
 
 旧的 `AllowUnexploredNeighbor` / `RequireExploredPath` / `BlockCurseRoom` 三个开关已移除：
-未探索场景并入 `AllowNeighborRoom` 的放宽逻辑；路径判定即 `FairTripPath`；
+未探索场景并入 `TravelMode` 的「相邻房间」放宽逻辑；路径判定即 `FairTripPath`；
 诅咒房不再禁止传送，改为进门扣血（`curse_toll_free`：Flat File / 深渊书免伤，
 以撒的心脏 / 牙与甲照扣，尖刺状态从门两侧分别记录）。
 

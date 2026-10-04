@@ -19,10 +19,12 @@ Also in this build:
 - Marks the room in Depths II that holds the special skull which always drops The Fool card, with a custom skull icon. Only shown for rooms you have already visited, so it never spoils the layout.
 - While a Card Reading portal or a Stairway ladder is present in the room you are in, teleporting is disabled: both entrances are destroyed the moment you leave the room, so this keeps a stray press from wasting them. It is tied to the entrance itself rather than to any notion of a "starting room", so it lifts by itself as soon as you leave, and it is correct on The Ascent too.
 - While the room you are in has a door leading to a reward room (Devil Room, Angel Room, Boss Rush, Hush), teleporting is disabled so a stray press cannot make you miss it. Rooms without such a door are not locked at all, so an ordinary boss room you just cleared still teleports normally. The Ascent is excluded.
-- New: while holding the map key, the outer edge of rooms that sit on the 13x13 map border is highlighted, so you can tell which side has no more rooms left. Only explored rooms are drawn. (MCM: Show Map Bounds / gtconfig: ShowMapBounds, on by default.)
+- While holding the map key, the outer edge of rooms that sit on the 13x13 map border is highlighted, so you can tell which side has no more rooms left. Only explored rooms are drawn. (MCM: Show Map Bounds / gtconfig: ShowMapBounds, on by default.)
+- How far a trip may reach is now a single three-way setting, "Can Teleport To" (MCM) / TravelMode (config): Any Room, Neighbor Room (default) or Explored Rooms. These replace the separate AllowNeighborRoom and AllowAnyRoom toggles with the same behaviour, just in one place.
+- New: on The Void, the boss room that belongs to Delirium is marked with a dedicated icon. The Void has several boss rooms but only one of them is Delirium; the marker appears as soon as that room is revealed on the map, so you can loot the other bosses first. (MCM: Mark the Delirium Room in The Void / gtconfig: DeliriumRoom, off by default.)
 - Diagnostics: hold the map key and press F4 for a full dump of the current teleport decision (drawn on screen and written to log.txt).
 
-Settings in the MCM menu or the config file: FollowCurseOfLost, AllowNeighborRoom, AllowAnyRoom, FairTripPath, ArriveAtDoor, FairTripTime, FastTransition, HighlightCursorRoom, ShowSecretMarkers, FoolsSkullRoom, CursorSpeed.
+Settings in the MCM menu or the config file: TravelMode, FollowCurseOfLost, FairTripPath, ArriveAtDoor, FairTripTime, FastTransition, HighlightCursorRoom, ShowSecretMarkers, FoolsSkullRoom, ShowMapBounds, DeliriumRoom, CursorSpeed.
 
 Please uninstall or disable goodtrip_mlxtweak (and the original Goodtrip) before use: all three share the same globals and cannot run at the same time.
 Required: MinimapAPI
@@ -30,7 +32,7 @@ Required: MinimapAPI
 Optional: Mod Config Menu (for in-game settings)
 
 Credits: original GoodTrip by tarako; this build is based on Goodtrip MLX's Tweak; Secret Room candidate markers are ported from Lazy Delver by dokee (MIT). See LICENSE and THIRD_PARTY.md for details.</description>
-    <version>1.8.0</version>
+    <version>1.8.2</version>
     <visibility>Public</visibility>
     <tag id="Lua"/>
     <tag id="Tweaks"/>
