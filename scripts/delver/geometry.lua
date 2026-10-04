@@ -13,6 +13,11 @@ M.DIR_DELTA = {
 }
 
 ---@type table<RoomShape, integer[]>
+-- ⚠️ 锚点是 RoomDescriptor.GridIndex（包围盒左上角），**不是** SafeGridIndex！
+-- 对 ROOMSHAPE_LTL（缺左上角），SafeGridIndex = 包围盒左上 + 1（最靠左上的真实格），
+-- 拿这张表去加 SafeGridIndex 会把整组格右移一列甚至跨行回绕（2026-10-04 在
+-- gtp_mapbounds 踩过：L 形房贴边只画出一格的边界线）。正确用法见 delver/map.lua
+-- （+ room_desc.GridIndex）；要「房间实际占哪些格」请改用 gtrep.lua 建的 grid_room。
 M.SHAPE_OFFSETS = {
   [RoomShape.ROOMSHAPE_1x1] = { 0 },
   [RoomShape.ROOMSHAPE_IH]  = { 0 },
