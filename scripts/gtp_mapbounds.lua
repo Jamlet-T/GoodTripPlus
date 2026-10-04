@@ -136,10 +136,19 @@ function M.render()
 end
 
 -- MCM 开关（默认开；显示类功能，与隐藏房标记一样给开关）
+--
+-- ⚠️ 必须只注册一次：MCM 的 `AddSetting` 是**无脑 append**、不按键去重
+-- （`ModConfigMenu.MenuData` 整局只在 MCM 加载时建一次、中途不清空），
+-- 而 `MC_POST_GAME_STARTED` **每次 rewind 都会再触发一次**
+-- （rewind 触发 LoadSaveTable 重建地图，gtp_rewindfix 就是靠这个钩子做的）。
+-- 所以不加上面这个 once 标记的话，用几次 rewind 配置菜单里就多几份重复项。
+-- 与 gtrep.lua 注册核心传送选项时用的 `mcm_registered` 是同一个套路。
+local mcm_registered = false
 gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
-  if not ModConfigMenu then
-    return
+  if mcm_registered or not ModConfigMenu then
+    return -- 还没注册过、且 MCM 已在则继续；MCM 若加载晚了下局再试
   end
+  mcm_registered = true
   local zh = type(Options.Language) == "string"
     and Options.Language:lower():sub(1, 2) == "zh"
   ModConfigMenu.AddBooleanSetting(

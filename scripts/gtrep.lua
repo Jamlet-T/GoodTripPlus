@@ -1,7 +1,7 @@
 gt = RegisterMod("GoodTripPlus", 1)
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "1.8.0"
+gt.VERSION = "1.8.2"
 pcall(function()
   Isaac.ConsoleOutput("[GoodTripPlus] v" .. gt.VERSION ..
     " loaded (console command: gtpdiag)\n")
@@ -78,8 +78,11 @@ gt.DebugMod = false
 gt.FastRestartEnable = false
 gt.TeleportAnimation = true
 gt.FollowCurseOfLost = true
-gt.AllowNeighborRoom = true
-gt.AllowAnyRoom = false
+-- 传送范围（本项目合并原 Fixed 的 AllowNeighborRoom + AllowAnyRoom 两项）：
+--   1 = 任意房间（原 AllowAnyRoom 开）
+--   2 = 相邻房间（原默认：AllowNeighborRoom 开、AllowAnyRoom 关）
+--   3 = 已探索房间（原 AllowNeighborRoom 关、AllowAnyRoom 关）
+gt.TravelMode = 2
 gt.FairTripPath = true
 gt.ArriveAtDoor = false
 gt.FairTripTime = false
@@ -533,7 +536,9 @@ function gt:check_teleble(gid)
       if trd.ListIndex == crd.ListIndex then
         return false
       end
-      if gt:get_config_bool("AllowAnyRoom", false) then
+      local travel_mode = gt:get_travel_mode()
+      if travel_mode == 1 then
+        -- 任意房间：地图上任何已显示房间都放行（等价旧的 AllowAnyRoom=开）
         return true
       end
       --the room stepped off from must be on the player's own island, else an
@@ -541,9 +546,10 @@ function gt:check_teleble(gid)
       local reach = gt:get_config_bool("FairTripPath", true) and gt:get_reachable_rooms() or nil
       if trd.VisitedCount > 0 and trd.Clear
           and (not reach or reach[trd.SafeGridIndex] == true) then
-        --AllowNeighborRoom only widens this: an Emperor'd start room has no cleared neighbour
+        --travel_mode=2 only widens this: an Emperor'd start room has no cleared neighbour
         return true
-      elseif not gt:get_config_bool("AllowNeighborRoom", true) then
+      elseif travel_mode == 3 then
+        -- 已探索房间：只认自己已清怪的房，不做邻居豁免（等价旧的 AllowNeighborRoom=关）
         return false
       end
       --the last hop needs a door too; `reach` is nil exactly when path rules are off
@@ -781,6 +787,16 @@ function gt:get_config_bool(key, default)
       return value
     end
     return default
+end
+--
+-- 传送范围（1=任意房间 2=相邻房间 3=已探索房间）。默认 2，等价于移植初期的
+-- AllowNeighborRoom=true / AllowAnyRoom=false。值一律夹到 1..3，防御 MCM 存的旧值 / 脏值。
+function gt:get_travel_mode()
+    local v = tonumber(gt:get_config_bool("TravelMode", 2)) or 2
+    v = math.floor(v + 0.5)
+    if v < 1 then return 1 end
+    if v > 3 then return 3 end
+    return v
 end
 --
 function gt:get_minapi_room_by_list_index(listIndex)
@@ -1356,10 +1372,9 @@ local GT_STRINGS = {
     cursor_speed_desc = "Pixels the cursor moves per frame while holding a direction key. Default: 2",
     follow_curse_name = "Disable On Curse Of Lost",
     follow_curse_desc = "Disable GoodTrip teleport while the floor has the Curse of the Lost. Default: enabled",
-    neighbor_name = "Allow Neighbor Room",
-    neighbor_desc = "Also allow moving into a shown, not-yet-cleared room next to a cleared, reachable room (normal, boss, miniboss and sacrifice rooms excluded). Default: enabled",
-    anyroom_name = "Allow Any Room",
-    anyroom_desc = "Allow moving to every room shown on the map, cleared or not. Default: disabled",
+    travel_mode_name = "Can Teleport To",
+    travel_mode_values = {[1] = "Any Room", [2] = "Neighbor Room", [3] = "Explored Rooms"},
+    travel_mode_desc = "How far a trip may reach. Any Room: every room shown on the map. Neighbor Room: cleared rooms, plus a shown but not-yet-cleared room next to a cleared one. Explored Rooms: only rooms you have visited and cleared. Default: Neighbor Room",
     fairpath_name = "Fair Trip Path",
     fairpath_desc = "Only allow teleport to rooms reachable through cleared rooms, door by door. Default: enabled",
     arrivedoor_name = "Arrive At Door",
@@ -1379,10 +1394,9 @@ local GT_STRINGS = {
     cursor_speed_desc = "按住射击方向键时光标每帧移动的像素数。默认值：2",
     follow_curse_name = "迷失诅咒下禁用传送",
     follow_curse_desc = "层里带有迷失诅咒时禁用传送。默认开启。",
-    neighbor_name = "允许传送到未清的邻居房",
-    neighbor_desc = "已清怪且可达的房间旁那些已显示但未清怪的房间也允许传送（普通房、boss 房、小 boss 房、献祭房除外）。默认开启。",
-    anyroom_name = "允许传送到所有已显示房间",
-    anyroom_desc = "地图上显示的房间全部允许传送，无论是否清怪。默认关闭。",
+    travel_mode_name = "可以传送到",
+    travel_mode_values = {[1] = "任意房间", [2] = "相邻房间", [3] = "已探索房间"},
+    travel_mode_desc = "决定传送能跳多远。任意房间：地图上显示的房间都能传。相邻房间：已清怪的房间，以及已清房旁那间已显示但未清的房间。已探索房间：只有你进过并且已清怪的房间。默认：相邻房间。",
     fairpath_name = "只能传送到已清房连通的房间",
     fairpath_desc = "传送目标必须能从当前房间沿已清怪的房间逐门抵达。默认开启。",
     arrivedoor_name = "传送后站在门口",
@@ -1439,19 +1453,13 @@ gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
       L.follow_curse_name,
       L.follow_curse_desc
     )
-    ModConfigMenu.AddBooleanSetting(
+    ModConfigMenu.AddNumberSetting(
       "GoodTripPlus", nil,
-      "AllowNeighborRoom",
-      true,
-      L.neighbor_name,
-      L.neighbor_desc
-    )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
-      "AllowAnyRoom",
-      false,
-      L.anyroom_name,
-      L.anyroom_desc
+      "TravelMode",
+      1, 3, 1, 2,
+      L.travel_mode_name,
+      L.travel_mode_values,
+      L.travel_mode_desc
     )
     ModConfigMenu.AddBooleanSetting(
       "GoodTripPlus", nil,
@@ -1650,14 +1658,15 @@ function gt:dump_tele_diag(gid)
         tostring(gt:rooms_linked(rd.SafeGridIndex, trd.SafeGridIndex))))
     end
   end
+  p("  travelMode=" .. gt:get_travel_mode() .. " (1=任意房间 2=相邻房间 3=已探索房间)")
   -- 按当前配置给出结论
-  if gt:get_config_bool("AllowAnyRoom", false) then
-    p("  verdict: AllowAnyRoom=on -> should be teleportable")
+  if gt:get_travel_mode() == 1 then
+    p("  verdict: TravelMode=AnyRoom(1) -> should be teleportable")
   elseif trd.VisitedCount > 0 and trd.Clear
       and (not reach or reach[trd.SafeGridIndex] == true) then
     p("  verdict: visited+clear+inReach -> should be teleportable (channel B)")
-  elseif not gt:get_config_bool("AllowNeighborRoom", true) then
-    p("  verdict: AllowNeighborRoom=off -> NOT teleportable (this is the blocking gate)")
+  elseif gt:get_travel_mode() == 3 then
+    p("  verdict: TravelMode=ExploredRooms(3) -> NOT teleportable (neighbor exemption off)")
   else
     local ok = gt:check_neigh_connected(trd, function(rd)
       return (rd.DisplayFlags & 1 ~= 0) and rd.VisitedCount > 0 and rd.Clear
