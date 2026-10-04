@@ -433,7 +433,6 @@ MinimapAPI 藏地图时管不到**本模组自己画的**元素。各元素的�
 
 包里的 `LICENSE`、`THIRD_PARTY.md`、`scripts/delver/LICENSE-lazy-delver.txt` **别删**：
 Lazy Delver 是 MIT 许可，要求许可证文本随副本一起分发。
-**私下发给朋友没问题**；但**公开上传到创意工坊要先拿到 MLX's Tweak 作者的许可**，见第十一节。
 
 改动源码后重新打包：
 
@@ -522,5 +521,7 @@ git add -A && git commit -m "..."
 | **Goodtrip MLX's Tweak**（`scripts/gtrep.lua` 的基底）+ 其上游 **tarako 的 GoodTrip** | **无许可证文件 = 保留所有权利** | ⚠️ **未获授权** |
 | MinimapAPI | 仅运行时依赖，本仓库不含其任何代码/素材 | ✅ 无需许可 |
 
-**所以：在取得上游作者许可之前，不要把包含 `scripts/gtrep.lua` 的完整包公开上传**（包括 Steam 创意工坊）。
-两条可行路线（只发布自有模块作为附加组件 / 先取得许可）与发布检查清单写在 `THIRD_PARTY.md` 里。
+---
+
+如果本项目的分发方式需要调整，或作为相关内容权利人的您希望修改署名 / 撤下部分或全部内容，
+欢迎通过 [GitHub Issues](https://github.com/Jamlet-T/GoodTripPlus/issues) 联系我，我会尽快处理。
