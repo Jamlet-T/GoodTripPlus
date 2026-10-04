@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<metadata>
+    <name>GoodTripPlus</name>
+    <directory>goodtripplus</directory>
+    <id>goodtripplus</id>
+    <description>Minimap teleport mod based on Goodtrip MLX's Tweak — an external teleport plugin for MinimapAPI.
+Hold the map key (TAB) to bring up a cursor on the minimap, steer it with the shoot direction keys, and release to teleport.
+Supports the mirrored map in the mirror world.
+
+Teleport admission and landing are a faithful port of GoodTrip [Fixed]: a trip may only travel through rooms you have explored and cleared, door by door.
+
+Secret Rooms can be teleported into as soon as their wall has been blown open; a wall that is still intact (for example a Secret Room revealed by Blue Map) is still refused, so you can never teleport through a wall you have not opened.
+
+One inherited rule ("no teleporting while the current room is named Mom or Ultra Greed") is skipped on The Ascent: there the boss room you walk in through is named Mom, but the fight is long over and the room is only a pass-through, so the rule used to swallow perfectly normal trips (the cursor came up, you could pick a room, and releasing only played the error sound).
+
+Also in this build:
+- Fixes pickup icons vanishing from the minimap after the "rewind" console command.
+- Bundles the Secret Room candidate markers from Lazy Delver (by dokee, MIT), re-projected onto MinimapAPI's own map math so they line up exactly. Please disable Lazy Delver itself to avoid drawing two sets of markers.
+- Marks the room in Depths II that holds the special skull which always drops The Fool card, with a custom skull icon. Only shown for rooms you have already visited, so it never spoils the layout.
+- While a Card Reading portal or a Stairway ladder is present in the room you are in, teleporting is disabled: both entrances are destroyed the moment you leave the room, so this keeps a stray press from wasting them. It is tied to the entrance itself rather than to any notion of a "starting room", so it lifts by itself as soon as you leave, and it is correct on The Ascent too.
+- While the room you are in has a door leading to a reward room (Devil Room, Angel Room, Boss Rush, Hush), teleporting is disabled so a stray press cannot make you miss it. Rooms without such a door are not locked at all, so an ordinary boss room you just cleared still teleports normally. The Ascent is excluded.
+- While holding the map key, the outer edge of rooms that sit on the 13x13 map border is highlighted, so you can tell which side has no more rooms left. Only explored rooms are drawn. (MCM: Show Map Bounds / gtconfig: ShowMapBounds, on by default.)
+- How far a trip may reach is now a single three-way setting, "Can Teleport To" (MCM) / TravelMode (config): Any Room, Neighbor Room (default) or Explored Rooms. These replace the separate AllowNeighborRoom and AllowAnyRoom toggles with the same behaviour, just in one place.
+- New: on The Void, the boss room that belongs to Delirium is marked with a dedicated icon. The Void has several boss rooms but only one of them is Delirium; the marker appears as soon as that room is revealed on the map, so you can loot the other bosses first. (MCM: Mark the Delirium Room in The Void / gtconfig: DeliriumRoom, off by default.)
+- Diagnostics: hold the map key and press F4 for a full dump of the current teleport decision (drawn on screen and written to log.txt).
+
+Settings in the MCM menu or the config file: TravelMode, FollowCurseOfLost, FairTripPath, ArriveAtDoor, FairTripTime, ShowSecretMarkers, FoolsSkullRoom, ShowMapBounds, DeliriumRoom, CursorSpeed. FastTransition and HighlightCursorRoom are on by default and only configurable in gtconfig.lua (no MCM entry).
+
+Please uninstall or disable goodtrip_mlxtweak, GoodTrip [Fixed] and the original Goodtrip before use: they share the same globals and cannot run at the same time.
+Required: MinimapAPI
+
+Optional: Mod Config Menu (for in-game settings)
+
+Credits: original GoodTrip by tarako; this build is based on Goodtrip MLX's Tweak; Secret Room candidate markers are ported from Lazy Delver by dokee (MIT). See LICENSE and THIRD_PARTY.md for details. If the original author has any concerns about this derivative work, contact me and I will take it down promptly.</description>
+    <version>2.0.0</version>
+    <visibility>Public</visibility>
+    <tag id="Lua"/>
+    <tag id="Tweaks"/>
+</metadata>
