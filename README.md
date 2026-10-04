@@ -227,14 +227,14 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 （其 `rules.lua` 全部 + `floor.lua` 门图/邻接基础设施 + `trip.lua` 传送与诅咒过路费），
 选项与 Fixed 同名同默认值（**例外**：`AllowNeighborRoom` + `AllowAnyRoom` 已在 v1.8.2
 合并为一个三选一设置 `TravelMode`，MCM 里显示为「可以传送到」，默认「相邻房间」＝原默认组合；
-`FastTransition` 默认改为开）：
+`FastTransition` 默认改为开；`ArriveAtDoor` 默认改为开，两者都是对 Fixed 默认值的偏离）：
 
 | 选项 | 默认 | 作用 |
 | --- | --- | --- |
 | `FollowCurseOfLost` | 开 | 迷失诅咒下禁用传送 |
 | `TravelMode`（MCM 显示「可以传送到」） | 相邻房间 | v1.8.2 由 Fixed 的 `AllowNeighborRoom` + `AllowAnyRoom` **合并**而成的三选一：**任意房间**＝所有已显示房间全部放行（＝原 `AllowAnyRoom` 开）；**相邻房间**＝已清且可达房间旁「已显示但未清/未探索」的房间放行（＝原默认组合；普通房/boss/小 boss/献祭房除外；红钥匙房、一层与水层镜像的商店/宝箱房豁免；虚空 Delirium boss 房角落特判）；**已探索房间**＝只认自己已清怪的房（＝原 `AllowNeighborRoom` 关） |
 | `FairTripPath` | 开 | 目标必须沿「已探索+已清怪」的房间逐真门抵达（门图 BFS） |
-| `ArriveAtDoor` | 关 | 落地在走路会走进来的门口（跨屏大房间远途会先经过前一格） |
+| `ArriveAtDoor` | **开**（偏离 Fixed 的默认关） | 落地在走路会走进来的门口（跨屏大房间远途会先经过前一格） |
 | `FairTripTime` | 关 | 按传送距离与移速补回游戏时间 |
 | `FastTransition` | 开 | 跳过传送动画（偏离 Fixed 的默认关；不进 MCM 菜单，仅 gtconfig.lua 可覆盖） |
 | `HighlightCursorRoom` | 开 | 高亮光标下可传送的房间（不进 MCM 菜单，仅 gtconfig.lua 可覆盖） |
