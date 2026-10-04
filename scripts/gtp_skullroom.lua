@@ -74,6 +74,7 @@ local stats = {
   scans = 0,          -- 重新扫描生成表的次数（每层一次）
   found_rooms = 0,    -- 最近一次扫描找到的骷髅房数量
   applied = 0,        -- 累计往房间图标表里补了多少次
+  resolved = 0,       -- 检测到「骷髅已被炸毁」并撤标的次数
   last_result = "尚未触发",
 }
 
@@ -231,6 +232,109 @@ local function ensure_icon(room, descriptor)
   return true
 end
 
+-- 骷髅已被炸毁 → 自动撤标
+-- --------------------------
+-- 生成表是静态的，看不出骷髅还在不在。玩家身处标记房时（节流 30 帧）扫一遍
+-- 当前房间网格：找不到 GRID_ROCK_ALT2(26) 的格子即视为骷髅已被炸毁，撤掉图标。
+-- 只能靠「人在房里」判：骷髅只会被身在房里的玩家炸掉，进房前它必然还在；
+-- 撤标后 `marked_rooms` 里也不再补（rewind 重建图标后同样不会复标）。
+-- ⚠️ 当前房间身份用 level:GetCurrentRoomDesc()（楼层系坐标），与 marked_rooms
+-- 的 SafeGridIndex 键同系；不要用 room:GetGridIndex(player.Position)（那是房间内
+-- 局部索引，对不上——按钮房模块 v2.0.x 踩过的坑）。
+local GRID_TYPE_SKULL = 26 -- GridEntityType.GRID_ROCK_ALT2
+local RESCAN_INTERVAL = 30
+local last_check_frame = -999999
+
+-- 把骷髅图标从 MinimapAPI 房间对象的图标表里撤掉；返回是否真的撤了。
+-- 兜底路径塞进去的 Card 只在「真用了兜底」（marker_icon_state == false）时才撤，
+-- 避免误删 MinimapAPI 自己放的其它 Card 图标。
+local function remove_icon(room)
+  local removed = false
+  for _, key in ipairs({ "PermanentIcons", "VisitedIcons" }) do
+    local icons = room[key]
+    if type(icons) == "table" then
+      for i = #icons, 1, -1 do
+        if icons[i] == MARKER_ICON_ID then
+          table.remove(icons, i)
+          removed = true
+        end
+      end
+      if marker_icon_state == false then
+        for i = #icons, 1, -1 do
+          if icons[i] == FALLBACK_ICON_ID then
+            table.remove(icons, i)
+            removed = true
+          end
+        end
+      end
+    end
+  end
+  return removed
+end
+
+-- 扫当前房间网格：骷髅(26)还在 → false；一个都没有 → true（已毁）；
+-- 接口全挂 → nil（保守：不撤标）
+local function skull_gone()
+  local ok, gone = pcall(function()
+    local room = Game():GetRoom()
+    if not room then return nil end
+    local size = room:GetGridSize()
+    for i = 0, size - 1 do
+      local ge = room:GetGridEntity(i)
+      if ge and ge:GetType() == GRID_TYPE_SKULL then
+        return false -- 骷髅还在
+      end
+    end
+    return true -- 一个 26 都没有：已被炸毁
+  end)
+  if not ok then
+    return nil
+  end
+  return gone
+end
+
+local function check_current_room(frame)
+  if frame - last_check_frame < RESCAN_INTERVAL then
+    return
+  end
+  last_check_frame = frame
+
+  local level = Game():GetLevel()
+  if not level then return end
+
+  local ok_desc, descriptor = pcall(function() return level:GetCurrentRoomDesc() end)
+  if not ok_desc or not descriptor then
+    return
+  end
+  local gid = descriptor.SafeGridIndex or descriptor.GridIndex
+  if not gid or not marked_rooms[gid] then
+    return
+  end
+
+  local gone = skull_gone()
+  if gone ~= true then
+    return -- 还在 / 信息不足：维持图标
+  end
+
+  marked_rooms[gid] = nil
+  stats.resolved = stats.resolved + 1
+  stats.last_result = string.format("房间 %s 的骷髅已被炸毁（累计撤标 %d 次）",
+    tostring(gid), stats.resolved)
+  log("标记骷髅：房间 " .. tostring(gid) .. " 的骷髅已被炸毁，撤掉图标")
+
+  -- 立刻从当前层 MinimapAPI 的房间里撤掉图标（不等下轮 ensure）
+  local rooms = MinimapAPI and MinimapAPI.GetLevel and MinimapAPI:GetLevel()
+  if rooms then
+    for _, r in ipairs(rooms) do
+      local d = r.Descriptor
+      if d and d.ListIndex == descriptor.ListIndex then
+        remove_icon(r)
+        break
+      end
+    end
+  end
+end
+
 local function update()
   if not is_enabled() then return end
   if not MinimapAPI or not MinimapAPI.Levels or not MinimapAPI.GetLevel then return end
@@ -248,6 +352,11 @@ local function update()
     marked_key = key
     rebuild_marked_rooms(level)
   end
+
+  if next(marked_rooms) == nil then return end
+
+  -- 人在标记房里时，低频复查骷髅是否已被炸毁
+  check_current_room(Game():GetFrameCount())
 
   if next(marked_rooms) == nil then return end
 
@@ -288,7 +397,8 @@ gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command)
     " stage=" .. tostring(Game():GetLevel() and Game():GetLevel():GetStage())
   lines[#lines + 1] = "skullRoom.scans=" .. stats.scans ..
     " foundRooms=" .. stats.found_rooms ..
-    " applied=" .. stats.applied
+    " applied=" .. stats.applied ..
+    " resolved=" .. stats.resolved
   lines[#lines + 1] = "skullRoom.lastResult=" .. stats.last_result
   lines[#lines + 1] = "skullRoom.icon=" .. tostring(marker_icon_id()) ..
     (marker_icon_state == true and " (custom)" or " (fallback)")

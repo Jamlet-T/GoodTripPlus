@@ -41,15 +41,19 @@
 
   已踩下的按钮自动撤图标
   ----------------------
-  生成表是静态的，看不出按钮是否已被踩下。玩家身处标记房时：
-  1. 首选 `RoomDescriptor.PressurePlatesTriggered`（布尔量，官方 API 文档明确列出，
-     对应 enums.lua 第 5085 行 `FLAG_PRESSURE_PLATES_TRIGGERED = 1<<1`：本房间所有
-     压力板已触发）；
-  2. 拿不到该字段时，扫一遍当前房间的网格实体做后备：存在
+  生成表是静态的，看不出按钮是否已被踩下。玩家身处标记房时（节流 30 帧）：
+  1. `RoomDescriptor.PressurePlatesTriggered`（布尔量，官方 API 文档明确列出，
+     对应 enums.lua 第 5085 行 `FLAG_PRESSURE_PLATES_TRIGGERED = 1<<1`）——
+     只把 **true** 当「已踩下」的证据（轨道按钮不保证置位，false 不否决）；
+  2. 主判：扫一遍当前房间的网格实体：存在
      GRID_PRESSURE_PLATE(20)/变体 3 且 `GridEntity.State ~= 0`
      （PressurePlateState.UNPRESSED = 0）即视为已踩下。
-  两条都拿不到就维持图标（可接受的退化）。撤标同时从 MinimapAPI 房间对象的
-  PermanentIcons 里移除图标，`marked_rooms` 里也不再补（rewind 重建也不会复标）。
+  都拿不到就维持图标（可接受的退化）。撤标同时从 MinimapAPI 房间对象的
+  图标表里移除图标，`marked_rooms` 里也不再补（rewind 重建也不会复标）。
+  ⚠️ v2.0.x 修复：撤标前提是「认得出人在标记房」。此前用
+  `room:GetGridIndex(player.Position)`（房间内局部索引）对比按楼层网格索引
+  （SafeGridIndex）建的 `marked_rooms` 键，两套坐标系对不上，撤标从未触发过；
+  现改用 `level:GetCurrentRoomDesc()`（仓库内 gtrep/delver 的既有姿势）。
 
   为什么每帧都要「确保」：同骷髅房——MinimapAPI 在换层 / rewind 时会整表重建
   房间对象，重建后图标表回到它自己的初值，每帧补一次可自愈，开销可忽略。
@@ -278,13 +282,7 @@ end
 local function grid_says_pressed()
   local ok, pressed = pcall(function()
     local room = Game():GetRoom()
-    local player = Isaac.GetPlayer(0)
-    if not room or not player then return nil end
-
-    -- 当前房间的网格索引：用玩家坐标反查（Room:GetGridIndex(Vector) 是原版接口；
-    -- 按钮房都是 1x1 普通房，SafeGridIndex == GridIndex，键直接可比）
-    local gid = room:GetGridIndex(player.Position)
-    if not gid then return nil end
+    if not room then return nil end
 
     local found_any = false
     local size = room:GetGridSize()
@@ -310,7 +308,11 @@ local function grid_says_pressed()
 end
 
 -- 人在标记房里时，节流地复查按钮是否已踩下；已踩下就撤标。
--- 首选 RoomDescriptor.PressurePlatesTriggered，后备扫网格。
+-- 判据：先看 RoomDescriptor.PressurePlatesTriggered（只信 true，轨道按钮可能不置位），
+-- 主判是扫当前房网格找 20/3 且 State ~= 0。
+-- ⚠️ 当前房间身份必须用 level:GetCurrentRoomDesc()（楼层系坐标）来取；
+-- 不能用 room:GetGridIndex(player.Position)（那是房间内局部索引，跟 marked_rooms
+-- 的楼层系 SafeGridIndex 键根本对不上——v2.0.x 之前的撤标因此从未触发过）。
 local function check_current_room(frame)
   if frame - last_check_frame < RESCAN_INTERVAL then
     return
@@ -318,36 +320,31 @@ local function check_current_room(frame)
   last_check_frame = frame
 
   local level = Game():GetLevel()
-  local room = Game():GetRoom()
-  local player = Isaac.GetPlayer(0)
-  if not level or not room or not player then return end
+  if not level then return end
 
-  local ok_gid, gid = pcall(function() return room:GetGridIndex(player.Position) end)
-  if not ok_gid or not gid or not marked_rooms[gid] then
+  -- 当前房间的 RoomDescriptor（楼层系身份；SafeGridIndex 与 marked_rooms 的键同系）
+  local ok_desc, descriptor = pcall(function() return level:GetCurrentRoomDesc() end)
+  if not ok_desc or not descriptor then
+    return
+  end
+  local gid = descriptor.SafeGridIndex or descriptor.GridIndex
+  if not gid or not marked_rooms[gid] then
     return
   end
 
-  -- 当前房间的 RoomDescriptor（对当前房，Level:GetRoomByIdx 拿到的就是它）
-  local descriptor
-  pcall(function() descriptor = level:GetRoomByIdx(gid) end)
-
-  -- 1) 首选：官方布尔量
+  -- 1) 官方布尔量：只把 true 当「已踩下」的证据；false 不否决（留网格扫描主判）
   local resolved, how
-  if descriptor then
-    local ok_flag, flag = pcall(function() return descriptor.PressurePlatesTriggered end)
-    if ok_flag and type(flag) == "boolean" then
-      resolved, how = flag, "flag"
-    end
+  local ok_flag, flag = pcall(function() return descriptor.PressurePlatesTriggered end)
+  if ok_flag and flag == true then
+    resolved, how = true, "flag"
   end
-  -- 2) 后备：扫网格找 20/3 且 State ~= 0
+  -- 2) 主判：扫网格找 20/3 且 State ~= 0
   if resolved == nil then
     local pressed = grid_says_pressed()
     if pressed == true then
       resolved, how = true, "grid"
-    elseif pressed == false then
-      resolved = false
     end
-    -- pressed == nil（信息不足）→ resolved 保持 nil，维持图标
+    -- pressed == false（按钮都在、未踩）/ nil（信息不足）→ 维持图标
   end
 
   if resolved then
