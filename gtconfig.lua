@@ -25,7 +25,8 @@ gt.TravelMode = 2
 gt.FairTripPath = true
 
 -- 传送后站在走路会进来的门口（Fixed: ArriveAtDoor）
-gt.ArriveAtDoor = false
+-- 默认改为开：偏离 Fixed 的默认关（2026-10-04 用户决定）
+gt.ArriveAtDoor = true
 
 -- 按距离公平增加游戏时间（Fixed: FairTripTime）
 gt.FairTripTime = false

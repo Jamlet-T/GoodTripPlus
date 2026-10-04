@@ -84,7 +84,8 @@ gt.FollowCurseOfLost = true
 --   3 = 已探索房间（原 AllowNeighborRoom 关、AllowAnyRoom 关）
 gt.TravelMode = 2
 gt.FairTripPath = true
-gt.ArriveAtDoor = false
+-- 默认改为开：偏离 Fixed 的默认关（2026-10-04 用户决定）
+gt.ArriveAtDoor = true
 gt.FairTripTime = false
 gt.FastTransition = true
 gt.HighlightCursorRoom = true
@@ -711,7 +712,7 @@ function gt:teleport_to_grid_index(gid)
     local there = trd and trd.SafeGridIndex or gid
     tele_door_slot = -1
     local arrive = gid --the cell handed over; see rules.landing_route
-    if gt:get_config_bool("ArriveAtDoor", false) then
+    if gt:get_config_bool("ArriveAtDoor", true) then
       local cell, walked, slot = gt:landing_route(here, there)
       arrive = cell or gid
       tele_door_slot = slot
@@ -1419,7 +1420,7 @@ local GT_STRINGS = {
     fairpath_name = "Fair Trip Path",
     fairpath_desc = "Only allow teleport to rooms reachable through cleared rooms, door by door. Default: enabled",
     arrivedoor_name = "Arrive At Door",
-    arrivedoor_desc = "Arrive standing at the exact door a walk would have come in by. A far trip into a room bigger than the screen passes through the room before it, which shows for a moment. Default: disabled",
+    arrivedoor_desc = "Arrive standing at the exact door a walk would have come in by. A far trip into a room bigger than the screen passes through the room before it, which shows for a moment. Default: enabled",
     fairtime_name = "Fair Trip Time",
     fairtime_desc = "Fairly increase game time according to player move speed and distance. Default: disabled",
     secret_markers_name = "Secret Room Candidate Markers",
@@ -1439,7 +1440,7 @@ local GT_STRINGS = {
     fairpath_name = "只能传送到已清房连通的房间",
     fairpath_desc = "传送目标必须能从当前房间沿已清怪的房间逐门抵达。默认开启。",
     arrivedoor_name = "传送后站在门口",
-    arrivedoor_desc = "传送到走路会走进来的那扇门门口；跨屏大房间的远途传送会先经过房间前部，会短暂看到一瞬。默认关闭。",
+    arrivedoor_desc = "传送到走路会走进来的那扇门门口；跨屏大房间的远途传送会先经过房间前部，会短暂看到一瞬。默认开启。",
     fairtime_name = "按距离增加游戏时间",
     fairtime_desc = "按传送距离和玩家移速公平地补回游戏时间（Boss Rush 计时用它）。默认关闭。",
     secret_markers_name = "显示隐藏房候选标记",
@@ -1508,7 +1509,7 @@ gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
     ModConfigMenu.AddBooleanSetting(
       "GoodTripPlus", nil,
       "ArriveAtDoor",
-      false,
+      true,
       L.arrivedoor_name,
       L.arrivedoor_desc
     )
