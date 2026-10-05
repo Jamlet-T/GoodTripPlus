@@ -1,7 +1,7 @@
 gt = RegisterMod("GoodTripPlus", 1)
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.0.6"
+gt.VERSION = "2.0.7"
 pcall(function()
   Isaac.ConsoleOutput("[GoodTripPlus] v" .. gt.VERSION ..
     " loaded (console command: gtpdiag)\n")
@@ -1459,6 +1459,9 @@ local GT_STRINGS = {
     map_bounds_desc = "Default: enabled",
     highlight_start_name = "Highlight Start Room",
     highlight_start_desc = "Mirrors MinimapAPI's setting. Default: disabled",
+    hide_combat_name = "Hide Map in Combat",
+    hide_combat_values = {[1] = "Never", [2] = "Bosses Only", [3] = "Always"},
+    hide_combat_desc = "Mirrors MinimapAPI's setting. Default: Never",
     delirium_name = "Mark the Delirium Room in The Void",
     delirium_desc = "Default: disabled",
     minebutton_name = "Mark the Rail Button Rooms in Mines II",
@@ -1489,6 +1492,9 @@ local GT_STRINGS = {
     map_bounds_desc = "默认开启。",
     highlight_start_name = "高亮初始房间",
     highlight_start_desc = "代理 MinimapAPI 对应设置。默认关。",
+    hide_combat_name = "战斗时隐藏地图",
+    hide_combat_values = {[1] = "从不", [2] = "仅 Boss 房", [3] = "总是"},
+    hide_combat_desc = "代理 MinimapAPI 对应设置。默认：从不。",
     delirium_name = "标记虚空层的精神错乱房",
     delirium_desc = "默认关闭。",
     minebutton_name = "标记矿洞 II 的轨道按钮房",
@@ -1589,13 +1595,15 @@ gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
       L.map_bounds_name,
       L.map_bounds_desc
     )
-    -- 「高亮初始房间」= 代理 MinimapAPI 自己的 HighlightStartRoom。
-    -- 它**不是**我们自己的配置项：值只存在 MinimapAPI.Config 里，所以我们用 MCM 的自定义设置表
-    -- （CurrentSetting 读、OnChange 写），而不是 AddBooleanSetting（那会往 ModConfigMenu.Config
-    -- 里另存一份，两边就会各说各话）。读写同一份 MinimapAPI.Config 的写法 = 与 MinimapAPI 自己菜单
-    -- 里那一项天然同步（在它那边改，这边也变），存档也照旧由 MinimapAPI 自己 SaveData 保存。
-    -- 结构照抄 MinimapAPI config_menu.lua 的同名项（Type/CurrentSetting/Display/OnChange/Info）。
+    -- 以下两项 = **代理** MinimapAPI 自己的设置（不是我们自己的配置项）：
+    -- 值只存在 MinimapAPI.Config 里，所以用 MCM 的自定义设置表（CurrentSetting 读、OnChange 写），
+    -- 而不是 AddBooleanSetting / AddNumberSetting（那些会往 ModConfigMenu.Config 里另存一份，
+    -- 两边就会各说各话）。读写同一份 MinimapAPI.Config = 与 MinimapAPI 自己菜单里那一项天然双向同步
+    -- （在它那边改，这边也变），存档也照旧由 MinimapAPI 自己 SaveData 保存。
+    -- 结构照抄 MinimapAPI config_menu.lua 的对应项（布尔：Type/Default/CurrentSetting/Display/OnChange/Info；
+    -- 数字：再加 Minimum/Maximum/ModifyBy —— 注意这几个字段是首字母大写）。
     if MinimapAPI and MinimapAPI.Config then
+      -- ①「高亮初始房间」→ MinimapAPI 的 HighlightStartRoom
       ModConfigMenu.AddSetting(
         "GoodTripPlus", nil,
         {
@@ -1616,6 +1624,31 @@ gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
             end
           end,
           Info = L.highlight_start_desc,
+        }
+      )
+      -- ②「战斗时隐藏地图」→ MinimapAPI 的 HideInCombat（1 从不 / 2 仅 Boss 房 / 3 总是，出厂默认 1）
+      ModConfigMenu.AddSetting(
+        "GoodTripPlus", nil,
+        {
+          Type = ModConfigMenu.OptionType.NUMBER,
+          Minimum = 1,
+          Maximum = 3,
+          ModifyBy = 1,
+          Default = 1,
+          CurrentSetting = function()
+            return MinimapAPI.Config.HideInCombat or 1
+          end,
+          Display = function()
+            local v = MinimapAPI.Config.HideInCombat or 1
+            return L.hide_combat_name .. ": " .. (L.hide_combat_values[v] or tostring(v))
+          end,
+          OnChange = function(newVal)
+            MinimapAPI.Config.HideInCombat = newVal
+            if MinimapAPI.Config.ConfigPreset ~= nil then
+              MinimapAPI.Config.ConfigPreset = 0
+            end
+          end,
+          Info = L.hide_combat_desc,
         }
       )
     end

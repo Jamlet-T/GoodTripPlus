@@ -245,6 +245,7 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 | `ArriveAtDoor` | **开**（偏离 Fixed 的默认关） | 落地在走路会走进来的门口（跨屏大房间远途会先经过前一格） |
 | `FairTripTime` | 关 | 按传送距离与移速补回游戏时间 |
 | `FastTransition` | 开 | 跳过传送动画（偏离 Fixed 的默认关；不进 MCM 菜单，仅 gtconfig.lua 可覆盖） |
+| `HideInCombat`（MCM 显示「战斗时隐藏地图」） | 从不（1） | 同样是**代理 MinimapAPI 的同名设置**（三档：1 从不 / 2 仅 Boss 房 / 3 总是）。与 MCM → MinimapAPI → Map(2) 里那一项同一个值、双向同步；实现用自定义设置表（数字型要写 `Minimum` / `Maximum` / `ModifyBy`，首字母大写）。本 mod 自己的自绘元素不跟着藏（见「显示行为」一节） |
 | `HighlightCursorRoom` | 开 | 高亮光标下可传送的房间（不进 MCM 菜单，仅 gtconfig.lua 可覆盖） |
 | `HighlightStartRoom`（MCM 显示「高亮初始房间」） | 关 | **代理 MinimapAPI 的同名设置**：值只存在 `MinimapAPI.Config.HighlightStartRoom`，不是本 mod 自己的配置项。所以 MCM → MinimapAPI → Map(2) 里那一项与本项**改的是同一个值、天然同步**（哪边改都立刻生效），存档也照旧由 MinimapAPI 自己负责（退出游戏时随它的 Config 一起写盘）。菜单项用 MCM 的自定义设置表（`CurrentSetting` / `OnChange`）实现，不走 `AddBooleanSetting`——后者会在 `ModConfigMenu.Config` 里另存一份，两边就会各说各话 |
 | —（常开，无开关） | 常开 | **本项目新增（非 Fixed 项）**：**判据＝当前房间里有没有道具生成的入口实体** —— 牌意解读（660）的传送门 = `EntityEffect` + `EffectVariant.PORTAL_TELEPORT`(161)、天堂阶梯（586）的台阶 = `EntityEffect` + `EffectVariant.TALL_LADDER`(156)。持有这两个道具之一、且房间里还有这枚入口时**禁止传送**（两者都是"一离开房间就销毁"，禁传送避免误触顶掉）；入口消失（即离开过）立刻恢复。不依赖任何"初始房间 / 本层离开过没有"的状态，所以回溯线等特殊路线也不会误禁。`gt.DebugMod` 调试模式仍可绕过 |

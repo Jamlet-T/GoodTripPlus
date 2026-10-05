@@ -23,9 +23,10 @@ Also in this build:
 - How far a trip may reach is now a single three-way setting, "Can Teleport To" (MCM) / TravelMode (config): Any Room, Neighbor Room (default) or Explored Rooms. These replace the separate AllowNeighborRoom and AllowAnyRoom toggles with the same behaviour, just in one place.
 - New: on The Void, the boss room that belongs to Delirium is marked with a dedicated icon. The Void has several boss rooms but only one of them is Delirium; the marker appears as soon as that room is revealed on the map, so you can loot the other bosses first. (MCM: Mark the Delirium Room in The Void / gtconfig: DeliriumRoom, off by default.)
 - New: in Mines II (Ashpit), the rooms holding the three yellow Rail Plates are marked with a dedicated button icon once you have entered them — pressing all 3 buttons on the floor lowers the rail bridge to Knife Piece 2 (the path to Mother). Once marked, an icon stays for the rest of the floor. (MCM: Mark the Rail Button Rooms in Mines II / gtconfig: MineButtonRoom, on by default.)
+- New: two of MinimapAPI's own map settings are also exposed in this mod's menu, as proxies: Highlight Start Room and Hide Map in Combat (three-way: Never / Bosses Only / Always). A proxy only reads and writes MinimapAPI's own config, so this mod's menu and MinimapAPI's own menu always agree, and the value is still saved by MinimapAPI.
 - Diagnostics: nothing is shown or written unless Debug Mode is on (MCM: Debug Mode / gtconfig: DebugMod, off by default). Once it is on, holding the map key pops up the full teleport verdict by itself, and pressing F4 on the keyboard while holding the map key dumps it on demand. Controller buttons never trigger the dump. Debug Mode also bypasses the protective blocks and skips teleport transitions.
 
-Settings in the MCM menu or the config file: TravelMode, FollowCurseOfLost, FairTripPath, ArriveAtDoor, FairTripTime, ShowSecretMarkers, FoolsSkullRoom, ShowMapBounds, DeliriumRoom, MineButtonRoom, CursorSpeed, DebugMod. FastTransition and HighlightCursorRoom are on by default and only configurable in gtconfig.lua (no MCM entry). Highlight Start Room is also offered in this mod's menu, but it is MinimapAPI's own setting: it reads and writes MinimapAPI's config directly, so the two menus always agree.
+Settings in the MCM menu or the config file: TravelMode, FollowCurseOfLost, FairTripPath, ArriveAtDoor, FairTripTime, ShowSecretMarkers, FoolsSkullRoom, ShowMapBounds, DeliriumRoom, MineButtonRoom, CursorSpeed, DebugMod. FastTransition and HighlightCursorRoom are on by default and only configurable in gtconfig.lua (no MCM entry). Highlight Start Room and Hide Map in Combat are also offered in this mod's menu, but they are MinimapAPI's own settings: they read and write MinimapAPI's config directly, so both menus always agree.
 
 Please uninstall or disable goodtrip_mlxtweak, GoodTrip [Fixed] and the original Goodtrip before use: they share the same globals and cannot run at the same time.
 Required: MinimapAPI
@@ -33,7 +34,7 @@ Required: MinimapAPI
 Optional: Mod Config Menu (for in-game settings)
 
 Credits: original GoodTrip by tarako; this build is based on Goodtrip MLX's Tweak; Secret Room candidate markers are ported from Lazy Delver by dokee (MIT). See LICENSE and THIRD_PARTY.md for details. If the original author has any concerns about this derivative work, contact me and I will take it down promptly.</description>
-    <version>2.0.6</version>
+    <version>2.0.7</version>
     <visibility>Public</visibility>
     <tag id="Lua"/>
     <tag id="Tweaks"/>
