@@ -81,7 +81,7 @@ local marked_rooms = {}
 local marked_key = nil
 
 local function log(message)
-  if gt.DebugMod then
+  if gt:is_debug() then
     Isaac.ConsoleOutput("[GoodTripPlus] " .. message .. "\n")
     Isaac.DebugString("[GoodTripPlus] " .. message)
   end
