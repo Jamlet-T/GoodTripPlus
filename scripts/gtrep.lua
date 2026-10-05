@@ -1,7 +1,7 @@
 gt = RegisterMod("GoodTripPlus", 1)
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.2.1"
+gt.VERSION = "2.2.2"
 pcall(function()
   Isaac.ConsoleOutput("[GoodTripPlus] v" .. gt.VERSION ..
     " loaded (console command: gtpdiag)\n")
@@ -275,7 +275,14 @@ function gt:check_neigh_connected(trd, cond)
       -- （用户报的「炸开隐藏房传不进去」就是这个）。放行后安全性由调用方保证：
       -- 最后一步还要求 rooms_linked(邻居, 目标)，而实测炸开洞口在门图里有真门
       -- （variant 7 -> 8），没炸开的墙没有 → 「已炸开的能进、还封着的进不去」。
-      if (trd.VisitedCount == 0 or not trd.Clear) and
+      -- 第二处同类偏离（2026-10-05，第 4 处对 Fixed 的偏离）：诅咒房(10) 同样不在白名单里，
+      -- 于是「相邻房间」档**永远**传不进没探索过的诅咒房 —— 可 `BlockCurseRoom` 关掉时
+      -- 用户的期望就是「诅咒房按普通房间处理」，白名单却把它拦在准入本体里（用户实测报的 bug）。
+      -- 所以关掉 BlockCurseRoom 时也放行类型 10，安全性同样交给后面那串邻居条件
+      -- （已显示 + 邻居已清且可达 + rooms_linked 真门）兜底。
+      local curse_ok = trd.Data.Type == 10 and not gt:block_curse_room()
+      if not curse_ok and
+        (trd.VisitedCount == 0 or not trd.Clear) and
         trd.Flags & RoomDescriptor.FLAG_RED_ROOM == 0 and
         not gt:is_secret_room(trd) and
         trd.Data.Type ~= 1 and trd.Data.Type ~= 5 and
@@ -881,6 +888,14 @@ function gt:get_travel_mode()
     if v < 1 then return 1 end
     if v > 3 then return 3 end
     return v
+end
+--
+-- 禁止传送进诅咒房（移植基底 MLX's Tweak 的 BlockCurseRoom，默认 true = 禁止）。
+-- 消费点：scripts/gtp_curseblock.lua 的准入包装（拦住「传送到诅咒房」这个目标），
+-- 以及本文件 check_neigh_connected 的类型白名单 —— 关掉本项后，诅咒房在「相邻房间」
+-- 档位也按普通房间参与邻居豁免（见那里的注释）。
+function gt:block_curse_room()
+    return gt:get_config_bool("BlockCurseRoom", true) == true
 end
 --
 -- 传送过场（落地时的表现）。默认 2，值一律夹到 1..3：
@@ -1676,9 +1691,11 @@ gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
       L.travel_mode_values,
       L.travel_mode_desc
     )
-    -- 「禁止传送进诅咒房」= 恢复 GoodTrip [Fixed] 的同名选项（变量 gt.BlockCurseRoom，
-    -- 默认开）。早期移植时把这一条连开关一起删了，导致已探索过的诅咒房能被直接传送进去
-    -- （2026-10-05 用户报的 bug）。实现见 scripts/gtp_curseblock.lua（包装 gt.check_teleble）。
+    -- 「禁止传送进诅咒房」= 恢复移植基底（MLX's Tweak）的同名选项（变量 gt.BlockCurseRoom，
+    -- 默认开；现行 GoodTrip [Fixed] 2.2.58 已无此项，它靠 check_neigh_connected 的类型白名单
+    -- 把诅咒房排除）。早期移植时把这一条连开关一起删了，导致已探索过的诅咒房能被直接传送进去
+    -- （2026-10-05 用户报的 bug）。消费点：scripts/gtp_curseblock.lua（拦住目标）+
+    -- 本文件 check_neigh_connected 的白名单（放行类型 10）。
     ModConfigMenu.AddBooleanSetting(
       "GoodTripPlus", nil,
       "BlockCurseRoom",
