@@ -1,7 +1,7 @@
 gt = RegisterMod("GoodTripPlus", 1)
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.0.0"
+gt.VERSION = "2.0.4"
 pcall(function()
   Isaac.ConsoleOutput("[GoodTripPlus] v" .. gt.VERSION ..
     " loaded (console command: gtpdiag)\n")
@@ -92,7 +92,7 @@ gt.HighlightCursorRoom = true
 gt.ShowSecretMarkers = true
 local _, err = pcall(require, "gtconfig")
 ----
-local debug = gt.DebugMod
+-- 调试模式不再是一次性快照：改成 gt:is_debug() 每帧实时读（MCM 开关改了立刻生效，不用重启）。
 local fastrestartenable = gt.FastRestartEnable
 local tele_cd = 0
 -------------------------------
@@ -515,7 +515,7 @@ function gt:check_teleble(gid)
     or (gt:get_config_bool("FollowCurseOfLost", true)
         and level:GetCurses() & LevelCurse.CURSE_OF_THE_LOST ~= 0) then
       return false
-    elseif debug and grid_room[gid] then
+    elseif gt:is_debug() and grid_room[gid] then
       return true
     elseif gt:start_room_lock() then
       -- 牌意解读 / 天堂阶梯：刚进层、还没离开初始房间 → 禁止传送（别顶掉道具效果）
@@ -571,7 +571,7 @@ function gt:tele_failed()
 end
 --
 function gt:check_curse_room(gid)
-    if debug then return end
+    if gt:is_debug() then return end
     --a bombed secret-room wall has no spikes, so secret<->guard room is free
     --both ways, even when the guard is the curse room
     if secret_pre_room_id[crid] == gid or secret_pre_room_id[gid] == crid then
@@ -724,7 +724,7 @@ function gt:teleport_to_grid_index(gid)
         Game():ChangeRoom(walked, -1)
       end
     end
-    if debug then
+    if gt:is_debug() then
       Game():ChangeRoom(arrive,-1)
     else
         if dist ~= 0 then
@@ -734,9 +734,9 @@ function gt:teleport_to_grid_index(gid)
         end
       tele_cd = 45
       if not gt:get_config_bool("TeleportAnimation", true) then tele_cd = 10 end
-      if debug or gt:get_config_bool("FastTransition", true) then tele_cd = 1 end
+      if gt:is_debug() or gt:get_config_bool("FastTransition", true) then tele_cd = 1 end
     end
-    if gt:get_config_bool("FastTransition", true) or debug then
+    if gt:get_config_bool("FastTransition", true) or gt:is_debug() then
       Game():ChangeRoom(arrive,-1)
       Game():GetRoom():PlayMusic()
       return
@@ -828,6 +828,21 @@ function gt:get_config_bool(key, default)
       return value
     end
     return default
+end
+--
+-- 调试模式（诊断 / 开发用），默认关，两个开关任一为真即开：
+--   · MCM 的「调试模式」项（键 DebugMod）—— 玩家侧开关，改了立刻生效（每帧实时读）；
+--   · gtconfig.lua 的 `gt.DebugMod = true` —— 开发者文件级开关。**故意让它优先于 MCM**：
+--     没装 MCM 时也能开，且不会被 MCM 注册时写入的默认 false 顶掉（MCM 的 Config 在注册瞬间
+--     就被填成默认值，普通选项都是 MCM 覆盖文件；调试开关反过来，免得改文件却没反应）。
+-- 开启后（= 所有调试信息的总闸，2026-10-05 用户拍板）：
+--   绕过保护性禁传（道具入口 / 奖励房门）、跳过传送动画、按住地图键自动弹诊断浮层、
+--   解锁「按住地图键 + 键盘 F4」的手动 dump。关着时以上全部静默（不画、不写 log）。
+function gt:is_debug()
+    if gt.DebugMod == true then
+      return true
+    end
+    return gt:get_config_bool("DebugMod", false) == true
 end
 --
 -- 传送范围（1=任意房间 2=相邻房间 3=已探索房间）。默认 2，等价于移植初期的
@@ -1275,11 +1290,21 @@ function gt:tab_action()
     local cp = Isaac.WorldToRenderPosition(Vector(320,280))
     scpos = cp + cp
     --
-    -- 免控制台诊断入口：按住地图键 + F4 → 把光标所在格（光标没启用时用当前房间）
-    -- 的完整判定打到屏幕左上角 + 控制台 + log.txt。
+    -- 免控制台诊断入口：**调试模式打开后**，按住地图键 + 键盘 F4 → 把光标所在格
+    -- （光标没启用时用当前房间）的完整判定打到屏幕左上角 + 控制台 + log.txt。
     -- （控制台命令在 REPENTOGON 的 ImGui 控制台里不分发给 mod，所以这条是主力入口；
     -- 20 帧内连按只算一次，避免长按/连点刷屏）
-    if Input.IsButtonTriggered(Keyboard.KEY_F4, player.ControllerIndex)
+    --
+    -- 2026-10-05 用户拍板：本入口归「调试模式」总闸 —— 开关关着时按 F4 什么都不出（连 log 都不写），
+    -- 免得正式游玩时误按出一屏诊断。想用就先去 MCM 打开「调试模式」（即时生效，不用重启）。
+    --
+    -- ⚠️ 第二个参数必须写死 0（= 键盘玩家），绝不能传 player.ControllerIndex：
+    --    IsButtonTriggered 的手柄按钮码是「低位编号、超过 31 回绕」（见 enums 的 Controller，
+    --    0=D_PAD_LEFT … 5=BUTTON_B …），而 Keyboard.KEY_F4 = 293，293 % 32 = 5 = 手柄 B 键。
+    --    传手柄索引时这条判定会退化成「查该手柄的 B 键」，手柄玩家边按地图键边按到 B
+    --    就误判成 F4、弹出这份黄字浮层（2026-10-05 玩家实测）。键盘热键一律用索引 0。
+    if gt:is_debug()
+        and Input.IsButtonTriggered(Keyboard.KEY_F4, 0)
         and Game():GetFrameCount() - last_diag_frame > 20 then
       last_diag_frame = Game():GetFrameCount()
       local cell = mmp_ctrl and gt:get_pos_grid_index(mmp_ctrl_pos)
@@ -1291,7 +1316,7 @@ function gt:tab_action()
       Isaac.ExecuteCommand("restart")
     end
     --
-    if gt:check_teleble(false) or debug then
+    if gt:check_teleble(false) or gt:is_debug() then
       if not mmp_ctrl then
         mmp_ctrl = true
         mmp_ctrl_pos = gt:gid_to_rtmap_pos(gt:get_current_room_cursor_gid())
@@ -1433,6 +1458,8 @@ local GT_STRINGS = {
     delirium_desc = "On the map of The Void, mark the boss room that belongs to Delirium with a dedicated icon. The Void has several boss rooms but only one of them is Delirium. Shown as soon as the room is revealed on the map, no need to enter it first. Default: disabled",
     minebutton_name = "Mark the Rail Button Rooms in Mines II",
     minebutton_desc = "On the Mines II (Ashpit) map, mark the rooms holding the yellow Rail Plates with a button icon. There are 3 buttons per floor; pressing all of them lowers the rail bridge to Knife Piece 2 (the path to Mother). Only rooms you have entered are marked (same as the Fool's skull marker, so unexplored rooms are never spoiled); once marked, an icon stays for the rest of the floor. Default: enabled",
+    debug_name = "Debug Mode",
+    debug_desc = "The master switch for all diagnostics. While holding the map key the full teleport verdict pops up on screen by itself (and is written to log.txt), and the manual dump (hold the map key and press F4 on the keyboard) becomes available. It also bypasses the protective blocks (item-entrance rooms, reward-room doors) and skips teleport transitions. With this off, no diagnostics are shown or written at all. Leave it off to play normally. Default: disabled",
   },
   zh_hans = {
     title = "GoodTripPlus",
@@ -1459,6 +1486,8 @@ local GT_STRINGS = {
     delirium_desc = "在虚空层（The Void）地图上，把属于精神错乱（Delirium）的那间 boss 房用专属图标标出来——虚空层有好几间 boss 房，只有一间是 Delirium。只要该房间在地图上显示出来就会标注，不必先进去过。默认关闭。",
     minebutton_name = "标记矿洞 II 的轨道按钮房",
     minebutton_desc = "在矿洞 II（Mines/Ashpit）地图上，把有黄色轨道按钮的房间用按钮图标标出——全层共 3 个按钮，全部踩下后放下通往刀片碎片 2 的轨道桥（腐妈支线必经）。只有进入过的房间才会标注（与标记骷髅一致，不剧透未探索的房间）；图标一经标注就会一直保留。默认开启。",
+    debug_name = "调试模式",
+    debug_desc = "所有调试信息的总开关。打开后：按住地图键会自动弹出完整的传送判定浮层（并写进 log.txt），同时解锁手动 dump（按住地图键 + 键盘 F4），并绕过保护性禁传（道具入口房间、奖励房门）、跳过传送动画。关闭时任何调试信息都不会显示或写入。正常游玩请保持关闭。默认关闭。",
   },
 }
 -- A few plausible spellings/casings for each supported language, since the
@@ -1573,6 +1602,14 @@ gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
       false,
       L.delirium_name,
       L.delirium_desc
+    )
+    -- 调试模式（诊断用，默认关）：读配置的 gt:is_debug() 每帧实时取，勾掉立刻生效。
+    ModConfigMenu.AddBooleanSetting(
+      "GoodTripPlus", nil,
+      "DebugMod",
+      false,
+      L.debug_name,
+      L.debug_desc
     )
   end
 end)
@@ -1768,10 +1805,10 @@ function gt:adjacent_secret_gid()
 end
 
 function gt:auto_log_secret_diag(gid)
-  -- 只在开发模式（gtconfig.lua 的 gt.DebugMod = true）下自动弹诊断：
+  -- 只在调试模式下自动弹诊断（MCM 的 Debug Mode 开关，或 gtconfig.lua 的 gt.DebugMod = true）：
   -- 正式游玩时不往 log.txt 写这些行，免得每次瞄隐藏房都刷十几行；
-  -- 想临时看诊断按「按住地图键 + F4」，那条不依赖本开关。
-  if not debug then
+  -- 「按住地图键 + 键盘 F4」的手动 dump 同样归这个开关管（2026-10-05 起）。
+  if not gt:is_debug() then
     return
   end
   if gid == -99 then

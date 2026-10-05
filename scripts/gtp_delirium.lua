@@ -88,7 +88,7 @@ local marked_key = nil
 local last_scan_lines = {}
 
 local function log(message)
-  if gt.DebugMod then
+  if gt:is_debug() then
     Isaac.ConsoleOutput("[GoodTripPlus] " .. message .. "\n")
     Isaac.DebugString("[GoodTripPlus] " .. message)
   end

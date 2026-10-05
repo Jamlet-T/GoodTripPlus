@@ -36,7 +36,8 @@
   ------------------------
   包一层 `gt.check_teleble()`：保存原函数再替换，命中时直接返回 false。
   表现与其它准入拒绝完全一致 —— 光标不高亮、按 TAB 也不启用、松手也不会传。
-  常开、没有开关；唯一的例外是 `gt.DebugMod` 调试模式（它本来就要绕过全部准入）。
+  常开、没有开关；唯一的例外是「调试模式」开关（MCM 的 Debug Mode / gtconfig 的 gt.DebugMod，
+  见 `gt:is_debug()` —— 它本来就要绕过全部准入）。
 
   诊断
   ----
@@ -95,9 +96,9 @@ end
 local base_check_teleble = gt.check_teleble
 if type(base_check_teleble) == "function" then
   gt.check_teleble = function(self, gid)
-    -- 常开（用户 2026-10-03 要求不给开关）；gt.DebugMod 调试模式仍可绕过，
-    -- 与 gtrep 里其它准入拒绝保持一致
-    if not gt.DebugMod and reward_door_blocks() then
+    -- 常开（用户 2026-10-03 要求不给开关）；「调试模式」仍可绕过（gt:is_debug()，MCM 开关或
+    -- gtconfig 文件开关），与 gtrep 里其它准入拒绝保持一致
+    if not gt:is_debug() and reward_door_blocks() then
       return false
     end
     return base_check_teleble(self, gid)

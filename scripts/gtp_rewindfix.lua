@@ -256,7 +256,7 @@ end)
 gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function(_, is_continued)
   push_event("frame=" .. Game():GetFrameCount() ..
     " POST_GAME_STARTED continued=" .. tostring(is_continued))
-  if gt.DebugMod then
+  if gt:is_debug() then
     out("POST_GAME_STARTED continued=" .. tostring(is_continued))
   end
 end)
