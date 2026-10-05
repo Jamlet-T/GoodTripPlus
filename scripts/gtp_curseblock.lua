@@ -35,7 +35,8 @@
     光标」，不是传送目标）一律放行，不误伤。
   · 与 gtp_bosswindow 同一套写法（包装函数、不改 gtrep.lua 的准入本体），
     所以表现与其它准入拒绝一致：光标不高亮、按 TAB 不启用、松手也不传。
-  · 调试模式（`gt:is_debug()`）绕过，与其它准入拒绝一致。
+  · 调试模式（`gt:is_debug()`）**不参与判定**（2026-10-06 用户要求：调试模式只出诊断、
+    不改变任何传送逻辑）—— 所以开着调试模式时，本模块照常按开关拦/放。
 
   诊断
   ----
@@ -60,9 +61,7 @@ end
 
 -- 本模块是否拦下这个传送目标
 function gt:curse_room_blocks(gid)
-    if gt:is_debug() then
-        return false
-    end
+    -- 调试模式不参与判定（2026-10-06 用户要求：debug 只出诊断、不改行为）
     return gt:block_curse_room() and gt:is_curse_room_gid(gid)
 end
 

@@ -1,7 +1,7 @@
 gt = RegisterMod("GoodTripPlus", 1)
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.2.2"
+gt.VERSION = "2.2.3"
 pcall(function()
   Isaac.ConsoleOutput("[GoodTripPlus] v" .. gt.VERSION ..
     " loaded (console command: gtpdiag)\n")
@@ -543,16 +543,19 @@ end
 function gt:check_teleble(gid)
     -- 迷失诅咒期间能不能传：跟随 MinimapAPI 显不显示地图（gt:curse_map_visible()）。
     -- 地图不显示 → 也不提供传送；MinimapAPI 那边改成显示 → 传送照常开放。
+    -- ⚠️ 这条排在调试模式之前，且调试模式**不能**绕过它（本来就只有它挡住了 debug，
+    --    2026-10-06 起 debug 一概不参与判定，见下）。
     if gid == -99
     or (not gt:curse_map_visible()
         and level:GetCurses() & LevelCurse.CURSE_OF_THE_LOST ~= 0) then
       return false
-    elseif gt:is_debug() and grid_room[gid] then
-      return true
     elseif gt:start_room_lock() then
       -- 牌意解读 / 天堂阶梯：刚进层、还没离开初始房间 → 禁止传送（别顶掉道具效果）
       return false
     end
+    -- 「调试模式直接放行」已于 2026-10-06 移除（用户要求）：调试模式只负责输出诊断，
+    -- **不得**改变任何传送判定 —— 否则拿它排查「为什么传不过去」时判定被绕过，反而看不见
+    -- 拦住的那条规则。要测的必须是「预期设置下」的行为。
     local cid = crd.SafeGridIndex
     if grid_room[cid] == nil or not crd.Clear then
       return false
@@ -603,7 +606,7 @@ function gt:tele_failed()
 end
 --
 function gt:check_curse_room(gid)
-    if gt:is_debug() then return end
+    -- 诅咒房进/出的过路费：调试模式**不豁免**（2026-10-06 起 debug 只出诊断、不改行为）
     --a bombed secret-room wall has no spikes, so secret<->guard room is free
     --both ways, even when the guard is the curse room
     if secret_pre_room_id[crid] == gid or secret_pre_room_id[gid] == crid then
@@ -757,20 +760,17 @@ function gt:teleport_to_grid_index(gid)
       end
     end
     local tele_mode = gt:get_teleport_transition()  -- 1 立即出现 / 2 淡入淡出 / 3 传送白闪
-    if gt:is_debug() then
-      Game():ChangeRoom(arrive,-1)
-    else
-        if dist ~= 0 then
-          local speed = player.MoveSpeed
-          local addTime = math.floor((60.0*dist/speed)+0.5)
-          Game().TimeCounter = Game().TimeCounter + addTime --boss rush reads TimeCounter; Hush does not
-        end
-      -- 过场越短，冷却越短（沿用 Fixed 的三档：无过场 1 帧 / 淡入淡出 10 帧 / 传送白闪 45 帧）
-      if tele_mode == 1 then tele_cd = 1
-      elseif tele_mode == 3 then tele_cd = 45
-      else tele_cd = 10 end
+    -- 调试模式不再强制「立即出现」也不跳过计时补偿（2026-10-06 用户要求：debug 只出诊断、不改行为）
+    if dist ~= 0 then
+      local speed = player.MoveSpeed
+      local addTime = math.floor((60.0*dist/speed)+0.5)
+      Game().TimeCounter = Game().TimeCounter + addTime --boss rush reads TimeCounter; Hush does not
     end
-    if tele_mode == 1 or gt:is_debug() then
+    -- 过场越短，冷却越短（沿用 Fixed 的三档：无过场 1 帧 / 淡入淡出 10 帧 / 传送白闪 45 帧）
+    if tele_mode == 1 then tele_cd = 1
+    elseif tele_mode == 3 then tele_cd = 45
+    else tele_cd = 10 end
+    if tele_mode == 1 then
       Game():ChangeRoom(arrive,-1)
       Game():GetRoom():PlayMusic()
       return
@@ -865,14 +865,18 @@ function gt:get_config_bool(key, default)
     return default
 end
 --
--- 调试模式（诊断 / 开发用），默认关，两个开关任一为真即开：
+-- 调试模式（**纯诊断开关**），默认关，两个开关任一为真即开：
 --   · MCM 的「调试模式」项（键 DebugMod）—— 玩家侧开关，改了立刻生效（每帧实时读）；
 --   · gtconfig.lua 的 `gt.DebugMod = true` —— 开发者文件级开关。**故意让它优先于 MCM**：
 --     没装 MCM 时也能开，且不会被 MCM 注册时写入的默认 false 顶掉（MCM 的 Config 在注册瞬间
 --     就被填成默认值，普通选项都是 MCM 覆盖文件；调试开关反过来，免得改文件却没反应）。
--- 开启后（= 所有调试信息的总闸，2026-10-05 用户拍板）：
---   绕过保护性禁传（道具入口 / 奖励房门）、跳过传送动画、按住地图键自动弹诊断浮层、
---   解锁「按住地图键 + 键盘 F4」的手动 dump。关着时以上全部静默（不画、不写 log）。
+-- 开启后只做一件事：**输出诊断**——按住地图键自动弹浮层、解锁「按住地图键 + 键盘 F4」
+--   手动 dump、各模块往控制台 / log.txt 写诊断行。关着时以上全部静默（不画、不写 log）。
+-- ⚠️ 它**绝不改变任何传送判定或传送表现**（2026-10-06 用户拍板）。历史遗留的几处
+--   「debug 下放行 / 跳过」已全部移除：不再绕过保护性禁传（道具入口 / 奖励房门 / 诅咒房）、
+--   不再强制「立即出现」跳过过场、不再豁免诅咒房过路费、呼出光标的闸门也不再为它开绿灯。
+--   理由：开它去排查「为什么传不过去」时，若判定被绕过就看不到拦住的规则；要测的是
+--   「预期设置下」的行为。排查仍然可用：按住地图键 + F4 的手动 dump 不依赖光标是否呼出。
 function gt:is_debug()
     if gt.DebugMod == true then
       return true
@@ -1414,7 +1418,7 @@ function gt:tab_action()
       Isaac.ExecuteCommand("restart")
     end
     --
-    if gt:check_teleble(false) or gt:is_debug() then
+    if gt:check_teleble(false) then
       if not mmp_ctrl then
         mmp_ctrl = true
         mmp_ctrl_moved = false
@@ -1602,7 +1606,7 @@ local GT_STRINGS = {
     minebutton_name = "Mark the Rail Button Rooms in Mines II",
     minebutton_desc = "Default: enabled",
     debug_name = "Debug Mode",
-    debug_desc = "Master switch for all diagnostics. Keep it off for normal play. Default: disabled",
+    debug_desc = "Diagnostics only; never changes teleporting. Keep it off for normal play. Default: disabled",
   },
   zh_hans = {
     title = "GoodTripPlus",
@@ -1640,7 +1644,7 @@ local GT_STRINGS = {
     minebutton_name = "标记矿洞 II 的轨道按钮房",
     minebutton_desc = "默认开启。",
     debug_name = "调试模式",
-    debug_desc = "所有调试信息的总开关。正常游玩请保持关闭。默认关闭。",
+    debug_desc = "所有调试信息的总开关，只出诊断、不影响传送。正常游玩请关闭。默认关闭。",
   },
 }
 -- A few plausible spellings/casings for each supported language, since the
