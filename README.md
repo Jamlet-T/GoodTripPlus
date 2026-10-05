@@ -239,7 +239,7 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 
 | 选项 | 默认 | 作用 |
 | --- | --- | --- |
-| `FollowCurseOfLost` | 开 | 迷失诅咒下禁用传送 |
+| `OverrideLost`（MCM 显示「迷失诅咒下显示地图」，代理 MiniMAPI 设置） | 关 | **已取消独立的 `FollowCurseOfLost`**（对 Fixed 的第 3 处偏离）：传送直接跟随 MinimapAPI 的 `OverrideLost`（其菜单里叫 "Display During Curse"）—— 诅咒期间地图照常显示 → 传送照常开放；地图被藏起来（默认） → 传送一并停用。纯代理（只读写 `MinimapAPI.Config.OverrideLost`，不另存值），改哪边都同步 |
 | `TravelMode`（MCM 显示「可以传送到」） | 相邻房间 | v1.8.2 由 Fixed 的 `AllowNeighborRoom` + `AllowAnyRoom` **合并**而成的三选一：**任意房间**＝所有已显示房间全部放行（＝原 `AllowAnyRoom` 开）；**相邻房间**＝已清且可达房间旁「已显示但未清/未探索」的房间放行（＝原默认组合；普通房/boss/小 boss/献祭房除外；红钥匙房、一层与水层镜像的商店/宝箱房豁免；虚空 Delirium boss 房角落特判）；**已探索房间**＝只认自己已清怪的房（＝原 `AllowNeighborRoom` 关） |
 | `FairTripPath` | 开 | 目标必须沿「已探索+已清怪」的房间逐真门抵达（门图 BFS） |
 | `ArriveAtDoor` | **开**（偏离 Fixed 的默认关） | 落地在走路会走进来的门口（跨屏大房间远途会先经过前一格） |
@@ -405,7 +405,9 @@ mineButtons.rooms={42,95,118}
   **同一份**帧计数（`get_fade()`，按住地图键才 > 0，返回 0~1 的系数；**松开地图键立即消失、
   不做淡出**），显示条件也逐条对齐 ——
   层被忽略（回溯线 / STAGE8 / 贪婪模式 / 镜像外维度）、**迷失诅咒**、房间不在网格上、
-  MinimapAPI 战斗隐藏，任一命中都不画。只有开关是各自独立的。
+  MinimapAPI 战斗隐藏，任一命中都不画。**其中「迷失诅咒」这一条自 v2.1.1 起跟随 MinimapAPI 的
+  `OverrideLost`（Display During Curse）** —— 它强制显示地图时我们也不藏（与「迷失诅咒下能否传送」
+  同一口径，都走 `gt:curse_map_visible()`）。只有开关是各自独立的。
 - 为此 `gtp_delver.lua` 里那个「按住地图键」的计数**不再受隐藏房标记开关影响**（否则
   关掉标记会让边界高亮一起停摆），`delver/render.lua` 另外暴露了 `get_fade()` 与
   `minimapapi_hides_map` 供本模组其它模块复用。

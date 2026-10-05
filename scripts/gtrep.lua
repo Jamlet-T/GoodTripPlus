@@ -1,7 +1,7 @@
 gt = RegisterMod("GoodTripPlus", 1)
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.1.0"
+gt.VERSION = "2.1.1"
 pcall(function()
   Isaac.ConsoleOutput("[GoodTripPlus] v" .. gt.VERSION ..
     " loaded (console command: gtpdiag)\n")
@@ -77,7 +77,9 @@ local room_neighbours = {}
 gt.DebugMod = false
 gt.FastRestartEnable = false
 gt.TeleportAnimation = true
-gt.FollowCurseOfLost = true
+-- 注：迷失诅咒下是否禁用传送**已不再由我们的配置项控制**（2026-10-05 用户要求）——
+-- 改为跟随 MinimapAPI 的 OverrideLost（其菜单里的 "Display During Curse"），见 gt:curse_map_visible()。
+-- 这是对 GoodTrip [Fixed] 的第 3 处语义偏离（Fixed 是独立的 FollowCurseOfLost 开关）。
 -- 传送范围（本项目合并原 Fixed 的 AllowNeighborRoom + AllowAnyRoom 两项）：
 --   1 = 任意房间（原 AllowAnyRoom 开）
 --   2 = 相邻房间（原默认：AllowNeighborRoom 开、AllowAnyRoom 关）
@@ -511,8 +513,10 @@ function gt:start_room_lock()
 end
 
 function gt:check_teleble(gid)
+    -- 迷失诅咒期间能不能传：跟随 MinimapAPI 显不显示地图（gt:curse_map_visible()）。
+    -- 地图不显示 → 也不提供传送；MinimapAPI 那边改成显示 → 传送照常开放。
     if gid == -99
-    or (gt:get_config_bool("FollowCurseOfLost", true)
+    or (not gt:curse_map_visible()
         and level:GetCurses() & LevelCurse.CURSE_OF_THE_LOST ~= 0) then
       return false
     elseif gt:is_debug() and grid_room[gid] then
@@ -853,6 +857,18 @@ function gt:get_travel_mode()
     if v < 1 then return 1 end
     if v > 3 then return 3 end
     return v
+end
+--
+-- 迷失诅咒期间 MinimapAPI 还会不会显示地图 = 它的 OverrideLost（MCM 里叫 "Display During Curse"，
+-- 默认 false）。MinimapAPI 自己的读法（main.lua）：`OverrideLost or (curse & CURSE_OF_THE_LOST <= 0)`
+-- —— 即 OverrideLost 为真时无视迷失诅咒照常画图。
+-- 我们把它作为「迷失诅咒下能否传送」的唯一依据（2026-10-05 用户要求），不再有独立开关：
+--   地图显示 → 传送照常；地图不显示 → 停用。没有 MinimapAPI 时按原版语义（诅咒期间不显示）处理。
+function gt:curse_map_visible()
+    if MinimapAPI and MinimapAPI.GetConfig then
+      return MinimapAPI:GetConfig("OverrideLost") == true
+    end
+    return false
 end
 --
 function gt:get_minapi_room_by_list_index(listIndex)
@@ -1440,8 +1456,8 @@ local GT_STRINGS = {
     title = "GoodTripPlus",
     cursor_speed_name = "Cursor Speed",
     cursor_speed_desc = "Pixels the cursor moves per frame. Default: 2",
-    follow_curse_name = "Disable On Curse Of Lost",
-    follow_curse_desc = "Default: enabled",
+    curse_display_name = "Display During Curse",
+    curse_display_desc = "Mirrors MinimapAPI's setting. Default: disabled. Teleport is available only while the map is shown",
     travel_mode_name = "Can Teleport To",
     travel_mode_values = {[1] = "Any Room", [2] = "Neighbor Room", [3] = "Explored Rooms"},
     travel_mode_desc = "Default: Neighbor Room",
@@ -1473,8 +1489,8 @@ local GT_STRINGS = {
     title = "GoodTripPlus",
     cursor_speed_name = "光标速度",
     cursor_speed_desc = "光标每帧移动的像素数。默认值：2",
-    follow_curse_name = "迷失诅咒下禁用传送",
-    follow_curse_desc = "默认开启。",
+    curse_display_name = "迷失诅咒下显示地图",
+    curse_display_desc = "代理 MinimapAPI 对应设置。默认关。只在显示地图时可传送。",
     travel_mode_name = "可以传送到",
     travel_mode_values = {[1] = "任意房间", [2] = "相邻房间", [3] = "已探索房间"},
     travel_mode_desc = "默认：相邻房间。",
@@ -1572,13 +1588,31 @@ gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
       L.fairtime_name,
       L.fairtime_desc
     )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
-      "FollowCurseOfLost",
-      true,
-      L.follow_curse_name,
-      L.follow_curse_desc
-    )
+    -- 「迷失诅咒下显示地图」= 代理 MinimapAPI 的 OverrideLost（它的菜单里叫 "Display During Curse"，
+    -- 默认关）。这一项同时决定迷失诅咒期间能否传送（见 gt:curse_map_visible() 与 check_teleble）：
+    -- 地图照常显示 → 传送照常；地图被诅咒藏起来 → 传送也停用。
+    -- 同样是纯代理（只读写 MinimapAPI.Config，不另存值）；注意 MinimapAPI 自己那一项没有改 ConfigPreset
+    -- 的动作，这里也不加，行为与它完全一致。
+    if MinimapAPI and MinimapAPI.Config then
+      ModConfigMenu.AddSetting(
+        "GoodTripPlus", nil,
+        {
+          Type = ModConfigMenu.OptionType.BOOLEAN,
+          Default = false,
+          CurrentSetting = function()
+            return MinimapAPI.Config.OverrideLost == true
+          end,
+          Display = function()
+            return L.curse_display_name .. ": " ..
+              (MinimapAPI.Config.OverrideLost == true and "ON" or "OFF")
+          end,
+          OnChange = function(newVal)
+            MinimapAPI.Config.OverrideLost = newVal and true or false
+          end,
+          Info = L.curse_display_desc,
+        }
+      )
+    end
     -- FastTransition / HighlightCursorRoom 不注册 MCM 菜单项（2026-10-04 用户决定）：
     -- 两者默认常开，仅可在 gtconfig.lua 里用文件覆盖。
     ModConfigMenu.AddBooleanSetting(
