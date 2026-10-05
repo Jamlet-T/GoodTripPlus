@@ -1,7 +1,7 @@
 gt = RegisterMod("GoodTripPlus", 1)
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.1.1"
+gt.VERSION = "2.1.2"
 pcall(function()
   Isaac.ConsoleOutput("[GoodTripPlus] v" .. gt.VERSION ..
     " loaded (console command: gtpdiag)\n")
@@ -39,6 +39,12 @@ local n_room_num = 0
 local mmp_ctrl = false
 local mmp_ctrl_pos = Vector(0, 0)
 local mmp_highlight_gid = nil
+-- 光标「出生后还没被玩家挪动过」：这个状态下**每帧**都把它贴回当前房间
+-- （跨层 / R 重开 / rewind 后地图重绘都能自愈，和隐藏房标记同一套做法）。
+-- 玩家一按方向键就置 true，之后完全照旧 —— 光标放哪儿待在哪儿。
+-- 已知代价（2026-10-05 接受）：呼出后还没碰过光标时，走路换房它会跟着你走。
+local mmp_ctrl_moved = false
+
 -- 隐藏房现场诊断的去重表（按「层 + 目标格」，new_level 清空）
 local secret_diag_logged = {}
 -- 上一次手动 dump 的帧号（F4 连按限流，避免刷屏）
@@ -502,7 +508,10 @@ function gt:start_room_lock()
     -- 先说持有道具：房间里出现同名特效（例如玩家自己传送时的漩涡）时，
     -- 这一条能挡掉误判，也省下一次实体遍历。想纯按实体判定就把这段删掉。
     local p = player or Isaac.GetPlayer(0)
-    if not p then
+    -- ⚠️ 光判 nil 不够：开局初始化期间 / 过场里拿到的是「对象在、但还没就绪」的玩家，
+    -- 直接 HasCollectible 会在原生层崩溃（2026-10-05 实测：POST_GAME_STARTED 期间调用即闪退两次）。
+    -- 用 Exists() 兜底，任何调用时机都不会再把游戏带崩。
+    if not p or not p:Exists() then
       return false
     end
     if not (p:HasCollectible(CollectibleType.COLLECTIBLE_CARD_READING)
@@ -1012,16 +1021,27 @@ function gt:gid_to_rtmap_pos(gid)
 end
 --
 function gt:get_current_room_cursor_gid()
-    local gid = crd.SafeGridIndex
-    if not crd.Data then
+    -- ⚠️ 读「游戏此刻」的当前房间，而不是文件级 local `crd` / `room`：
+    -- 跨层 / R 重开时，光标要定位的那一刻可能**早于** new_room() 刷新这些 local
+    -- （回调顺序与帧对齐不定 —— 2026-10-05 用户实测「TAB+R 间隔短就定位错」），
+    -- 用缓存值会把光标算到**上一层**的房间格子上。这两个调用都很便宜。
+    local lvl = Game():GetLevel()
+    local d = (lvl and lvl:GetCurrentRoomDesc()) or crd
+    if not d then
+      return crd and crd.SafeGridIndex or 0
+    end
+
+    local gid = d.SafeGridIndex
+    if not d.Data then
       return gid
     end
 
-    local tl = room:GetTopLeftPos()
-    local br = room:GetBottomRightPos()
+    local rm = Game():GetRoom() or room
+    local tl = rm:GetTopLeftPos()
+    local br = rm:GetBottomRightPos()
     local isRight = player.Position.X >= (tl.X + br.X) / 2
     local isBottom = player.Position.Y >= (tl.Y + br.Y) / 2
-    local shape = crd.Data.Shape
+    local shape = d.Data.Shape
 
     if shape == RoomShape.ROOMSHAPE_1x2 or shape == RoomShape.ROOMSHAPE_IIV then
       if isBottom then gid = gid + 13 end
@@ -1054,7 +1074,7 @@ function gt:get_current_room_cursor_gid()
     if grid_room[gid] then
       return gid
     end
-    return crd.SafeGridIndex
+    return d.SafeGridIndex
 end
 --
 function gt:get_grid_room()
@@ -1223,6 +1243,8 @@ function gt:mmp_ctrl_move()
         local newpos = mmp_ctrl_pos + dir[i] * speed
         if newpos.X >= xmin and newpos.Y >= ymin and newpos.X <= xmax and newpos.Y <= ymax then
           mmp_ctrl_pos = newpos
+          -- 玩家自己动过光标了：从此不再自动归位（照旧"你放哪儿就待在哪儿"）
+          mmp_ctrl_moved = true
         end
       end
     end
@@ -1338,9 +1360,18 @@ function gt:tab_action()
     if gt:check_teleble(false) or gt:is_debug() then
       if not mmp_ctrl then
         mmp_ctrl = true
+        mmp_ctrl_moved = false
         mmp_ctrl_pos = gt:gid_to_rtmap_pos(gt:get_current_room_cursor_gid())
         gt:update_cursor_room_highlight()
       else
+        -- 玩家还没自己动过光标 ⇒ 每帧都把它贴回当前房间（与隐藏房标记同一套做法：
+        -- 标记也是每帧按当前地图重算投影，所以跨层/重开后过几帧会自己切回正确位置）。
+        -- 之前用「呼出后 30 帧内才归位」的窗口，用户实测 TAB+R 间隔短时仍然错位
+        -- （地图重建要几帧，窗口可能已经走完），所以改成不设窗口。
+        -- 玩家一按方向键就置 mmp_ctrl_moved，从此完全照旧：光标放哪儿待在哪儿。
+        if not mmp_ctrl_moved then
+          mmp_ctrl_pos = gt:gid_to_rtmap_pos(gt:get_current_room_cursor_gid())
+        end
         gt:mmp_ctrl_move()
         gt:update_cursor_room_highlight()
         player:SetShootingCooldown(2)
@@ -1445,6 +1476,25 @@ function gt:new_level()
     door_link = {}
     door_swept = {}
     curse_bare_outside, curse_bare_inside = {}, {}
+    --
+    -- 重开（长按 TAB + R）时光标必须重新定位（2026-10-05 用户报的 bug）：
+    -- 那张局是「玩家一直按着 TAB」—— 光标在重开前就已经呼出（mmp_ctrl = true），
+    -- 于是新局里 tab_action() 走的是「已在呼出中」的移动分支，mmp_ctrl_pos 还是上一局
+    -- 留下的屏幕坐标；地图重绘后它落在另一间房上，松手就直接传到那间房去。
+    -- （重新按一次 TAB 反而是对的，因为那会走「首次呼出」分支按当前房间定位）。
+    -- 所以换层/开新局一律把光标状态清空：下一帧 tab_action 会当成首次呼出，重新定位到当前房间。
+    -- ⚠️ 只清一次不够（用户 2026-10-05 实测：TAB+R 间隔短时仍错位）—— 重定位那一刻，
+    -- MinimapAPI 的地图（锚点）或我们文件级 local 的房间缓存可能还没刷新完，先后取决于回调与帧。
+    -- 所以真正的兜底在 tab_action：玩家没自己动过光标（mmp_ctrl_moved == false）时**每帧**都贴回
+    -- 当前房间（不设时间窗口 —— 先试过「30 帧内归位」，实测不够），几帧内自愈；
+    -- 另有 get_current_room_cursor_gid 改读实时房间。二者见各自的注释。
+    -- 覆盖范围：MC_POST_NEW_LEVEL + MC_POST_GAME_STARTED（开局、R 重开、控制台 rewind）。
+    mmp_ctrl = false
+    mmp_ctrl_pos = Vector(0, 0)
+    mmp_highlight_gid = nil
+    mmp_ctrl_moved = false
+    -- 注意：这里**不要**放任何依赖玩家实体的逻辑（例如 check_teleble）—— new_level 会在
+    -- POST_GAME_STARTED（开局初始化中）被调到，那时玩家实体还没就绪，会原生崩溃（2026-10-05 踩过）。
 end
 --
 -------------------------------
