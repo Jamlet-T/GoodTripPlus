@@ -3,38 +3,94 @@
     <name>GoodTripPlus</name>
     <directory>goodtripplus</directory>
     <id>goodtripplus</id>
-    <description>Minimap teleport mod based on Goodtrip MLX's Tweak — an external teleport plugin for MinimapAPI.
-Hold the map key (TAB) to bring up a cursor on the minimap, steer it with the shoot direction keys, and release to teleport.
-Supports the mirrored map in the mirror world.
-
-Teleport admission and landing are a faithful port of GoodTrip [Fixed]: a trip may only travel through rooms you have explored and cleared, door by door.
-
-Secret Rooms can be teleported into as soon as their wall has been blown open; a wall that is still intact (for example a Secret Room revealed by Blue Map) is still refused, so you can never teleport through a wall you have not opened.
-
-One inherited rule ("no teleporting while the current room is named Mom or Ultra Greed") is skipped on The Ascent: there the boss room you walk in through is named Mom, but the fight is long over and the room is only a pass-through, so the rule used to swallow perfectly normal trips (the cursor came up, you could pick a room, and releasing only played the error sound).
-
-Also in this build:
-- Fixes pickup icons vanishing from the minimap after the "rewind" console command.
-- Bundles the Secret Room candidate markers from Lazy Delver (by dokee, MIT), re-projected onto MinimapAPI's own map math so they line up exactly. Please disable Lazy Delver itself to avoid drawing two sets of markers.
-- Marks the room in Depths II that holds the special skull which always drops The Fool card, with a custom skull icon. Only shown for rooms you have already visited, so it never spoils the layout.
-- While a Card Reading portal or a Stairway ladder is present in the room you are in, teleporting is disabled: both entrances are destroyed the moment you leave the room, so this keeps a stray press from wasting them. It is tied to the entrance itself rather than to any notion of a "starting room", so it lifts by itself as soon as you leave, and it is correct on The Ascent too.
-- While the room you are in has a door leading to a reward room (Devil Room, Angel Room, Boss Rush, Hush), teleporting is disabled so a stray press cannot make you miss it. Rooms without such a door are not locked at all, so an ordinary boss room you just cleared still teleports normally. The Ascent is excluded.
-- While holding the map key, the outer edge of rooms that sit on the 13x13 map border is highlighted, so you can tell which side has no more rooms left. Only explored rooms are drawn. (MCM: Show Map Bounds / gtconfig: ShowMapBounds, on by default.)
-- How far a trip may reach is now a single three-way setting, "Can Teleport To" (MCM) / TravelMode (config): Any Room, Neighbor Room (default) or Explored Rooms. These replace the separate AllowNeighborRoom and AllowAnyRoom toggles with the same behaviour, just in one place.
-- New: on The Void, the boss room that belongs to Delirium is marked with a dedicated icon. The Void has several boss rooms but only one of them is Delirium; the marker appears as soon as that room is revealed on the map, so you can loot the other bosses first. (MCM: Mark the Delirium Room in The Void / gtconfig: DeliriumRoom, off by default.)
-- New: in Mines II (Ashpit), the rooms holding the three yellow Rail Plates are marked with a dedicated button icon once you have entered them — pressing all 3 buttons on the floor lowers the rail bridge to Knife Piece 2 (the path to Mother). Once marked, an icon stays for the rest of the floor. (MCM: Mark the Rail Button Rooms in Mines II / gtconfig: MineButtonRoom, on by default.)
-- New: two of MinimapAPI's own map settings are also exposed in this mod's menu, as proxies: Highlight Start Room and Hide Map in Combat (three-way: Never / Bosses Only / Always). A proxy only reads and writes MinimapAPI's own config, so this mod's menu and MinimapAPI's own menu always agree, and the value is still saved by MinimapAPI.
-- Diagnostics: nothing is shown or written unless Debug Mode is on (MCM: Debug Mode / gtconfig: DebugMod, off by default). Once it is on, holding the map key pops up the full teleport verdict by itself, and pressing F4 on the keyboard while holding the map key dumps it on demand. Controller buttons never trigger the dump. Debug Mode also bypasses the protective blocks and skips teleport transitions.
-
-Settings in the MCM menu or the config file: TravelMode, FollowCurseOfLost, FairTripPath, ArriveAtDoor, FairTripTime, ShowSecretMarkers, FoolsSkullRoom, ShowMapBounds, DeliriumRoom, MineButtonRoom, CursorSpeed, DebugMod. FastTransition and HighlightCursorRoom are on by default and only configurable in gtconfig.lua (no MCM entry). Highlight Start Room and Hide Map in Combat are also offered in this mod's menu, but they are MinimapAPI's own settings: they read and write MinimapAPI's config directly, so both menus always agree.
-
-Please uninstall or disable goodtrip_mlxtweak, GoodTrip [Fixed] and the original Goodtrip before use: they share the same globals and cannot run at the same time.
-Required: MinimapAPI
-
-Optional: Mod Config Menu (for in-game settings)
-
-Credits: original GoodTrip by tarako; this build is based on Goodtrip MLX's Tweak; Secret Room candidate markers are ported from Lazy Delver by dokee (MIT). See LICENSE and THIRD_PARTY.md for details. If the original author has any concerns about this derivative work, contact me and I will take it down promptly.</description>
-    <version>2.0.7</version>
+    <description>[h1]GoodTripPlus[/h1]
+将 [b]GoodTrip[/b] 融合进右上角的 [b]MiniMAPI[/b] 小地图！
+直接在小地图上选择房间并传送，在保留 GoodTrip 经典功能的同时，加入更多地图信息显示、实用功能与 Bug 修复。
+[h2]主要功能[/h2]
+[list]
+[*]在 MiniMAPI 小地图上直接选择并传送至房间
+[*]支持传送至未探索房间
+[*]标记 Depths II 的 [b]Tinted Skull[/b]
+[*]标记 Mines II 的 [b]Yellow Rail Button[/b]
+[*]支持为传送设置时间惩罚
+[/list]
+[h2]MiniMAPI 兼容[/h2]
+兼容 MiniMAPI 的地图显示功能，包括：
+[list]
+[*]战斗时隐藏地图
+[*]高亮初始房间
+[*]高亮最远房间
+[*]显示各房间到当前房间的距离
+[/list]
+[h2]新增功能[/h2]
+[list]
+[*]集成 [b]Lazy Delver[/b] 的隐藏房候选位置标记
+[*]在虚空层标记真正的 [b]精神错乱（Delirium）房间[/b]
+[*]显示地图边界，方便判断哪些方向已不可能生成更多房间
+[/list]
+[h2]Bug 修复[/h2]
+[list]
+[*]修复使用控制台命令 [b]rewind[/b] 后 MiniMAPI 地图图标重置的问题
+[*]修复虚空层中的地图错位问题：MiniMAPI 会将精神错乱的 2×2 房间按照原版地图显示为 1×1 房间，导致 GoodTrip MLX's Tweak 与 Lazy Delver 的光标、标记与地图整体错位。GoodTripPlus 已针对 MiniMAPI 的地图坐标重新适配
+[/list]
+[h2]安装要求[/h2]
+[list]
+[*][b]必须安装：MiniMAPI[/b]
+[*]推荐安装：[b]Mod Config Menu[/b]
+[*][b]请勿与其他 GoodTrip Mod 同时启用！[/b]
+[/list]
+[h2]Credits[/h2]
+感谢：
+[list]
+[*][b]GoodTrip[/b] — 原始地图传送 Mod
+[*][b]GoodTrip MLX's Tweak[/b] — GoodTripPlus 的主要开发基础
+[*][b]Lazy Delver[/b] — 隐藏房候选位置标记
+[/list]
+[hr][/hr]
+[h1]GoodTripPlus[/h1]
+[b]GoodTrip[/b], integrated directly into the [b]MiniMAPI[/b] minimap!
+Select rooms and teleport directly from the minimap while keeping the classic GoodTrip features, with additional map information, quality-of-life features, and bug fixes.
+[h2]Main Features[/h2]
+[list]
+[*]Select and teleport to rooms directly from the MiniMAPI minimap
+[*]Teleport to unexplored rooms
+[*]Mark the [b]Tinted Skull[/b] in Depths II
+[*]Mark the [b]Yellow Rail Button[/b] in Mines II
+[*]Optional time penalties for teleporting
+[/list]
+[h2]MiniMAPI Compatibility[/h2]
+Compatible with MiniMAPI's map display features, including:
+[list]
+[*]Hide the map during combat
+[*]Highlight the starting room
+[*]Highlight the furthest room
+[*]Display each room's distance from your current room
+[/list]
+[h2]New Features[/h2]
+[list]
+[*]Secret Room candidate markers from [b]Lazy Delver[/b]
+[*]Mark the actual [b]Delirium Room[/b] in The Void
+[*]Display map boundaries to show which directions can no longer contain additional rooms
+[/list]
+[h2]Bug Fixes[/h2]
+[list]
+[*]Fixes MiniMAPI map icons being reset after using the [b]rewind[/b] console command
+[*]Fixes map misalignment in The Void: MiniMAPI renders Delirium's 2×2 room as a 1×1 room like the vanilla minimap, which previously caused the cursor and markers from GoodTrip MLX's Tweak and Lazy Delver to become misaligned. GoodTripPlus reprojects them to MiniMAPI's map coordinates
+[/list]
+[h2]Requirements[/h2]
+[list]
+[*][b]Required: MiniMAPI[/b]
+[*]Recommended: [b]Mod Config Menu[/b]
+[*][b]Do NOT enable this mod together with other GoodTrip mods![/b]
+[/list]
+[h2]Credits[/h2]
+Special thanks to:
+[list]
+[*][b]GoodTrip[/b] — Original minimap teleport mod
+[*][b]GoodTrip MLX's Tweak[/b] — Main foundation of GoodTripPlus
+[*][b]Lazy Delver[/b] — Secret Room candidate markers
+[/list]</description>
+    <version>2.1.0</version>
     <visibility>Public</visibility>
     <tag id="Lua"/>
     <tag id="Tweaks"/>
