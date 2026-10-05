@@ -46,51 +46,8 @@
 [*][b]GoodTrip MLX's Tweak[/b] — GoodTripPlus 的主要开发基础
 [*][b]Lazy Delver[/b] — 隐藏房候选位置标记
 [/list]
-[hr][/hr]
-[h1]GoodTripPlus[/h1]
-[b]GoodTrip[/b], integrated directly into the [b]MiniMAPI[/b] minimap!
-Select rooms and teleport directly from the minimap while keeping the classic GoodTrip features, with additional map information, quality-of-life features, and bug fixes.
-[h2]Main Features[/h2]
-[list]
-[*]Select and teleport to rooms directly from the MiniMAPI minimap
-[*]Teleport to unexplored rooms
-[*]Mark the [b]Tinted Skull[/b] in Depths II
-[*]Mark the [b]Yellow Rail Button[/b] in Mines II
-[*]Optional time penalties for teleporting
-[/list]
-[h2]MiniMAPI Compatibility[/h2]
-Compatible with MiniMAPI's map display features, including:
-[list]
-[*]Hide the map during combat
-[*]Highlight the starting room
-[*]Highlight the furthest room
-[*]Display each room's distance from your current room
-[/list]
-[h2]New Features[/h2]
-[list]
-[*]Secret Room candidate markers from [b]Lazy Delver[/b]
-[*]Mark the actual [b]Delirium Room[/b] in The Void
-[*]Display map boundaries to show which directions can no longer contain additional rooms
-[/list]
-[h2]Bug Fixes[/h2]
-[list]
-[*]Fixes MiniMAPI map icons being reset after using the [b]rewind[/b] console command
-[*]Fixes map misalignment in The Void: MiniMAPI renders Delirium's 2×2 room as a 1×1 room like the vanilla minimap, which previously caused the cursor and markers from GoodTrip MLX's Tweak and Lazy Delver to become misaligned. GoodTripPlus reprojects them to MiniMAPI's map coordinates
-[/list]
-[h2]Requirements[/h2]
-[list]
-[*][b]Required: MiniMAPI[/b]
-[*]Recommended: [b]Mod Config Menu[/b]
-[*][b]Do NOT enable this mod together with other GoodTrip mods![/b]
-[/list]
-[h2]Credits[/h2]
-Special thanks to:
-[list]
-[*][b]GoodTrip[/b] — Original minimap teleport mod
-[*][b]GoodTrip MLX's Tweak[/b] — Main foundation of GoodTripPlus
-[*][b]Lazy Delver[/b] — Secret Room candidate markers
-[/list]</description>
-    <version>2.2.0</version>
+</description>
+    <version>2.2.1</version>
     <visibility>Public</visibility>
     <tag id="Lua"/>
     <tag id="Tweaks"/>

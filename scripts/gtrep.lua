@@ -1,7 +1,7 @@
 gt = RegisterMod("GoodTripPlus", 1)
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.2.0"
+gt.VERSION = "2.2.1"
 pcall(function()
   Isaac.ConsoleOutput("[GoodTripPlus] v" .. gt.VERSION ..
     " loaded (console command: gtpdiag)\n")
@@ -1560,6 +1560,8 @@ local GT_STRINGS = {
     travel_mode_name = "Can Teleport To",
     travel_mode_values = {[1] = "Any Room", [2] = "Neighbor Room", [3] = "Explored Rooms"},
     travel_mode_desc = "Default: Neighbor Room",
+    block_curse_name = "Block Curse Room Teleport",
+    block_curse_desc = "Cannot teleport into Curse Rooms (they damage you on entry/exit). Default: enabled",
     transition_name = "Teleport Transition",
     transition_values = {[1] = "Instant", [2] = "Fade", [3] = "Teleport Effect"},
     transition_desc = "How the arrival looks: Instant, Fade or Teleport effect. Default: Fade",
@@ -1596,6 +1598,8 @@ local GT_STRINGS = {
     travel_mode_name = "可以传送到",
     travel_mode_values = {[1] = "任意房间", [2] = "相邻房间", [3] = "已探索房间"},
     travel_mode_desc = "默认：相邻房间。",
+    block_curse_name = "禁止传送进诅咒房",
+    block_curse_desc = "开启后不能传送进会在进出时扣血的诅咒房。默认开启。",
     transition_name = "传送过场",
     transition_values = {[1] = "立即出现", [2] = "淡入淡出", [3] = "传送动画"},
     transition_desc = "传送落地时的表现：立即出现 / 淡入淡出 / 传送动画。默认：淡入淡出。",
@@ -1671,6 +1675,16 @@ gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
       L.travel_mode_name,
       L.travel_mode_values,
       L.travel_mode_desc
+    )
+    -- 「禁止传送进诅咒房」= 恢复 GoodTrip [Fixed] 的同名选项（变量 gt.BlockCurseRoom，
+    -- 默认开）。早期移植时把这一条连开关一起删了，导致已探索过的诅咒房能被直接传送进去
+    -- （2026-10-05 用户报的 bug）。实现见 scripts/gtp_curseblock.lua（包装 gt.check_teleble）。
+    ModConfigMenu.AddBooleanSetting(
+      "GoodTripPlus", nil,
+      "BlockCurseRoom",
+      true,
+      L.block_curse_name,
+      L.block_curse_desc
     )
     ModConfigMenu.AddBooleanSetting(
       "GoodTripPlus", nil,
