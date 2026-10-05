@@ -12,7 +12,14 @@
   （用户实测）。本模块把它补回来：
 
     · BlockCurseRoom = true（默认） → 全局禁止把传送目标落在诅咒房上；
-    · BlockCurseRoom = false        → 不拦，诅咒房按普通房间处理。
+    · BlockCurseRoom = false        → 不拦，诅咒房按普通房间处理（**含「相邻房间」档的
+      未探索邻居豁免**：Fixed 的 check_neigh_connected 类型白名单本来把诅咒房(10)
+      排除在外，导致关掉本开关也传不进「已显示但未探索」的诅咒房；该白名单在
+      gtrep.lua 里同样按本开关放行类型 10，见那边的注释）。
+
+  ⚠️ 本模块只管「传送到诅咒房」这个**目标**的准入；上面第二条里「关掉后按普通房间
+  处理」要 gtrep.lua 的 check_neigh_connected 配合，两处都以 `gt:block_curse_room()`
+  为唯一开关（定义在 gtrep.lua，与 get_travel_mode 同类）。
 
   语义 & 落点
   -----------
@@ -49,10 +56,7 @@ function gt:is_curse_room_gid(gid)
     return rd ~= nil and rd.Data ~= nil and rd.Data.Type == RoomType.ROOM_CURSE
 end
 
--- 是否禁止传送进诅咒房（Fixed 的 BlockCurseRoom，默认 true = 禁止）
-function gt:block_curse_room()
-    return gt:get_config_bool("BlockCurseRoom", true) == true
-end
+-- 开关本身是 gt:block_curse_room()（定义在 gtrep.lua，与 get_travel_mode 同类）。
 
 -- 本模块是否拦下这个传送目标
 function gt:curse_room_blocks(gid)

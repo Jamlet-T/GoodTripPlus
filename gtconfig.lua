@@ -38,12 +38,15 @@ gt.HighlightCursorRoom = true
 --   3 = 已探索房间 （等价 Fixed: AllowNeighborRoom = false、AllowAnyRoom = false）
 gt.TravelMode = 2
 
--- 禁止传送进诅咒房（GoodTrip [Fixed] 的同名选项 BlockCurseRoom，默认开）。
+-- 禁止传送进诅咒房（移植基底 MLX's Tweak 的同名选项 BlockCurseRoom，默认开）。
 -- 诅咒房 = RoomType.ROOM_CURSE(10)，进出时会按门咬血的那种。
 --   true（默认） = 任何传送范围档位都不允许把目标落在诅咒房上（「任意房间」档也拦）；
---   false        = 不拦，诅咒房按普通房间处理（仍照旧在进出时扣血）。
--- 实现见 scripts/gtp_curseblock.lua（包装 gt.check_teleble）；仅调试模式可绕过。
--- 注：2026-10-05 恢复 —— 本 mod 早期移植时漏掉了 Fixed 的这条选项。
+--   false        = 不拦，诅咒房按普通房间处理（含「相邻房间」档的未探索邻居豁免），
+--                  但仍照旧在进出时扣血。
+-- 两个消费点都读同一个 gt:block_curse_room()：
+--   · scripts/gtp_curseblock.lua —— 拦住「传送到诅咒房」这个目标；
+--   · gtrep.lua 的 check_neigh_connected 类型白名单 —— 放行类型 10。
+-- 仅调试模式可绕过。注：2026-10-05 恢复 —— 本 mod 早期移植时漏掉了 Fixed 的这条选项。
 gt.BlockCurseRoom = true
 
 -- 只能传送到经已清房间逐门连通的房间（Fixed: FairTripPath）
