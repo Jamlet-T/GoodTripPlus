@@ -1,12 +1,17 @@
 -- GoodTripPlus - 静态默认值覆盖（优先级低于游戏内 Mod Config Menu）
 -- 这里的每一项都可以被 MCM 里的设置覆盖（有对应菜单项的话）。
--- 例外：FastTransition / HighlightCursorRoom 自 2026-10-04 起**不进 MCM 菜单**，
--- 只能在本文件里覆盖（两者默认常开）。
+-- 例外：HighlightCursorRoom 自 2026-10-04 起**不进 MCM 菜单**，只能在本文件里覆盖（默认常开）。
 -- 传送准入逻辑为 GoodTrip [Fixed] 的忠实移植，选项与 Fixed 同名同默认值
--- （唯一例外：传送范围把 Fixed 的 AllowNeighborRoom + AllowAnyRoom 两项合并成
---   一个三选一的 TravelMode，默认值等价于 Fixed 的原默认组合）。
+-- （例外：① 传送范围把 Fixed 的 AllowNeighborRoom + AllowAnyRoom 两项合并成一个三选一的
+--   TravelMode，默认值等价于 Fixed 的原默认组合；② 传送过场把 Fixed 的 TeleportAnimation +
+--   FastTransition 两个布尔项合并成一个三选一 TeleportTransition，默认「淡入淡出」，
+--   而 Fixed 默认是「淡入淡出关 + 快速过场关」= 淡入淡出，两边效果一致）。
 gt.FastRestartEnable = true
-gt.TeleportAnimation = false
+
+-- 传送过场（落地时的表现）：1 = 立即出现 / 2 = 淡入淡出 / 3 = 传送动画（白闪）。
+-- MCM 里对应「传送过场」项（装了 MCM 时以它为准）；这里只是没装 MCM 时的文件级默认。
+-- 顺带决定传送冷却 tele_cd（1 / 10 / 45 帧）：过场越短，冷却越短。
+gt.TeleportTransition = 2
 
 -- 调试模式（诊断 / 开发用，默认关）。**所有调试信息的总闸**：关着时屏幕不画浮层、
 -- log 里也不写诊断行（「地图键 + F4」手动入口同样按不动）。两个入口任一为真即开：
@@ -43,9 +48,8 @@ gt.ArriveAtDoor = true
 -- 按距离公平增加游戏时间（Fixed: FairTripTime）
 gt.FairTripTime = false
 
--- 跳过传送动画（Fixed: FastTransition；不进 MCM 菜单，仅本文件可覆盖。
--- 注意：默认值 true 是对 Fixed 的一处偏离，Fixed 默认为 false）
-gt.FastTransition = true
+-- 注：传送过场已合并为一个三选一项（见文件开头 gt.TeleportTransition），
+-- 原来的两个布尔项 gt.TeleportAnimation / gt.FastTransition 自 2026-10-05 起不再读取。
 
 -- 隐藏房候选标记（合并自 Lazy Delver）
 gt.ShowSecretMarkers = true
