@@ -1,7 +1,7 @@
 gt = RegisterMod("GoodTripPlus", 1)
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.0.5"
+gt.VERSION = "2.0.6"
 pcall(function()
   Isaac.ConsoleOutput("[GoodTripPlus] v" .. gt.VERSION ..
     " loaded (console command: gtpdiag)\n")
@@ -1253,6 +1253,9 @@ end
 -- 初始房间的绿色高亮已移除（2026-10-03）：MinimapAPI 自带
 -- "Highlight Start Room"（HighlightStartRoom，其菜单里开），
 -- 按项目定位（MinimapAPI 的外置传送插件）不再自己画。
+-- 2026-10-05：这一项**已在我们自己的 MCM 里代理出来**（「高亮初始房间」，
+-- 见文件末尾 MCM 注册段的 ModConfigMenu.AddSetting：只读写 MinimapAPI.Config，
+-- 不另存一份，所以与 MinimapAPI 菜单里那项是同一个值）。这里依旧不自己绘制。
 -- 光标所在房间的高亮保留（HighlightCursorRoom，MinimapAPI 无对应功能），
 -- 由 render_cursor 直接绘制。
 --
@@ -1454,6 +1457,8 @@ local GT_STRINGS = {
     fools_skull_desc = "Default: enabled",
     map_bounds_name = "Show Map Bounds",
     map_bounds_desc = "Default: enabled",
+    highlight_start_name = "Highlight Start Room",
+    highlight_start_desc = "Mirrors MinimapAPI's setting. Default: disabled",
     delirium_name = "Mark the Delirium Room in The Void",
     delirium_desc = "Default: disabled",
     minebutton_name = "Mark the Rail Button Rooms in Mines II",
@@ -1482,6 +1487,8 @@ local GT_STRINGS = {
     fools_skull_desc = "默认开启。",
     map_bounds_name = "显示地图边界",
     map_bounds_desc = "默认开启。",
+    highlight_start_name = "高亮初始房间",
+    highlight_start_desc = "代理 MinimapAPI 对应设置。默认关。",
     delirium_name = "标记虚空层的精神错乱房",
     delirium_desc = "默认关闭。",
     minebutton_name = "标记矿洞 II 的轨道按钮房",
@@ -1582,6 +1589,36 @@ gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
       L.map_bounds_name,
       L.map_bounds_desc
     )
+    -- 「高亮初始房间」= 代理 MinimapAPI 自己的 HighlightStartRoom。
+    -- 它**不是**我们自己的配置项：值只存在 MinimapAPI.Config 里，所以我们用 MCM 的自定义设置表
+    -- （CurrentSetting 读、OnChange 写），而不是 AddBooleanSetting（那会往 ModConfigMenu.Config
+    -- 里另存一份，两边就会各说各话）。读写同一份 MinimapAPI.Config 的写法 = 与 MinimapAPI 自己菜单
+    -- 里那一项天然同步（在它那边改，这边也变），存档也照旧由 MinimapAPI 自己 SaveData 保存。
+    -- 结构照抄 MinimapAPI config_menu.lua 的同名项（Type/CurrentSetting/Display/OnChange/Info）。
+    if MinimapAPI and MinimapAPI.Config then
+      ModConfigMenu.AddSetting(
+        "GoodTripPlus", nil,
+        {
+          Type = ModConfigMenu.OptionType.BOOLEAN,
+          Default = false,
+          CurrentSetting = function()
+            return MinimapAPI.Config.HighlightStartRoom == true
+          end,
+          Display = function()
+            return L.highlight_start_name .. ": " ..
+              (MinimapAPI.Config.HighlightStartRoom == true and "ON" or "OFF")
+          end,
+          OnChange = function(newVal)
+            MinimapAPI.Config.HighlightStartRoom = newVal and true or false
+            -- 与 MinimapAPI 自己那份菜单的处理一致：改了就变成「自定义」配置（预设 0）
+            if MinimapAPI.Config.ConfigPreset ~= nil then
+              MinimapAPI.Config.ConfigPreset = 0
+            end
+          end,
+          Info = L.highlight_start_desc,
+        }
+      )
+    end
     ModConfigMenu.AddBooleanSetting(
       "GoodTripPlus", nil,
       "FoolsSkullRoom",
