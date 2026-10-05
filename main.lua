@@ -21,6 +21,8 @@
 --   9. 矿洞 II 标记黄色轨道按钮（Rail Plate）所在的房间：踩下全层 3 个按钮才
 --      放行刀片碎片 2 的轨道桥；房间一显示在地图上就标注，按钮踩下后图标自动消失
 --      （scripts/gtp_minebuttons.lua，默认开启；素材 resources/gfx/goodtripplus/MineButton.*）
+--  10. 禁止传送进诅咒房（scripts/gtp_curseblock.lua，默认开启；恢复 GoodTrip [Fixed]
+--      的 BlockCurseRoom 选项 —— 早期移植时漏掉，导致已探索的诅咒房能被直接传送进去）
 
 require("scripts.gtrep")
 require("scripts.gtp_rewindfix")
@@ -28,6 +30,8 @@ require("scripts.gtp_delver")
 require("scripts.gtp_skullroom")
 -- 必须放在 gtrep 之后：它包一层 gt.check_teleble
 require("scripts.gtp_bosswindow")
+-- 同上，也要在 gtrep 之后（同样包一层 gt.check_teleble）
+require("scripts.gtp_curseblock")
 require("scripts.gtp_mapbounds")
 require("scripts.gtp_delirium")
 require("scripts.gtp_minebuttons")

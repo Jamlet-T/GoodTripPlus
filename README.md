@@ -21,6 +21,9 @@
    合成一个三选一 `TravelMode`，MCM 里显示为「可以传送到」——「任意房间 / 相邻房间 / 已探索房间」，
    默认「相邻房间」（行为等价于原来的默认组合），见第四节。
 10. **新增**了矿洞 II 黄色轨道按钮（Rail Plate）所在房间的标记，默认开启（见第六节）。
+11. **修复**：恢复 GoodTrip [Fixed] 的 `BlockCurseRoom` 选项（默认开）。早期移植时漏掉这条，
+    导致**已探索过的诅咒房能被传送光标直接选中、直接传进去**（2026-10-05 用户报的 bug）；
+    现在默认「禁止传送进诅咒房」，可在 MCM 里关掉（见第四节）。
 
 ---
 
@@ -243,6 +246,7 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 | --- | --- | --- |
 | `OverrideLost`（MCM 显示「迷失诅咒下显示地图」，代理 MiniMAPI 设置） | 关 | **已取消独立的 `FollowCurseOfLost`**（对 Fixed 的第 3 处偏离）：传送直接跟随 MinimapAPI 的 `OverrideLost`（其菜单里叫 "Display During Curse"）—— 诅咒期间地图照常显示 → 传送照常开放；地图被藏起来（默认） → 传送一并停用。纯代理（只读写 `MinimapAPI.Config.OverrideLost`，不另存值），改哪边都同步 |
 | `TravelMode`（MCM 显示「可以传送到」） | 相邻房间 | v1.8.2 由 Fixed 的 `AllowNeighborRoom` + `AllowAnyRoom` **合并**而成的三选一：**任意房间**＝所有已显示房间全部放行（＝原 `AllowAnyRoom` 开）；**相邻房间**＝已清且可达房间旁「已显示但未清/未探索」的房间放行（＝原默认组合；普通房/boss/小 boss/献祭房除外；红钥匙房、一层与水层镜像的商店/宝箱房豁免；虚空 Delirium boss 房角落特判）；**已探索房间**＝只认自己已清怪的房（＝原 `AllowNeighborRoom` 关） |
+| `BlockCurseRoom`（MCM 显示「禁止传送进诅咒房」，v2.2.1 恢复） | **开** | **GoodTrip [Fixed] 的同名选项**（早期移植时被删，2026-10-05 恢复）：开启时**任何传送范围档位都不能把目标落在诅咒房上**（`RoomType.ROOM_CURSE`(10)，进出会按门咬血的那种；「任意房间」档也拦）；关掉则按普通房间处理。**只拦「传进去」，从诅咒房传出去不拦**（出去该扣的血照旧扣）。实现是独立模块 `scripts/gtp_curseblock.lua`，**包一层 `gt.check_teleble()`**（不改 `gtrep.lua`） |
 | `FairTripPath` | 开 | 目标必须沿「已探索+已清怪」的房间逐真门抵达（门图 BFS） |
 | `ArriveAtDoor` | **开**（偏离 Fixed 的默认关） | 落地在走路会走进来的门口（跨屏大房间远途会先经过前一格） |
 | `FairTripTime` | 关 | 按传送距离与移速补回游戏时间 |
@@ -260,10 +264,12 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 "一离开房间就随房间销毁"，所以**实体在＝别动它**；门没了禁令自动解除，**不需要任何层/房间状态**。
 回溯线也自然正确 —— Wiki 写明那里的门生成在"通往下一层的那个起始房间"，不是进门那间 boss 房。
 
-旧的 `AllowUnexploredNeighbor` / `RequireExploredPath` / `BlockCurseRoom` 三个开关已移除：
-未探索场景并入 `TravelMode` 的「相邻房间」放宽逻辑；路径判定即 `FairTripPath`；
-诅咒房不再禁止传送，改为进门扣血（`curse_toll_free`：Flat File / 深渊书免伤，
-以撒的心脏 / 牙与甲照扣，尖刺状态从门两侧分别记录）。
+旧的 `AllowUnexploredNeighbor` / `RequireExploredPath` 两个开关已移除：
+未探索场景并入 `TravelMode` 的「相邻房间」放宽逻辑；路径判定即 `FairTripPath`。
+`BlockCurseRoom` 曾一并被删（当时改成「诅咒房能传、进门扣血」），实测是错的 ——
+**v2.2.1 起按 Fixed 恢复为默认开启的选项**（见第四节表格）。诅咒门进出的过路费
+（`curse_toll_free`：Flat File / 深渊书免伤，以撒的心脏 / 牙与甲照扣，
+尖刺状态从门两侧分别记录）仍照旧生效。
 
 **对 Fixed 的两处偏离**（都为了修实际 bug，理由都写在代码注释里）：
 1. `check_neigh_connected()` 的类型白名单放进隐藏房 → 已炸开的隐藏房可以传送进入（见第 2 节）；
@@ -498,7 +504,7 @@ bash pack.sh        # 产出 dist/goodtripplus-<版本>.zip
 ```
 issacMod/                       ← 工作区 git 仓库（可容纳多个 mod）
 └── goodtripplus/               ← 本 mod 的源码目录（自包含，可独立打包/拆出）
-    ├── main.lua                ← 入口：加载 gtrep + gtp_rewindfix + gtp_delver + gtp_skullroom
+    ├── main.lua                ← 入口：加载 gtrep + gtp_rewindfix + gtp_delver + gtp_skullroom 等
     ├── metadata.xml            ← mod 元数据（name / directory / id）
     ├── gtconfig.lua            ← 静态默认值（可被 MCM 覆盖）
     ├── deploy.sh               ← 同步到游戏 mods/goodtripplus（开发机用）
@@ -515,6 +521,8 @@ issacMod/                       ← 工作区 git 仓库（可容纳多个 mod�
         ├── gtp_delver.lua      ← 隐藏房候选标记的回调接线 + MCM 开关
         ├── gtp_skullroom.lua   ← 深牢 II 愚者骷髅房标记（读房间生成表 → MinimapAPI 房间图标）
         ├── gtp_minebuttons.lua ← 矿洞 II 黄色按钮房标记（读房间生成表 → MinimapAPI 房间图标）
+        ├── gtp_bosswindow.lua  ← 房间里有奖励门（恶魔/天使/Boss Rush/死寂）时禁传（常开，包装 check_teleble）
+        ├── gtp_curseblock.lua  ← 禁止传送进诅咒房（Fixed 的 BlockCurseRoom，默认开，包装 check_teleble）
         └── delver/             ← 移植自 Lazy Delver（MIT），仅改了 require 路径
             ├── const.lua       ← 常量表
             ├── geometry.lua    ← 形状占据格、相邻格、门槽映射
@@ -537,12 +545,13 @@ issacMod/                       ← 工作区 git 仓库（可容纳多个 mod�
 
 | 位置 | 改动 |
 | --- | --- |
-| `scripts/gtrep.lua` | `RegisterMod` 名、ModConfigMenu 配置键 / 标题全部改为 `GoodTripPlus`；新增 MCM 开关 `ShowSecretMarkers`、`FoolsSkullRoom`；传送准入与传送判定整体移植自 GoodTrip [Fixed]（选项同名同默认值，见第四节） |
+| `scripts/gtrep.lua` | `RegisterMod` 名、ModConfigMenu 配置键 / 标题全部改为 `GoodTripPlus`；新增 MCM 开关 `ShowSecretMarkers`、`FoolsSkullRoom`、`BlockCurseRoom`（v2.2.1，恢复自 Fixed）；传送准入与传送判定整体移植自 GoodTrip [Fixed]（选项同名同默认值，见第四节） |
 | `scripts/gtp_rewindfix.lua` | 新增文件，rewind 图标修复 |
 | `scripts/gtp_delver.lua` | 新增文件，隐藏房候选标记的回调接线 |
 | `scripts/gtp_skullroom.lua` | 新增文件，深牢 II 愚者骷髅房标记（自己写的，未参考任何 mod 的实现代码） |
 | `scripts/gtp_minebuttons.lua` | 新增文件，矿洞 II 黄色按钮房标记（同上，自研；识别值 4500/3 用原版 `.stb` 实测验证） |
 | `scripts/gtp_bosswindow.lua` | 新增文件，房间里出现「奖励房间的门」（恶魔房 / 天使房 / Boss Rush / 死寂）时禁用传送，常开（**包装 `gt.check_teleble`** 实现，不改 `gtrep.lua`） |
+| `scripts/gtp_curseblock.lua` | 新增文件，禁止传送进诅咒房（恢复 GoodTrip [Fixed] 的 `BlockCurseRoom` 选项，默认开；**包装 `gt.check_teleble`**，不改 `gtrep.lua`） |
 | `scripts/gtp_mapbounds.lua` | 新增文件，地图边界房间高亮（默认开；用一张 8×8 纯白贴图缩放画边） |
 | `scripts/delver/*` | 从 Lazy Delver 原样移植（仅改写 `require` 路径），`render.lua` 重写了定位部分 |
 | `resources/gfx/goodtripplus/*` | `marker.*` 从 Lazy Delver 复制（换到自己的路径避免与它本体冲突）；`TintedSkull.*` 是本模组自有的骷髅图标（16x16）；`MineButton.*` 是本模组自有的按钮图标（16x16）；`bounds.*` 是本模组自有的纯白贴图（8×8，画地图边界线用） |
