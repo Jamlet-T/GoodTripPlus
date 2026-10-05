@@ -1,7 +1,7 @@
 gt = RegisterMod("GoodTripPlus", 1)
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.1.2"
+gt.VERSION = "2.1.3"
 pcall(function()
   Isaac.ConsoleOutput("[GoodTripPlus] v" .. gt.VERSION ..
     " loaded (console command: gtpdiag)\n")
@@ -82,7 +82,10 @@ local room_neighbours = {}
 
 gt.DebugMod = false
 gt.FastRestartEnable = false
-gt.TeleportAnimation = true
+-- 传送过场：1 = 立即出现 / 2 = 淡入淡出 / 3 = 传送白闪（见 gt:get_teleport_transition()）。
+-- 取代了原来的两个布尔项 FastTransition + TeleportAnimation（2026-10-05 用户要求做成三选一，
+-- 默认 2 = 淡入淡出；上游 GoodTrip [Fixed] 也把这两个效果放在 MCM 里）。
+gt.TeleportTransition = 2
 -- 注：迷失诅咒下是否禁用传送**已不再由我们的配置项控制**（2026-10-05 用户要求）——
 -- 改为跟随 MinimapAPI 的 OverrideLost（其菜单里的 "Display During Curse"），见 gt:curse_map_visible()。
 -- 这是对 GoodTrip [Fixed] 的第 3 处语义偏离（Fixed 是独立的 FollowCurseOfLost 开关）。
@@ -95,7 +98,6 @@ gt.FairTripPath = true
 -- 默认改为开：偏离 Fixed 的默认关（2026-10-04 用户决定）
 gt.ArriveAtDoor = true
 gt.FairTripTime = false
-gt.FastTransition = true
 gt.HighlightCursorRoom = true
 gt.ShowSecretMarkers = true
 local _, err = pcall(require, "gtconfig")
@@ -737,6 +739,7 @@ function gt:teleport_to_grid_index(gid)
         Game():ChangeRoom(walked, -1)
       end
     end
+    local tele_mode = gt:get_teleport_transition()  -- 1 立即出现 / 2 淡入淡出 / 3 传送白闪
     if gt:is_debug() then
       Game():ChangeRoom(arrive,-1)
     else
@@ -745,18 +748,20 @@ function gt:teleport_to_grid_index(gid)
           local addTime = math.floor((60.0*dist/speed)+0.5)
           Game().TimeCounter = Game().TimeCounter + addTime --boss rush reads TimeCounter; Hush does not
         end
-      tele_cd = 45
-      if not gt:get_config_bool("TeleportAnimation", true) then tele_cd = 10 end
-      if gt:is_debug() or gt:get_config_bool("FastTransition", true) then tele_cd = 1 end
+      -- 过场越短，冷却越短（沿用 Fixed 的三档：无过场 1 帧 / 淡入淡出 10 帧 / 传送白闪 45 帧）
+      if tele_mode == 1 then tele_cd = 1
+      elseif tele_mode == 3 then tele_cd = 45
+      else tele_cd = 10 end
     end
-    if gt:get_config_bool("FastTransition", true) or gt:is_debug() then
+    if tele_mode == 1 or gt:is_debug() then
       Game():ChangeRoom(arrive,-1)
       Game():GetRoom():PlayMusic()
       return
     end
-    local tele_anime = gt:get_config_bool("TeleportAnimation", true) and 3 or 1
+    -- RoomTransitionAnim（enums.lua）：1 = FADE（淡入淡出）/ 3 = TELEPORT（白闪）
+    local tele_anime = (tele_mode == 3) and 3 or 1
     Game():StartRoomTransition(arrive, Direction.NO_DIRECTION, tele_anime, player, -1) --direction is ignored, measured twice
-    tele_cd = tele_anime == 3 and 45 or 10
+    tele_cd = (tele_mode == 3) and 45 or 10
 end
 --
 function gt:is_mirror_world()
@@ -862,6 +867,19 @@ end
 -- AllowNeighborRoom=true / AllowAnyRoom=false。值一律夹到 1..3，防御 MCM 存的旧值 / 脏值。
 function gt:get_travel_mode()
     local v = tonumber(gt:get_config_bool("TravelMode", 2)) or 2
+    v = math.floor(v + 0.5)
+    if v < 1 then return 1 end
+    if v > 3 then return 3 end
+    return v
+end
+--
+-- 传送过场（落地时的表现）。默认 2，值一律夹到 1..3：
+--   1 = 立即出现：直接 Game():ChangeRoom()，没有任何过场（原来的 FastTransition = true）
+--   2 = 淡入淡出：StartRoomTransition(..., RoomTransitionAnim.FADE = 1)，短暂淡出淡入（像换房）
+--   3 = 传送白闪：StartRoomTransition(..., RoomTransitionAnim.TELEPORT = 3)，等同使用传送道具
+-- 顺带决定传送冷却 tele_cd（1 / 10 / 45 帧，沿用 Fixed 的档位）：过场越短，冷却越短。
+function gt:get_teleport_transition()
+    local v = tonumber(gt:get_config_bool("TeleportTransition", 2)) or 2
     v = math.floor(v + 0.5)
     if v < 1 then return 1 end
     if v > 3 then return 3 end
@@ -1511,6 +1529,9 @@ local GT_STRINGS = {
     travel_mode_name = "Can Teleport To",
     travel_mode_values = {[1] = "Any Room", [2] = "Neighbor Room", [3] = "Explored Rooms"},
     travel_mode_desc = "Default: Neighbor Room",
+    transition_name = "Teleport Transition",
+    transition_values = {[1] = "Instant", [2] = "Fade", [3] = "Teleport Effect"},
+    transition_desc = "How the arrival looks: Instant, Fade or Teleport effect. Default: Fade",
     fairpath_name = "Only Teleport to Connected Rooms",
     fairpath_desc = "Only allow teleport to rooms reachable through cleared rooms, door by door. Default: enabled",
     arrivedoor_name = "Arrive At Door",
@@ -1544,6 +1565,9 @@ local GT_STRINGS = {
     travel_mode_name = "可以传送到",
     travel_mode_values = {[1] = "任意房间", [2] = "相邻房间", [3] = "已探索房间"},
     travel_mode_desc = "默认：相邻房间。",
+    transition_name = "传送过场",
+    transition_values = {[1] = "立即出现", [2] = "淡入淡出", [3] = "传送动画"},
+    transition_desc = "传送落地时的表现：立即出现 / 淡入淡出 / 传送动画。默认：淡入淡出。",
     fairpath_name = "只能传送到已连通的房间",
     fairpath_desc = "传送目标必须能从当前房间沿已清怪的房间逐门抵达。默认开启。",
     arrivedoor_name = "传送后站在门口",
@@ -1638,6 +1662,14 @@ gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
       L.fairtime_name,
       L.fairtime_desc
     )
+    ModConfigMenu.AddNumberSetting(
+      "GoodTripPlus", nil,
+      "TeleportTransition",
+      1, 3, 1, 2,
+      L.transition_name,
+      L.transition_values,
+      L.transition_desc
+    )
     -- 「迷失诅咒下显示地图」= 代理 MinimapAPI 的 OverrideLost（它的菜单里叫 "Display During Curse"，
     -- 默认关）。这一项同时决定迷失诅咒期间能否传送（见 gt:curse_map_visible() 与 check_teleble）：
     -- 地图照常显示 → 传送照常；地图被诅咒藏起来 → 传送也停用。
@@ -1663,8 +1695,8 @@ gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
         }
       )
     end
-    -- FastTransition / HighlightCursorRoom 不注册 MCM 菜单项（2026-10-04 用户决定）：
-    -- 两者默认常开，仅可在 gtconfig.lua 里用文件覆盖。
+    -- HighlightCursorRoom 不注册 MCM 菜单项（2026-10-04 用户决定）：默认常开，仅可在 gtconfig.lua 覆盖。
+    -- （FastTransition 原先是同一批，2026-10-05 起已并入上面的「传送过场」三选一项。）
     ModConfigMenu.AddBooleanSetting(
       "GoodTripPlus", nil,
       "ShowSecretMarkers",
