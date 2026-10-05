@@ -1,7 +1,7 @@
 gt = RegisterMod("GoodTripPlus", 1)
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.1.3"
+gt.VERSION = "2.1.4"
 pcall(function()
   Isaac.ConsoleOutput("[GoodTripPlus] v" .. gt.VERSION ..
     " loaded (console command: gtpdiag)\n")
@@ -44,6 +44,16 @@ local mmp_highlight_gid = nil
 -- 玩家一按方向键就置 true，之后完全照旧 —— 光标放哪儿待在哪儿。
 -- 已知代价（2026-10-05 接受）：呼出后还没碰过光标时，走路换房它会跟着你走。
 local mmp_ctrl_moved = false
+-- 光标淡入（2026-10-05 用户要求：与隐藏房候选标记 / 地图边界高亮同一节奏）：
+-- 按住地图键后先等几帧、再渐显，免得光标在 MinimapAPI 的大地图还没就位时就先冒出来
+-- （2.1.2 修好「重开时光标贴回当前房间」之后尤其明显 —— 那时地图刚重建，光标已经画了）。
+-- 计数口径刻意与 delver/render.lua 的 tab_hold_cnt 一致（THRESHOLD=3 / MAX=9：
+-- 第 4 帧起可见，alpha 由 1/9 渐到 1，约 0.2 秒）。**那边改了这边要一起改。**
+-- 为什么不直接复用 delver 的 get_fade()：它在「被忽略的层」（回溯线 / STAGE8 / 贪婪模式 /
+-- 镜像外维度）恒为 0，而传送光标在这些层必须照常工作（那些层只是**标记**没意义）。
+local CURSOR_FADE_MIN = -3
+local CURSOR_FADE_MAX = 9
+local mmp_ctrl_fade = CURSOR_FADE_MIN
 
 -- 隐藏房现场诊断的去重表（按「层 + 目标格」，new_level 清空）
 local secret_diag_logged = {}
@@ -1231,6 +1241,15 @@ function gt:get_cursor_speed()
     return 2
 end
 --
+-- 光标的不透明度系数 [0, 1]。0 ＝ 这一刻还不该画（淡入还没开始，前 4 帧）。
+-- 节奏与隐藏房候选标记 / 地图边界高亮一致（同口径的帧计数，见文件上方 CURSOR_FADE_*）。
+function gt:get_cursor_fade()
+    if mmp_ctrl_fade <= 0 then
+      return 0
+    end
+    return mmp_ctrl_fade / CURSOR_FADE_MAX
+end
+--
 function gt:mmp_ctrl_move()
     local speed = gt:get_cursor_speed()
     local xmin, xmax, ymin, ymax
@@ -1326,18 +1345,23 @@ end
 function gt:render_cursor()
     gt:render_diag_overlay() -- 诊断浮层（画在 HUD 之上，与地图是否按住无关）
     if mmp_ctrl then
-      if gt:get_config_bool("HighlightCursorRoom", true) and mmp_highlight_gid then
-        local desc = grid_room[mmp_highlight_gid]
-        if desc then
-          gt:draw_minapi_room_highlight(
-            gt:get_minapi_room_by_list_index(desc.ListIndex),
-            -- RGB multipliers of 1 preserve the original room art.  Zeroing
-            -- them and applying a white RGB offset leaves only its silhouette.
-            Color(0, 0, 0, 0.45, 1, 1, 1)
-          )
+      -- 淡入：前几帧 fade == 0（不画），之后渐显 —— 与标记 / 地图边界同一节奏
+      local fade = gt:get_cursor_fade()
+      if fade > 0 then
+        if gt:get_config_bool("HighlightCursorRoom", true) and mmp_highlight_gid then
+          local desc = grid_room[mmp_highlight_gid]
+          if desc then
+            gt:draw_minapi_room_highlight(
+              gt:get_minapi_room_by_list_index(desc.ListIndex),
+              -- RGB multipliers of 1 preserve the original room art.  Zeroing
+              -- them and applying a white RGB offset leaves only its silhouette.
+              Color(0, 0, 0, 0.45 * fade, 1, 1, 1)
+            )
+          end
         end
+        cursor.Color = Color(1, 1, 1, fade, 0, 0, 0)
+        gt:draw_rtmap_cursor()
       end
-      gt:draw_rtmap_cursor()
     end
 end
 --
@@ -1379,6 +1403,7 @@ function gt:tab_action()
       if not mmp_ctrl then
         mmp_ctrl = true
         mmp_ctrl_moved = false
+        mmp_ctrl_fade = CURSOR_FADE_MIN  -- 从「还没开始」重新起算淡入
         mmp_ctrl_pos = gt:gid_to_rtmap_pos(gt:get_current_room_cursor_gid())
         gt:update_cursor_room_highlight()
       else
@@ -1394,6 +1419,8 @@ function gt:tab_action()
         gt:update_cursor_room_highlight()
         player:SetShootingCooldown(2)
       end
+      -- 淡入计数：按住期间逐帧 +1（与 delver/render.lua 的 tab_hold_cnt 同口径）
+      mmp_ctrl_fade = math.min(mmp_ctrl_fade + 1, CURSOR_FADE_MAX)
     end
 end
 --
@@ -1410,6 +1437,7 @@ function gt:step()
     end
     if Game():IsPaused() then
       mmp_ctrl = false
+      mmp_ctrl_fade = CURSOR_FADE_MIN
       return
     end
     if Input.IsActionTriggered(ButtonAction.ACTION_MAP,player.ControllerIndex)
@@ -1424,6 +1452,7 @@ function gt:step()
       if mmp_ctrl and gt:check_teleble(false) then
         mmp_ctrl = false
         mmp_highlight_gid = nil
+        mmp_ctrl_fade = CURSOR_FADE_MIN
         local mgid = gt:get_pos_grid_index(mmp_ctrl_pos)
         gt:auto_log_secret_diag(mgid)
         if (gt:check_teleble(mgid) and tele_cd < 1) then
@@ -1436,6 +1465,7 @@ function gt:step()
         end
       else
         mmp_ctrl = false
+        mmp_ctrl_fade = CURSOR_FADE_MIN
       end
     end
     if prep_alarm then
@@ -1511,6 +1541,7 @@ function gt:new_level()
     mmp_ctrl_pos = Vector(0, 0)
     mmp_highlight_gid = nil
     mmp_ctrl_moved = false
+    mmp_ctrl_fade = CURSOR_FADE_MIN
     -- 注意：这里**不要**放任何依赖玩家实体的逻辑（例如 check_teleble）—— new_level 会在
     -- POST_GAME_STARTED（开局初始化中）被调到，那时玩家实体还没就绪，会原生崩溃（2026-10-05 踩过）。
 end
