@@ -26,6 +26,12 @@
 
   **启用本功能时请禁用 Lazy Delver 本体**，否则两套标记会同时画出来。
 
+  另外两处只覆盖「访问器」、不动上游文件（详见文件里 state.is_lost_cursed 处的注释）：
+    * 迷失诅咒状态改成**实时读取**（上游是换房才刷新的缓存，药丸/道具当场给诅咒时会滞后）；
+    * 「因迷失诅咒而隐藏」这一条**跟随 MinimapAPI 的 Display During Curse（OverrideLost）**：
+      MinimapAPI 强制显示地图时，隐藏房候选与地图边界高亮照常绘制 —— 与「迷失诅咒下能不能传送」
+      同一口径（v2.1.1，用户要求）。二者都走 gt:curse_map_visible()。
+
   开关：Mod Config Menu → GoodTripPlus → 「显示隐藏房候选标记」，或 gtconfig.lua 里
   设置 gt.ShowSecretMarkers = false。
 ]]
@@ -36,13 +42,25 @@ local map = require("scripts.delver.map")
 local room = require("scripts.delver.room")
 local render = require("scripts.delver.render")
 
--- 本项目修 bug（2026-10-03，用户报）：上游 delver/state.lua 里的 lost_cursed 是**缓存值**，
--- 只在 M.check() 跑到末尾时才更新，而 state.check() 只挂在 MC_POST_NEW_ROOM 上 ——
--- 于是「地图先完整显示过（候选已算好）、之后才被塞进迷失诅咒（药丸 P25 / 道具）」时，
--- 诅咒状态一直停在 false，长按 TAB 仍画出隐藏房候选，直到换一次房间（check() 重跑）才消失。
--- 这里把该访问器换成**实时读取**：GetCurses() 随时可查，每帧一次的开销可忽略；
--- 只覆盖这一个函数，不动上游移植文件 delver/state.lua。
+-- 本项目对这个访问器有两处覆盖（都只改 gtp_delver 这一层，不动上游移植文件 delver/state.lua；
+-- 它的消费点只有两处「要不要画」的闸门：delver/render.lua 的 M.render 与 gtp_mapbounds.lua 的 render）：
+--
+--  ①（2026-10-03，用户报 bug）上游 delver/state.lua 里的 lost_cursed 是**缓存值**，只在 M.check()
+--     跑到末尾时才更新，而 state.check() 只挂在 MC_POST_NEW_ROOM 上 —— 于是「地图先完整显示过
+--     （候选已算好）、之后才被塞进迷失诅咒（药丸 P25 / 道具）」时，诅咒状态一直停在 false，
+--     长按 TAB 仍画出隐藏房候选，直到换一次房间（check() 重跑）才消失。改成**实时读取**诅咒位。
+--
+--  ②（2026-10-05，用户要求）与「迷失诅咒下能不能传送」保持同一口径：MinimapAPI 的 OverrideLost
+--     （其 MCM 里的 "Display During Curse"）为真时地图照常显示 ⇒ 隐藏房候选标记与地图边界高亮
+--     也不再藏。判据统一走 gt:curse_map_visible()（读的是同一份 MinimapAPI 配置）。
+--
+-- ⚠️ 因此本函数的**语义**已从「本层是否带迷失诅咒」收窄为「本层地图是否**因为迷失诅咒**而隐藏」
+--    （诅咒生效 **且** MinimapAPI 没有强制显示）。改名会牵动上游 delver 文件，故沿用原名，
+--    在这里说明。目前没有第三个消费点依赖它的「纯诅咒」语义。
 state.is_lost_cursed = function()
+  if gt.curse_map_visible and gt:curse_map_visible() then
+    return false
+  end
   local level = Game():GetLevel()
   return level ~= nil
     and (level:GetCurses() & LevelCurse.CURSE_OF_THE_LOST) ~= 0

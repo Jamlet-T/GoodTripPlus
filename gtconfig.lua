@@ -20,8 +20,12 @@ gt.DebugMod = false
 -- 高亮光标下可传送的房间（不进 MCM 菜单，仅本文件可覆盖）
 gt.HighlightCursorRoom = true
 
--- 迷失诅咒下禁用传送（Fixed: FollowCurseOfLost）
-gt.FollowCurseOfLost = true
+-- 迷失诅咒下是否禁用传送：**已不再由本文件控制**（2026-10-05 用户要求）。
+-- 改为跟随 MinimapAPI 的 OverrideLost（其 MCM 里的 "Display During Curse"，默认关）：
+--   · MinimapAPI 在迷失诅咒下照常显示地图 → 传送照常开放；
+--   · 地图被诅咒藏起来（默认） → 传送一并停用。
+-- 也就是「能不能传」与「看不看得见图」保持一致，不再有我们自己的开关。
+-- 这是对 Fixed 的 FollowCurseOfLost 的第 3 处语义偏离（前两处：隐藏房 7/8/29 白名单、回溯线 Mom 房）。
 
 -- 传送范围（合并了 Fixed 的 AllowNeighborRoom + AllowAnyRoom）
 --   1 = 任意房间   （等价 Fixed: AllowAnyRoom = true）
