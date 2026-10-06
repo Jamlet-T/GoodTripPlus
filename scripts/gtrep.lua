@@ -257,6 +257,33 @@ end
 -- 却保留游戏侧的「已访问」状态 —— 于是「访问过但本次没重扫」的房间既 swept=false 又
 -- VisitedCount>0，兜底 `not (swept[a] or swept[b])` 就把它们当成与目标相连，
 -- 门锁着的宝藏房 / 街机厅因此能被传进去（links=none 却 ③ 放行，只有兜底这一条路）。
+-- 网格步进方向 -> 那一侧的门槽位掩码（DoorSlotFlag：LEFT0=1<<0, UP0=1<<1, RIGHT0=1<<2,
+-- DOWN0=1<<3, LEFT1=1<<4 …）。用于判断「这一侧配置上有没有门」。
+function gt:side_door_mask(step)
+  if step == -1 then return 1 | 16            -- LEFT（slot 0 / 4）
+  elseif step == 1 then return 4 | 64         -- RIGHT（slot 2 / 6）
+  elseif step == -13 then return 2 | 32       -- UP（slot 1 / 5）
+  elseif step == 13 then return 8 | 128       -- DOWN（slot 3 / 7）
+  end
+  return nil
+end
+
+-- (a,b) 之间**配置上**有没有门（不看锁没锁）—— 用来区分「隔墙相邻」与「有门连通」。
+-- 读 RoomConfigRoom.Doors（官方文档：位掩码，由 DoorSlotFlag 构成），两面都要有门才算。
+-- ⚠️ 字段读不到（本 API 版本没暴露 / 返回非数字）时**一律返回 false** —— 宁可保守拦掉，
+-- 也不要凭猜测放行（这就是「隔墙也能传进去」那个洞的来源）。
+function gt:has_door_between(a, b)
+  local cell, step = gt:touching_cell(a, b)
+  if not cell or not step then return false end
+  local ra, rb = grid_room[a], grid_room[b]
+  local da = ra and ra.Data and ra.Data.Doors
+  local db = rb and rb.Data and rb.Data.Doors
+  if type(da) ~= "number" or type(db) ~= "number" then return false end
+  local m, opp = gt:side_door_mask(step), gt:side_door_mask(-step)
+  if not m or not opp then return false end
+  return (da & m) ~= 0 and (db & opp) ~= 0
+end
+
 function gt:has_known_passage(a, b)
   local link = door_graph()
   return link[a] ~= nil and link[a][b] ~= nil
