@@ -1,0 +1,101 @@
+-- 来源：gtrep.lua:1680-1780（2026-10-07 提取，语言行为保持不变）。
+-- Mod Config Menu text, localized based on the game's language setting
+-- (Options.Language). Anything not explicitly recognized falls back to
+-- English.
+local GT_STRINGS = {
+  en = {
+    title = "GoodTripPlus",
+    cursor_speed_name = "Cursor Speed",
+    cursor_speed_desc = "Pixels the cursor moves per frame. Default: 2",
+    curse_display_name = "Display During Curse",
+    curse_display_desc = "Mirrors MinimapAPI's setting. Default: disabled. Teleport is available only while the map is shown",
+    travel_mode_name = "Can Teleport To",
+    travel_mode_values = {[1] = "Any Room", [2] = "Neighbor Room", [3] = "Explored Rooms"},
+    travel_mode_desc = "Any Room: teleport at any time to any selectable room. Severely disrupts game balance; enable with caution. Default: Neighbor Room",
+    block_curse_name = "Block Curse Room Teleport",
+    block_curse_desc = "Cannot teleport into Curse Rooms (they damage you on entry/exit). Default: enabled",
+    transition_name = "Teleport Transition",
+    transition_values = {[1] = "Instant", [2] = "Fade", [3] = "Teleport Effect"},
+    transition_desc = "How the arrival looks: Instant, Fade or Teleport effect. Default: Fade",
+    fairpath_name = "Only Teleport to Connected Rooms",
+    fairpath_desc = "Only allow teleport to rooms reachable through cleared rooms, door by door. Default: enabled",
+    arrivedoor_name = "Arrive At Door",
+    arrivedoor_desc = "Arrive standing at the exact door a walk would have come in by. Default: enabled",
+    fairtime_name = "Fair Trip Time",
+    fairtime_desc = "Fairly increase game time according to player move speed and distance. Default: disabled",
+    secret_markers_name = "Secret Room Candidate Markers",
+    secret_markers_desc = "Marks where Secret / Super Secret / Ultra Secret rooms could be. Default: enabled",
+    fools_skull_name = "Mark The Fool Skull Room",
+    fools_skull_desc = "Default: enabled",
+    map_bounds_name = "Show Map Bounds",
+    map_bounds_desc = "Default: enabled",
+    highlight_start_name = "Highlight Start Room",
+    highlight_start_desc = "Mirrors MinimapAPI's setting. Default: disabled",
+    hide_combat_name = "Hide Map in Combat",
+    hide_combat_values = {[1] = "Never", [2] = "Bosses Only", [3] = "Always"},
+    hide_combat_desc = "Mirrors MinimapAPI's setting. Default: Never",
+    delirium_name = "Mark the Delirium Room in The Void",
+    delirium_desc = "Default: disabled",
+    minebutton_name = "Mark the Rail Button Rooms in Mines II",
+    minebutton_desc = "Default: enabled",
+    debug_name = "Debug Mode",
+    debug_desc = "Diagnostics only; never changes teleporting. Keep it off for normal play. Default: disabled",
+  },
+  zh_hans = {
+    title = "GoodTripPlus",
+    cursor_speed_name = "光标速度",
+    cursor_speed_desc = "光标每帧移动的像素数。默认值：2",
+    curse_display_name = "迷失诅咒下显示地图",
+    curse_display_desc = "代理 MinimapAPI 对应设置。默认关。只在显示地图时可传送。",
+    travel_mode_name = "可以传送到",
+    travel_mode_values = {[1] = "任意房间", [2] = "相邻房间", [3] = "已探索房间"},
+    travel_mode_desc = "任意时刻传送至任意房间，极大破坏游戏平衡，请谨慎启用",
+    block_curse_name = "禁止传送进诅咒房",
+    block_curse_desc = "开启后不能传送进会在进出时扣血的诅咒房。默认开启。",
+    transition_name = "传送过场",
+    transition_values = {[1] = "立即出现", [2] = "淡入淡出", [3] = "传送动画"},
+    transition_desc = "传送落地时的表现：立即出现 / 淡入淡出 / 传送动画。默认：淡入淡出。",
+    fairpath_name = "只能传送到已连通的房间",
+    fairpath_desc = "传送目标必须能从当前房间沿已清怪的房间逐门抵达。默认开启。",
+    arrivedoor_name = "传送后站在门口",
+    arrivedoor_desc = "传送到走路会走进来的那扇门门口。默认开启。",
+    fairtime_name = "按距离增加游戏时间",
+    fairtime_desc = "按传送距离和玩家移速公平地补回游戏时间。默认关闭。",
+    secret_markers_name = "显示隐藏房候选标记",
+    secret_markers_desc = "按住地图键时标出隐藏房 / 超级隐藏房 / 究极隐藏房的可能位置。默认开启。",
+    fools_skull_name = "标记深牢 II 的愚者骷髅房",
+    fools_skull_desc = "默认开启。",
+    map_bounds_name = "显示地图边界",
+    map_bounds_desc = "默认开启。",
+    highlight_start_name = "高亮初始房间",
+    highlight_start_desc = "代理 MinimapAPI 对应设置。默认关。",
+    hide_combat_name = "战斗时隐藏地图",
+    hide_combat_values = {[1] = "从不", [2] = "仅 Boss 房", [3] = "总是"},
+    hide_combat_desc = "代理 MinimapAPI 对应设置。默认：从不。",
+    delirium_name = "标记虚空层的精神错乱房",
+    delirium_desc = "默认关闭。",
+    minebutton_name = "标记矿洞 II 的轨道按钮房",
+    minebutton_desc = "默认开启。",
+    debug_name = "调试模式",
+    debug_desc = "所有调试信息的总开关，只出诊断、不影响传送。正常游玩请关闭。默认关闭。",
+  },
+}
+-- A few plausible spellings/casings for each supported language, since the
+-- exact string Options.Language returns can vary by game version/branch.
+local GT_LANG_ALIASES = {
+  zh_hans = { "zh", "zh_hans", "zh-hans", "zh_cn", "zh-cn", "zh_chs", "chinese_s", "chi_s" },
+}
+local function get_strings(raw)
+  if type(raw) == "string" then
+    local lang = raw:lower()
+    for code, aliases in pairs(GT_LANG_ALIASES) do
+      for _, alias in ipairs(aliases) do
+        if lang == alias then
+          return GT_STRINGS[code]
+        end
+      end
+    end
+  end
+  return GT_STRINGS.en
+end
+return get_strings

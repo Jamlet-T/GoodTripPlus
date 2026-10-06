@@ -7,13 +7,13 @@
   其它房间只能读到 RoomConfigRoom.Doors —— 那是「哪几侧有门」的门位掩码，
   **不含「锁没锁 / 墙炸没炸」**。所以进程一重启，这份知识没有任何办法重新推导 → 只能存下来。
 
-  本文件只负责「表 <-> 文本」这一层，**pure**（因此能进 tools/test-travel.lua 的 headless 测试）；
+  本文件只负责「表 <-> 文本」这一层，**pure**（因此能进 tests/travel.lua 的 headless 测试）；
   读写存档、什么时候存，都在 gtrep 里。设计与取舍见
   docs/superpowers/specs/2026-10-06-door-graph-persistence-design.md
 
   格式（行式纯文本，首行版本串；解析不认识的行就跳过 —— 失败安全 + 向前兼容）：
 
-      GTPDG1
+      GTPDG2
       I <identity>
       D <dim> <a> <b> <slot>      -- slot 0 表示「另一端裸标记」（值为 true）
       S <dim> <a>
@@ -23,7 +23,8 @@
 ]]--
 
 -- 版本串。改了格式就换它 —— 旧档会被整份忽略（代价只是重新探一次图）。
-local MAGIC = "GTPDG1"
+-- GTPDG1 可能已被换层回调把旧图写成新层身份，不能继续信任。
+local MAGIC = "GTPDG2"
 gt.PERSIST_MAGIC = MAGIC
 
 -- state = { identity = string,

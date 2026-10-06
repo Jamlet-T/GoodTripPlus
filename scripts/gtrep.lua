@@ -1,11 +1,15 @@
 gt = RegisterMod("GoodTripPlus", 1)
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.3.1"
+gt.VERSION = "2.3.2"
+-- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
+local build_ok, build = pcall(require, "scripts.gtp_build")
+gt.BUILD = build_ok and type(build) == "string" and build or "source"
 pcall(function()
   Isaac.ConsoleOutput("[GoodTripPlus] v" .. gt.VERSION ..
     " loaded (console command: gtpdiag)\n")
   Isaac.DebugString("[GoodTripPlus] v" .. gt.VERSION .. " loaded")
+  Isaac.DebugString("[GoodTripPlus] build=" .. gt.BUILD)
 end)
 -------------------------------------------
 local player = Isaac.GetPlayer(0)
@@ -66,12 +70,23 @@ local last_diag_frame = -1000
 -- door graph, learned one room at a time: grid adjacency alone cannot tell a
 -- doorway from a secret room's unbombed wall. Per dimension: the mirror world
 -- reuses the same grid numbers for different rooms.
-local door_state_dirty = false -- 门图自上次落盘后有没有变（见 gt:save_door_state）
-local door_link = {}  --door_link[dim][a][b]: a passage, seen from either end
-local door_swept = {} --door_swept[dim][a]: a's own walls were read
+local DoorGraph = require("scripts.gtp_doorgraph")
+local door_state = DoorGraph.new()
 --curse-room door spikes seen from outside / inside; Flat File strips only the
 --side it was used on, so the two are kept apart
 local curse_bare_outside, curse_bare_inside = {}, {}
+require("scripts.gtp_doors")(gt, {
+  state = door_state,
+  get_aux = function()
+    return { bare_out = curse_bare_outside, bare_in = curse_bare_inside, pre = secret_pre_room_id }
+  end,
+  reset_aux = function()
+    curse_bare_outside, curse_bare_inside, secret_pre_room_id = {}, {}, {}
+  end,
+  set_aux = function(state)
+    curse_bare_outside, curse_bare_inside, secret_pre_room_id = state.bare_out, state.bare_in, state.pre
+  end,
+})
 --each room shape's cell offsets beyond the anchor's four direct neighbours
 --（floor.lua 的 neighlut 原样；下标 = RoomDescriptor.Data.Shape）
 local neighlut = {
@@ -153,106 +168,10 @@ end
 -- ===== 以下准入与传送判定：忠实移植自 GoodTrip [Fixed]（scripts/rules.lua）=====
 --（floor.lua door_graph/sweep_doors/linked：门图，一格一格学出来）
 local function door_graph()
-    local d = Game():GetRoom():IsMirrorWorld() and 1 or 0
-    door_link[d] = door_link[d] or {}
-    door_swept[d] = door_swept[d] or {}
-    return door_link[d], door_swept[d]
+  return gt:get_door_graph()
 end
 
--- 必须炸开（或用钥匙打开）墙才能进的三种隐藏房：
--- 7 = ROOM_SECRET、8 = ROOM_SUPERSECRET、29 = ROOM_ULTRASECRET（红钥匙房）
---
--- 实测（2026-10-03，gtpdiag 门表，用户现场复现）：
---   墙还在   → variant=7(DOOR_HIDDEN) busted=false canBlowOpen=true  isOpen=false
---   已炸开   → variant=8(DOOR_UNLOCKED) busted=true  canBlowOpen=false isOpen=true
--- 也就是说炸开之后**变体确实会变**，Fixed 门图里那句
--- `door.Desc.Variant ~= DoorVariant.DOOR_HIDDEN` 是对的（已炸开的洞口本来就会被记进门图），
--- 所以这里不需要、也不该再加别的「已炸开」判据（曾经加过 hidden_door_open，已删）。
--- 真正卡住传送的是 check_neigh_connected 里那份「已显示但未探索目标」的类型白名单：
--- 隐藏房不在名单里 → 还没进去过的隐藏房一律拦，哪怕洞口已经炸开。
-function gt:is_secret_room(rd)
-    if not rd or not rd.Data then
-      return false
-    end
-    local t = rd.Data.Type
-    return t == 7 or t == 8 or t == 29
-end
-
-
--- 门图诊断访问器（诊断用）：某房已学到的边 + 它的墙扫过没有。
--- 判定层不许直接读 door_graph()（那是文件级 local），所以从这儿取。
--- 用途：回答「这条通路是哪来的」—— 例如「上锁的房为什么能传进去」。
-function gt:door_links_of(sgi)
-  local link, swept = door_graph()
-  local out = {}
-  local row = link[sgi]
-  if row then
-    for other, slot in pairs(row) do
-      out[#out + 1] = { other = other, slot = slot }
-    end
-    table.sort(out, function(a, b) return tostring(a.other) < tostring(b.other) end)
-  end
-  return out, swept[sgi] == true
-end
-
--- 当前房间里通向某格的那扇门（找不到返回 nil）。
--- 判红挑战房的进入条件要用它 —— 见 gtp_travel 的 target.challenge_gate：
--- 「游戏自己把门开着」是「允许进」最直接的证据，比复刻它的血量公式可靠。
-function gt:door_to(gid)
-  local room = Game():GetRoom()
-  if not room then return nil end
-  for i = 0, 7 do
-    local door = room:GetDoor(i)
-    if door and door.TargetRoomIndex == gid then
-      return door
-    end
-  end
-  return nil
-end
-
---read the current room's doors (the only room the game answers for) into the
---graph both ways. DOOR_HIDDEN is an unbombed wall, so no passage; locked doors
---are no passage either (a trip must not bypass a door nobody has opened yet --
---2026-10-06, the user: a locked shop must not be enterable, an unlocked one must).
---Everything else is walkable. All read live so nothing is from different moments.
-function gt:sweep_doors()
-    local live = Game():GetRoom()
-    local lvl = Game():GetLevel()
-    local here = lvl:GetCurrentRoomDesc().SafeGridIndex
-    local link, swept = door_graph()
-    link[here] = link[here] or {}
-    swept[here] = true
-    for i = 0, 7 do
-      local door = live:GetDoor(i)
-      --DOOR_HIDDEN is an unbombed wall, so no passage; a door that is closed right now
-      --is no passage either (see gt:door_is_passage in gtp_travel).
-      --All read live so nothing is from different moments.
-      --（实测：炸开之后 variant 会变成 8，所以这条判据本身就够用，别再加「已炸开」判据）
-      if door and door.Desc.Variant ~= DoorVariant.DOOR_HIDDEN then
-        local tdes = lvl:GetRoomByIdx(door.TargetRoomIndex, -1)
-        if tdes then
-          local there = tdes.SafeGridIndex
-          --curse-room spikes are read off the door itself: Flat File strips them
-          --once and for good, so the trinket in hand says nothing about this door
-          if door.TargetRoomType == RoomType.ROOM_CURSE then
-            curse_bare_outside[there] = door.VarData ~= 0
-            door_state_dirty = true
-          elseif live:GetType() == RoomType.ROOM_CURSE then
-            curse_bare_inside[here] = door.VarData ~= 0
-            door_state_dirty = true
-          end
-          if there ~= here and gt:door_is_passage(door) then
-            --this end knows its slot; the far end gets a bare mark until its own turn
-            link[here][there] = i
-            link[there] = link[there] or {}
-            if link[there][here] == nil then link[there][here] = true end
-            door_state_dirty = true
-          end
-        end
-      end
-    end
-end
-
+-- 门扫描、隐藏房分类和门图读写：scripts/gtp_doors.lua。
 --may a trip step between these rooms? A passage seen from either end: yes. A
 --swept room saying nothing: no. Neither swept (mod loaded mid-run): grid adjacency stands.
 -- **严格版**：只在门图里**真的学到过这条边**时才算连通 —— 不吃下面的几何兜底。
@@ -396,70 +315,7 @@ function gt:check_neigh_connected(trd, cond)
     return false
 end
 
--- ===== 层身份 + 门图跨会话持久化 =====
--- 设计与取舍：docs/superpowers/specs/2026-10-06-door-graph-persistence-design.md
--- 为什么要存：游戏**只对当前房间**回答门的状态（Room:GetDoor 属于 Game():GetRoom()），
--- 别的房间只有 RoomConfigRoom.Doors（「哪几侧有门」的位掩码，不含锁没锁 / 墙炸没炸）。
--- 所以进程一重启，「哪扇门能走」这份知识没有任何办法重新推导 —— 只能存下来。
-
--- 层身份：一组「同一层内稳定」的字段（含**起始种子**）——
--- 继续存档 / rewind 一致；换层或新局必然不同。
-function gt:level_identity()
-  local lvl = Game():GetLevel()
-  if not lvl then return nil end
-  local rooms = lvl:GetRooms()
-  return table.concat({
-    lvl:GetStage(),
-    lvl:GetStageType(),
-    lvl:GetAbsoluteStage(),
-    Game():GetSeeds():GetStartSeed(),
-    rooms and rooms.Size or -1,
-    lvl:IsAscent() and 1 or 0,
-  }, ":")
-end
-
--- 把当前层的门图状态落盘（只在门图确实变了之后真写，见 door_state_dirty）。
--- ⚠️ 全程 pcall：**持久化绝不允许弄坏它要保护的功能**（本仓库吃过一次这个亏）。
-function gt:save_door_state()
-  if not door_state_dirty then return end
-  if not gt.persist_serialize then return end
-  local ok, err = pcall(function()
-    local state = {
-      identity = gt:level_identity(),
-      link = door_link, swept = door_swept,
-      bare_out = curse_bare_outside, bare_in = curse_bare_inside,
-      pre = secret_pre_room_id,
-    }
-    gt:SaveData(gt.persist_serialize(state))
-  end)
-  if ok then
-    door_state_dirty = false
-  else
-    Isaac.DebugString("[GoodTripPlus][persist] 门图落盘失败（不影响传送）：" .. tostring(err))
-  end
-end
-
--- 从存档恢复当前层的门图（无存档 / 身份不符 / 解析失败 -> 什么都不做，回到「从零学」）。
-function gt:load_door_state()
-  if not gt.persist_parse then return false end
-  local ok, state = pcall(function()
-    if not gt:HasData() then return nil end
-    return gt.persist_parse(gt:LoadData())
-  end)
-  if not ok then
-    Isaac.DebugString("[GoodTripPlus][persist] 读档失败（不影响传送）：" .. tostring(state))
-    return false
-  end
-  if not state or state.identity ~= gt:level_identity() then return false end
-  door_link = state.link
-  door_swept = state.swept
-  curse_bare_outside = state.bare_out
-  curse_bare_inside = state.bare_in
-  secret_pre_room_id = state.pre
-  door_state_dirty = false
-  return true
-end
-
+-- 门图生命周期与持久化适配：scripts/gtp_doors.lua。
 function gt:get_reachable_rooms()
     --flood from the current room through visited+cleared rooms; each step needs
     --a door too, else a secret room counts as a corridor on all four sides
@@ -760,7 +616,7 @@ function gt:teleport_to_grid_index(gid)
     end
 
     local dist = 0
-    if gt:get_config_bool("FairTripTime", false) then
+    if gt:get_travel_mode() ~= 1 and gt:get_config_bool("FairTripTime", false) then
       -- 不算 999 了：判定层 ④ path.walk_time 已经保证有可步行路线；这里纯为补时间
       dist = gt:fair_trip(crd.SafeGridIndex, gid)
     end
@@ -1317,7 +1173,7 @@ function gt:pre_secret_room()
       end
     end
   end
-  door_state_dirty = true
+  door_state.dirty = true
 end
 --
 function gt:pre_secret_curse_room()
@@ -1338,7 +1194,7 @@ function gt:pre_secret_curse_room()
       end
     end
   end
-  door_state_dirty = true
+  door_state.dirty = true
 end
 --
 function gt:get_cursor_speed()
@@ -1643,13 +1499,7 @@ function gt:new_level()
       gt:travel_reset_probe_log()
     end
     --a new floor: everything learned about the old one goes
-    door_link = {}
-    door_swept = {}
-    curse_bare_outside, curse_bare_inside = {}, {}
-    door_state_dirty = false
-    -- 继续存档 / rewind 回到同一层时，把上次退出时的门图恢复回来。
-    -- （换层 / 新局的层身份不同，load 会自己拒绝；见 load_door_state）
-    if gt.load_door_state then gt:load_door_state() end
+    gt:reset_door_floor()
     --
     -- 重开（长按 TAB + R）时光标必须重新定位（2026-10-05 用户报的 bug）：
     -- 那张局是「玩家一直按着 TAB」—— 光标在重开前就已经呼出（mmp_ctrl = true），
@@ -1673,305 +1523,13 @@ function gt:new_level()
 end
 --
 -------------------------------
--- Mod Config Menu text, localized based on the game's language setting
--- (Options.Language). Anything not explicitly recognized falls back to
--- English.
-local GT_STRINGS = {
-  en = {
-    title = "GoodTripPlus",
-    cursor_speed_name = "Cursor Speed",
-    cursor_speed_desc = "Pixels the cursor moves per frame. Default: 2",
-    curse_display_name = "Display During Curse",
-    curse_display_desc = "Mirrors MinimapAPI's setting. Default: disabled. Teleport is available only while the map is shown",
-    travel_mode_name = "Can Teleport To",
-    travel_mode_values = {[1] = "Any Room", [2] = "Neighbor Room", [3] = "Explored Rooms"},
-    travel_mode_desc = "Default: Neighbor Room",
-    block_curse_name = "Block Curse Room Teleport",
-    block_curse_desc = "Cannot teleport into Curse Rooms (they damage you on entry/exit). Default: enabled",
-    transition_name = "Teleport Transition",
-    transition_values = {[1] = "Instant", [2] = "Fade", [3] = "Teleport Effect"},
-    transition_desc = "How the arrival looks: Instant, Fade or Teleport effect. Default: Fade",
-    fairpath_name = "Only Teleport to Connected Rooms",
-    fairpath_desc = "Only allow teleport to rooms reachable through cleared rooms, door by door. Default: enabled",
-    arrivedoor_name = "Arrive At Door",
-    arrivedoor_desc = "Arrive standing at the exact door a walk would have come in by. Default: enabled",
-    fairtime_name = "Fair Trip Time",
-    fairtime_desc = "Fairly increase game time according to player move speed and distance. Default: disabled",
-    secret_markers_name = "Secret Room Candidate Markers",
-    secret_markers_desc = "Marks where Secret / Super Secret / Ultra Secret rooms could be. Default: enabled",
-    fools_skull_name = "Mark The Fool Skull Room",
-    fools_skull_desc = "Default: enabled",
-    map_bounds_name = "Show Map Bounds",
-    map_bounds_desc = "Default: enabled",
-    highlight_start_name = "Highlight Start Room",
-    highlight_start_desc = "Mirrors MinimapAPI's setting. Default: disabled",
-    hide_combat_name = "Hide Map in Combat",
-    hide_combat_values = {[1] = "Never", [2] = "Bosses Only", [3] = "Always"},
-    hide_combat_desc = "Mirrors MinimapAPI's setting. Default: Never",
-    delirium_name = "Mark the Delirium Room in The Void",
-    delirium_desc = "Default: disabled",
-    minebutton_name = "Mark the Rail Button Rooms in Mines II",
-    minebutton_desc = "Default: enabled",
-    debug_name = "Debug Mode",
-    debug_desc = "Diagnostics only; never changes teleporting. Keep it off for normal play. Default: disabled",
-  },
-  zh_hans = {
-    title = "GoodTripPlus",
-    cursor_speed_name = "光标速度",
-    cursor_speed_desc = "光标每帧移动的像素数。默认值：2",
-    curse_display_name = "迷失诅咒下显示地图",
-    curse_display_desc = "代理 MinimapAPI 对应设置。默认关。只在显示地图时可传送。",
-    travel_mode_name = "可以传送到",
-    travel_mode_values = {[1] = "任意房间", [2] = "相邻房间", [3] = "已探索房间"},
-    travel_mode_desc = "默认：相邻房间。",
-    block_curse_name = "禁止传送进诅咒房",
-    block_curse_desc = "开启后不能传送进会在进出时扣血的诅咒房。默认开启。",
-    transition_name = "传送过场",
-    transition_values = {[1] = "立即出现", [2] = "淡入淡出", [3] = "传送动画"},
-    transition_desc = "传送落地时的表现：立即出现 / 淡入淡出 / 传送动画。默认：淡入淡出。",
-    fairpath_name = "只能传送到已连通的房间",
-    fairpath_desc = "传送目标必须能从当前房间沿已清怪的房间逐门抵达。默认开启。",
-    arrivedoor_name = "传送后站在门口",
-    arrivedoor_desc = "传送到走路会走进来的那扇门门口。默认开启。",
-    fairtime_name = "按距离增加游戏时间",
-    fairtime_desc = "按传送距离和玩家移速公平地补回游戏时间。默认关闭。",
-    secret_markers_name = "显示隐藏房候选标记",
-    secret_markers_desc = "按住地图键时标出隐藏房 / 超级隐藏房 / 究极隐藏房的可能位置。默认开启。",
-    fools_skull_name = "标记深牢 II 的愚者骷髅房",
-    fools_skull_desc = "默认开启。",
-    map_bounds_name = "显示地图边界",
-    map_bounds_desc = "默认开启。",
-    highlight_start_name = "高亮初始房间",
-    highlight_start_desc = "代理 MinimapAPI 对应设置。默认关。",
-    hide_combat_name = "战斗时隐藏地图",
-    hide_combat_values = {[1] = "从不", [2] = "仅 Boss 房", [3] = "总是"},
-    hide_combat_desc = "代理 MinimapAPI 对应设置。默认：从不。",
-    delirium_name = "标记虚空层的精神错乱房",
-    delirium_desc = "默认关闭。",
-    minebutton_name = "标记矿洞 II 的轨道按钮房",
-    minebutton_desc = "默认开启。",
-    debug_name = "调试模式",
-    debug_desc = "所有调试信息的总开关，只出诊断、不影响传送。正常游玩请关闭。默认关闭。",
-  },
-}
--- A few plausible spellings/casings for each supported language, since the
--- exact string Options.Language returns can vary by game version/branch.
-local GT_LANG_ALIASES = {
-  zh_hans = { "zh", "zh_hans", "zh-hans", "zh_cn", "zh-cn", "zh_chs", "chinese_s", "chi_s" },
-}
-local function gt_get_lang_strings()
-  local raw = Options.Language
-  if type(raw) == "string" then
-    local lang = raw:lower()
-    for code, aliases in pairs(GT_LANG_ALIASES) do
-      for _, alias in ipairs(aliases) do
-        if lang == alias then
-          return GT_STRINGS[code]
-        end
-      end
-    end
-  end
-  return GT_STRINGS.en
-end
-local mcm_registered = false
+-- 生命周期编排保留在适配层；菜单内容与语言表独立维护。
+require("scripts.gtp_menu")(gt)
 gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
   gt:prep()
   gt:new_room()
   gt:new_level()
-  if not mcm_registered and ModConfigMenu then
-    mcm_registered = true
-    local L = gt_get_lang_strings()
-    ModConfigMenu.AddTitle("GoodTripPlus", nil, L.title)
-    -- ⚠️ 菜单顺序 = 下面这些注册调用的书写顺序（MCM 无脑 append）。
-    -- 2026-10-04 起全部 MCM 项集中在这里按序注册（用户指定的顺序），
-    -- 各功能模块（gtp_mapbounds / gtp_minebuttons / gtp_delirium 等）
-    -- 不再各自注册 MCM 项，只留配置键说明。
-    -- 顺序：光标 → 传送行为（Fixed 系）→ 显示类 → 房间标记类。
-    ModConfigMenu.AddNumberSetting(
-      "GoodTripPlus", nil,
-      "CursorSpeed",
-      1, 5, 0.25, 2,
-      L.cursor_speed_name,
-      L.cursor_speed_desc
-    )
-    ModConfigMenu.AddNumberSetting(
-      "GoodTripPlus", nil,
-      "TravelMode",
-      1, 3, 1, 2,
-      L.travel_mode_name,
-      L.travel_mode_values,
-      L.travel_mode_desc
-    )
-    -- 「禁止传送进诅咒房」= 恢复移植基底（MLX's Tweak）的同名选项（变量 gt.BlockCurseRoom，
-    -- 默认开；现行 GoodTrip [Fixed] 2.2.58 已无此项，它靠 check_neigh_connected 的类型白名单
-    -- 把诅咒房排除）。早期移植时把这一条连开关一起删了，导致已探索过的诅咒房能被直接传送进去
-    -- （2026-10-05 用户报的 bug）。消费点：scripts/gtp_curseblock.lua（拦住目标）+
-    -- 本文件 check_neigh_connected 的白名单（放行类型 10）。
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
-      "BlockCurseRoom",
-      true,
-      L.block_curse_name,
-      L.block_curse_desc
-    )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
-      "FairTripPath",
-      true,
-      L.fairpath_name,
-      L.fairpath_desc
-    )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
-      "ArriveAtDoor",
-      true,
-      L.arrivedoor_name,
-      L.arrivedoor_desc
-    )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
-      "FairTripTime",
-      false,
-      L.fairtime_name,
-      L.fairtime_desc
-    )
-    ModConfigMenu.AddNumberSetting(
-      "GoodTripPlus", nil,
-      "TeleportTransition",
-      1, 3, 1, 2,
-      L.transition_name,
-      L.transition_values,
-      L.transition_desc
-    )
-    -- 「迷失诅咒下显示地图」= 代理 MinimapAPI 的 OverrideLost（它的菜单里叫 "Display During Curse"，
-    -- 默认关）。这一项同时决定迷失诅咒期间能否传送（见 gt:curse_map_visible() 与
-    -- gtp_travel 的 departure.lost_curse 规则）：
-    -- 地图照常显示 → 传送照常；地图被诅咒藏起来 → 传送也停用。
-    -- 同样是纯代理（只读写 MinimapAPI.Config，不另存值）；注意 MinimapAPI 自己那一项没有改 ConfigPreset
-    -- 的动作，这里也不加，行为与它完全一致。
-    if MinimapAPI and MinimapAPI.Config then
-      ModConfigMenu.AddSetting(
-        "GoodTripPlus", nil,
-        {
-          Type = ModConfigMenu.OptionType.BOOLEAN,
-          Default = false,
-          CurrentSetting = function()
-            return MinimapAPI.Config.OverrideLost == true
-          end,
-          Display = function()
-            return L.curse_display_name .. ": " ..
-              (MinimapAPI.Config.OverrideLost == true and "ON" or "OFF")
-          end,
-          OnChange = function(newVal)
-            MinimapAPI.Config.OverrideLost = newVal and true or false
-          end,
-          Info = L.curse_display_desc,
-        }
-      )
-    end
-    -- HighlightCursorRoom 不注册 MCM 菜单项（2026-10-04 用户决定）：默认常开，仅可在 gtconfig.lua 覆盖。
-    -- （FastTransition 原先是同一批，2026-10-05 起已并入上面的「传送过场」三选一项。）
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
-      "ShowSecretMarkers",
-      true,
-      L.secret_markers_name,
-      L.secret_markers_desc
-    )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
-      "ShowMapBounds",
-      true,
-      L.map_bounds_name,
-      L.map_bounds_desc
-    )
-    -- 以下两项 = **代理** MinimapAPI 自己的设置（不是我们自己的配置项）：
-    -- 值只存在 MinimapAPI.Config 里，所以用 MCM 的自定义设置表（CurrentSetting 读、OnChange 写），
-    -- 而不是 AddBooleanSetting / AddNumberSetting（那些会往 ModConfigMenu.Config 里另存一份，
-    -- 两边就会各说各话）。读写同一份 MinimapAPI.Config = 与 MinimapAPI 自己菜单里那一项天然双向同步
-    -- （在它那边改，这边也变），存档也照旧由 MinimapAPI 自己 SaveData 保存。
-    -- 结构照抄 MinimapAPI config_menu.lua 的对应项（布尔：Type/Default/CurrentSetting/Display/OnChange/Info；
-    -- 数字：再加 Minimum/Maximum/ModifyBy —— 注意这几个字段是首字母大写）。
-    if MinimapAPI and MinimapAPI.Config then
-      -- ①「高亮初始房间」→ MinimapAPI 的 HighlightStartRoom
-      ModConfigMenu.AddSetting(
-        "GoodTripPlus", nil,
-        {
-          Type = ModConfigMenu.OptionType.BOOLEAN,
-          Default = false,
-          CurrentSetting = function()
-            return MinimapAPI.Config.HighlightStartRoom == true
-          end,
-          Display = function()
-            return L.highlight_start_name .. ": " ..
-              (MinimapAPI.Config.HighlightStartRoom == true and "ON" or "OFF")
-          end,
-          OnChange = function(newVal)
-            MinimapAPI.Config.HighlightStartRoom = newVal and true or false
-            -- 与 MinimapAPI 自己那份菜单的处理一致：改了就变成「自定义」配置（预设 0）
-            if MinimapAPI.Config.ConfigPreset ~= nil then
-              MinimapAPI.Config.ConfigPreset = 0
-            end
-          end,
-          Info = L.highlight_start_desc,
-        }
-      )
-      -- ②「战斗时隐藏地图」→ MinimapAPI 的 HideInCombat（1 从不 / 2 仅 Boss 房 / 3 总是，出厂默认 1）
-      ModConfigMenu.AddSetting(
-        "GoodTripPlus", nil,
-        {
-          Type = ModConfigMenu.OptionType.NUMBER,
-          Minimum = 1,
-          Maximum = 3,
-          ModifyBy = 1,
-          Default = 1,
-          CurrentSetting = function()
-            return MinimapAPI.Config.HideInCombat or 1
-          end,
-          Display = function()
-            local v = MinimapAPI.Config.HideInCombat or 1
-            return L.hide_combat_name .. ": " .. (L.hide_combat_values[v] or tostring(v))
-          end,
-          OnChange = function(newVal)
-            MinimapAPI.Config.HideInCombat = newVal
-            if MinimapAPI.Config.ConfigPreset ~= nil then
-              MinimapAPI.Config.ConfigPreset = 0
-            end
-          end,
-          Info = L.hide_combat_desc,
-        }
-      )
-    end
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
-      "FoolsSkullRoom",
-      true,
-      L.fools_skull_name,
-      L.fools_skull_desc
-    )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
-      "MineButtonRoom",
-      true,
-      L.minebutton_name,
-      L.minebutton_desc
-    )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
-      "DeliriumRoom",
-      false,
-      L.delirium_name,
-      L.delirium_desc
-    )
-    -- 调试模式（诊断用，默认关）：读配置的 gt:is_debug() 每帧实时取，勾掉立刻生效。
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
-      "DebugMod",
-      false,
-      L.debug_name,
-      L.debug_desc
-    )
-  end
+  gt:register_menu()
 end)
 -- 退出游戏时把门图落盘（「门图一变就写」已覆盖大部分情形，这条是多一层保险）。
 -- ⚠️ 各退出路径（退出到桌面 / Alt+F4 / 崩溃）是否都触发未实测，所以不把它当唯一保障。

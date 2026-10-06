@@ -27,7 +27,7 @@
 ]]--
 
 -- ===== 规则表 =====
--- 顺序即判定顺序；段间按此顺序，段内按登记顺序。
+-- 段间按此顺序；段内按 order，相同 order 保持登记顺序。
 local STAGE_ORDER = { "departure", "target_entry", "range", "path" }
 gt.travel_stages = STAGE_ORDER
 gt.travel_rules = { departure = {}, target_entry = {}, range = {}, path = {} }
@@ -60,13 +60,20 @@ function gt:add_travel_rule(rule)
 end
 
 -- 纯引擎：逐段逐条跑，命中即返回。不碰任何游戏 API，所以能 headless 测
--- （见 tools/test-travel.lua）。
+-- （见 tests/travel.lua）。
+-- 任意档只保留目标有效性检查；其他档继续执行完整规则。
+function gt:travel_rule_enabled(rule, ctx)
+  if ctx.mode ~= 1 then return true end
+  return rule.id == "target.no_target" or rule.id == "target.unknown_cell"
+    or rule.id == "target.same_room"
+end
+
 function gt:run_travel_stages(stage_names, ctx)
   for _, sname in ipairs(stage_names) do
     local bucket = gt.travel_rules[sname]
     for i = 1, #bucket do
       local rule = bucket[i]
-      local detail = rule.test(ctx)
+      local detail = gt:travel_rule_enabled(rule, ctx) and rule.test(ctx) or nil
       if detail then
         return { ok = false, stage = rule.stage, rule = rule.id,
                  text = rule.text, detail = detail }
@@ -92,18 +99,12 @@ end
 --   · variant 锁定型但门开着 → 算通路，留给「解锁后 variant 未变、只有 IsOpen 变 true」；
 --     **实测反证它不误放**：上锁的门 isOpen=false，这条后路对它们不发作。
 --   · 0(UNSPECIFIED) / 8(UNLOCKED) → 算通路。
---   · 没炸开的隐藏墙在 sweep_doors 里已被外层判据（variant ~= DOOR_HIDDEN）跳过。
+--   · sweep_doors 也会读取隐藏墙，以便撤销已失效的旧连接。
 -- ⚠️ 这段被改过三次（只看 variant → 只看 IsOpen → 两条任一）。选它的理由是「门开着就能走」
 --    这个口径，而不是「哪条更简单」。
-local LOCKED_DOOR_VARIANTS = {
-  [1] = true, [2] = true, [3] = true, [4] = true, [5] = true, [6] = true, [7] = true,
-}
-
+local is_passage = require("scripts.gtp_passage")
 function gt:door_is_passage(door)
-  if not LOCKED_DOOR_VARIANTS[door.Desc.Variant] then
-    return true
-  end
-  return door:IsOpen() == true
+  return is_passage(door)
 end
 
 -- ===== 判定上下文 =====
@@ -146,6 +147,7 @@ end
 -- 呼出光标：只跑 ①。它必须能在没有目标时回答 —— 所以 ① 段规则不得访问
 -- ctx.gid / ctx.target。这条不变量正是「能否呼出光标」的定义。
 function gt:can_open_cursor()
+  if gt:get_travel_mode() == 1 then return { ok = true } end
   return gt:run_travel_stages({ "departure" }, gt:travel_ctx(nil))
 end
 
@@ -236,6 +238,9 @@ gt:add_travel_rule({
   id = "target.unknown_cell", stage = "target_entry", order = 20,
   text = "这个格子不在本层的房间表里",
   test = function(ctx)
+    if ctx.mode == 1 and ctx.target ~= nil and not gt:is_grid_room_displayed(ctx.gid) then
+      return { gid = ctx.gid, selectable = false }
+    end
     if ctx.target ~= nil then return nil end
     return { gid = ctx.gid }
   end,
@@ -397,6 +402,9 @@ function gt:travel_verdict_dump(gid, ascii)
   local ctx = gt:travel_ctx(gid)
   local L = { string.format("travelDiag: target gid=%s mode=%d fairPath=%s fairTime=%s",
     tostring(gid), ctx.mode, tostring(ctx.fair_path), tostring(ctx.fair_time)) }
+  if ctx.mode == 1 then
+    L[#L + 1] = "  unrestricted mode: gameplay gates bypassed; selectable map targets only"
+  end
   local stopped, verdict = false, nil
   for _, sname in ipairs(gt.travel_stages) do
     if stopped then
@@ -405,7 +413,7 @@ function gt:travel_verdict_dump(gid, ascii)
       local bucket = gt.travel_rules[sname]
       local hit_rule, hit_detail = nil, nil
       for i = 1, #bucket do
-        local detail = bucket[i].test(ctx)
+        local detail = gt:travel_rule_enabled(bucket[i], ctx) and bucket[i].test(ctx) or nil
         if detail then
           hit_rule, hit_detail = bucket[i], detail
           break

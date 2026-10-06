@@ -37,7 +37,8 @@ gt.HighlightCursorRoom = true
 -- 这是对 Fixed 的 FollowCurseOfLost 的第 3 处语义偏离（前两处：隐藏房 7/8/29 白名单、回溯线 Mom 房）。
 
 -- 传送范围（合并了 Fixed 的 AllowNeighborRoom + AllowAnyRoom）
---   1 = 任意房间   （等价 Fixed: AllowAnyRoom = true）
+--   1 = 任意房间   （随时呼出，绕过游戏限制，传送至任意地图可选房间）
+--       任意时刻传送至任意房间，极大破坏游戏平衡，请谨慎启用
 --   2 = 相邻房间   （等价 Fixed 默认: AllowNeighborRoom = true、AllowAnyRoom = false）
 --   3 = 已探索房间 （等价 Fixed: AllowNeighborRoom = false、AllowAnyRoom = false）
 gt.TravelMode = 2
