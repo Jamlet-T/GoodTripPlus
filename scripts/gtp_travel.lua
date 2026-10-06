@@ -355,6 +355,48 @@ function gt:travel_verdict_dump(gid, ascii)
   return table.concat(L, "\n"), (verdict == nil)
 end
 
+-- ===== 免按键取证（调试模式）=====
+-- 光标停在一个**会被拒**的房间上时，自动把整段判定过程 + 当前房间的门表写进 log.txt。
+-- 为什么要这个：2026-10-06 反复踩到「用户报问题 → 我请用户按 F4/截图 → 用户没按/截不全
+-- → 白跑一轮」。光标扫过去就落盘，把取证负担从用户挪回代码。
+-- 按 (gid, 规则) 去重、每层清空，不会刷屏。
+local travel_reject_logged = {}
+
+function gt:travel_reset_reject_log()
+  travel_reject_logged = {}
+end
+
+-- 当前房间每扇门的一行摘要（变体 / 开着没 / 算不算通路 / 通向哪）
+-- —— 「上锁的门算不算通路」那条规则只能靠这个字段核对。
+function gt:travel_doors_dump()
+  local room = Game():GetRoom()
+  if not room then return "  doors: no room" end
+  local L = {}
+  for i = 0, 7 do
+    local door = room:GetDoor(i)
+    if door then
+      local open = "-"
+      pcall(function() open = tostring(door:IsOpen()) end)
+      L[#L + 1] = string.format(
+        "  door slot=%d variant=%s isOpen=%s passage=%s targetIdx=%s targetType=%s",
+        i, tostring(door.Desc and door.Desc.Variant), open,
+        tostring(gt:door_is_passage(door)),
+        tostring(door.TargetRoomIndex), tostring(door.TargetRoomType))
+    end
+  end
+  return #L > 0 and table.concat(L, "\n") or "  doors: none"
+end
+
+function gt:auto_log_travel_reject(gid, res)
+  if not gt:is_debug() or res.ok then return end
+  local key = tostring(gid) .. "|" .. tostring(res.rule)
+  if travel_reject_logged[key] then return end
+  travel_reject_logged[key] = true
+  local text = gt:travel_verdict_dump(gid, true)
+  Isaac.DebugString("[GTPtrip] rejected target (auto, no keypress needed)\n" ..
+    text .. "\n" .. gt:travel_doors_dump())
+end
+
 -- ===== 屏幕理由浮层（仅调试模式）=====
 -- 调试模式打开、且正按住地图键时，光标停在会被拒的房间上就把**整条判定过程**
 -- 画在屏幕左上角（逐段逐条 + 短路 + 规则 id + detail）；通过时不画。

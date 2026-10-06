@@ -1283,7 +1283,12 @@ end
 --
 function gt:update_cursor_room_highlight()
     local gid = gt:get_pos_grid_index(mmp_ctrl_pos)
-    if gt:can_travel_to(gid).ok then
+    local res = gt:can_travel_to(gid)
+    -- 调试模式下免按键取证：光标扫到会被拒的房间就把判定过程 + 门表写进 log.txt
+    if gt.auto_log_travel_reject then
+      gt:auto_log_travel_reject(gid, res)
+    end
+    if res.ok then
       mmp_highlight_gid = gid
     else
       mmp_highlight_gid = nil
@@ -1449,7 +1454,11 @@ function gt:step()
         mmp_ctrl_fade = CURSOR_FADE_MIN
         local mgid = gt:get_pos_grid_index(mmp_ctrl_pos)
         gt:auto_log_secret_diag(mgid)
-        if (gt:can_travel_to(mgid).ok and tele_cd < 1) then
+        local mres = gt:can_travel_to(mgid)
+        if gt.auto_log_travel_reject then
+          gt:auto_log_travel_reject(mgid, mres)
+        end
+        if (mres.ok and tele_cd < 1) then
           if crd.Data.Type == 7 or (crd.Data.Type == 8 and Game():IsGreedMode()) then
             gt:pre_secret_room()
           elseif crd.Data.Type == 10 then
@@ -1514,6 +1523,10 @@ function gt:new_level()
     n_room_num = (level:GetRooms()).Size
     secret_pre_room_id = {}
     secret_diag_logged = {}
+    -- 免按键取证的去重表（gtp_travel 里）：每层清空，免得跨层误判为「已记过」
+    if gt.travel_reset_reject_log then
+      gt:travel_reset_reject_log()
+    end
     --a new floor: everything learned about the old one goes
     door_link = {}
     door_swept = {}
