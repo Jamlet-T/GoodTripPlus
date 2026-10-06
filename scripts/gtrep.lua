@@ -195,12 +195,17 @@ local LOCKED_DOOR_VARIANTS = {
   [1] = true, [2] = true, [3] = true, [4] = true, [5] = true, [6] = true, [7] = true,
 }
 
--- 这扇门算不算「实际通路」
+-- 这扇门算不算「实际通路」。
+-- 判据只有 door.Desc.Variant（变体表见上）：0/8 算通；1..6（各种 LOCKED）与 7（没炸开的墙）不算。
+--
+-- ⚠️ 这里曾经还有一句 `or door:IsOpen() == true` 当逃生口，理由是「万一 variant 还写着
+-- LOCKED、门其实已经开着」——2026-10-06 实测**推翻并删除**：
+--   · 手上每一份门表现场数据（普通门 / 炸开的隐藏房 / boss 房 / 红挑战房闸门）里，
+--     variant 都是 8(UNLOCKED)，**从未出现 1..6** —— 这个逃生口没有任何数据支持，是凭空加的。
+--   · 而它**会让锁着的门漏过去**：上锁的商店门只要 IsOpen() 报 true 就被当成通路，
+--     于是商店能被传进去（用户实测报的 bug）。逃生口比它要防的问题更危险。
 function gt:door_is_passage(door)
-  if not LOCKED_DOOR_VARIANTS[door.Desc.Variant] then
-    return true
-  end
-  return door:IsOpen() == true
+  return not LOCKED_DOOR_VARIANTS[door.Desc.Variant]
 end
 
 -- 当前房间里通向某格的那扇门（找不到返回 nil）。
