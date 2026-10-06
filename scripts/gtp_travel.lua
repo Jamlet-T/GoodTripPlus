@@ -338,11 +338,19 @@ gt:add_travel_rule({
       if (rd.DisplayFlags & 1) == 0 then return false end
       if not (rd.VisitedCount > 0 and rd.Clear) then return false end
       if reach == nil then return true end
-      -- ⚠️ 这里必须用**严格版**（学到过的边），不能吃 rooms_linked 的几何兜底：
-      -- 继续存档 / rewind 后门图被清空、而游戏侧的「已访问」还在，兜底会把
-      -- 「访问过但没重扫」的房间当成与目标相连 → 门锁着也能传进去（2026-10-06 实测）。
-      return reach[rd.SafeGridIndex] == true
-        and gt:has_known_passage(rd.SafeGridIndex, t.SafeGridIndex)
+      if reach[rd.SafeGridIndex] ~= true then return false end
+      -- 最后一跳要区分两个**看起来一样、其实不同**的情形（2026-10-06 实测两次）：
+      --   ① 隔墙相邻（网格挨着但**根本没有门**）：兜底会当成连通 → 上锁的宝藏房 /
+      --      街机厅因此能被传进去 ✗。必须**拒**。
+      --   ② 有门、但那个邻居本次没重新扫过（继续存档 / rewind 后门图被清空）：
+      --      边没学到不代表不通 ✗。必须**放**。
+      -- 区别就在「这一侧配置上有没有门」→ 读 RoomConfigRoom.Doors（位掩码）。
+      local a, b = rd.SafeGridIndex, t.SafeGridIndex
+      if gt:has_known_passage(a, b) then return true end
+      local _, sa = gt:door_links_of(a)
+      local _, sb = gt:door_links_of(b)
+      if sa or sb then return false end          -- 有一边扫过 → 没学到边就是真没有通路
+      return gt:has_door_between(a, b) == true    -- 都没扫过 → 只在配置上真有门时才认
     end)
     if near then return nil end
     return { branch = "channel_c", mode = ctx.mode }
@@ -512,7 +520,9 @@ function gt:travel_target_dump(gid)
     "  target: type=%s visited=%s clear=%s dispFlags=0x%x isSecret=%s mode=%d",
     tostring(rd.Data and rd.Data.Type), tostring(rd.VisitedCount),
     tostring(rd.Clear), rd.DisplayFlags or 0,
-    tostring(gt:is_secret_room(rd)), gt:get_travel_mode())
+    tostring(gt:is_secret_room(rd)), gt:get_travel_mode()) ..
+    "  doorsBits=" .. tostring(rd.Data and rd.Data.Doors) ..
+    "  (RoomConfigRoom.Doors 位掩码；读不到就是 nil)"
 end
 
 -- 目标房在**门图**里已学到的边（诊断用）：这是回答「这条通路是哪来的」的唯一办法 ——
