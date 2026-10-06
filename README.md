@@ -254,7 +254,12 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 合并为一个三选一设置 `TravelMode`，MCM 里显示为「可以传送到」，默认「相邻房间」＝原默认组合；
 `TeleportAnimation` + `FastTransition` 已在 v2.1.3 合并为一个三选一 `TeleportTransition`
 （MCM 显示「传送过场」，默认「淡入淡出」，与 Fixed 的原默认组合效果一致）；
-`ArriveAtDoor` 默认改为开（对 Fixed 默认值的偏离））：
+`ArriveAtDoor` 默认改为开（对 Fixed 默认值的偏离））。
+**2026-10-06 起判定收敛成 `scripts/gtp_travel.lua` 里的四段流水线 + 规则表**
+（呼出光标 / 房间高亮 / 松手传送三者共用同一套判定）。
+
+> 📖 **完整的判定逻辑说明见 [`docs/TRAVEL-RULES.md`](../docs/TRAVEL-RULES.md)**
+> （规则清单 14 条 / 数据依赖 / 执行层 / 诊断 / 易错点 / 与 Fixed 的偏离 / 未验证项）。
 
 | 选项 | 默认 | 作用 |
 | --- | --- | --- |
