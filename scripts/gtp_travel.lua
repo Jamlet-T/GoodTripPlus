@@ -114,9 +114,20 @@ function gt:shadow_check(gid, res, old_ok, old_why)
   end
   if shadow_seen[key] then return end
   shadow_seen[key] = true
+  -- 带上 detail：只写规则 id 的话，事后看到 "new=target.challenge_gate" 也不知道
+  -- 当时的入参是什么（2026-10-06 实测：挑战房那条告警就没法判断 hp 是多少）。
+  -- detail 的值都是数字/ASCII 短串，写进 log 不影响可读性。
+  local bits = {}
+  if res.detail then
+    for k, v in pairs(res.detail) do
+      bits[#bits + 1] = tostring(k) .. "=" .. tostring(v)
+    end
+    table.sort(bits)
+  end
   Isaac.DebugString(string.format(
-    "[GTPshadow] %s gid=%s new=%s old=%s(%s)", tag, tostring(gid),
-    tostring(res.rule or "ok"), tostring(old_ok), tostring(old_why)))
+    "[GTPshadow] %s gid=%s new=%s old=%s(%s)%s", tag, tostring(gid),
+    tostring(res.rule or "ok"), tostring(old_ok), tostring(old_why),
+    #bits > 0 and ("  {" .. table.concat(bits, " ") .. "}") or ""))
 end
 
 -- 2.2.3 类型白名单的原样副本。生产代码已把它删了（见 gtrep 里那段说明），
