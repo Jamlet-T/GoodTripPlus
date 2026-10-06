@@ -25,7 +25,7 @@
     导致**已探索过的诅咒房能被传送光标直接选中、直接传进去**（2026-10-05 用户报的 bug）；
     现在默认「禁止传送进诅咒房」，可在 MCM 里关掉（见第四节）。
 12. **修复（v2.2.2）**：关掉「禁止传送进诅咒房」后，「相邻房间」档也能传送到**未探索但相邻**的
-    诅咒房 —— Fixed 的准入白名单本来把诅咒房排除，让那个开关形同虚设（见第四节）。
+    诅咒房 —— Fixed 的准入白名单本来把诅咒房排除，让那个开关形同虚设（见第四节；该白名单已于 2026-10-06 整体删除）。
 13. **调整（v2.2.3）**：**「调试模式」改为纯诊断开关**，不再改变任何传送判定或传送表现
     （原本它会绕过保护性禁传并跳过传送动画）。要排查的问题发生在"预期设置"下，开诊断就不该
     让判定变样（见第一节末尾）。
@@ -253,7 +253,7 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 | --- | --- | --- |
 | `OverrideLost`（MCM 显示「迷失诅咒下显示地图」，代理 MiniMAPI 设置） | 关 | **已取消独立的 `FollowCurseOfLost`**（对 Fixed 的第 3 处偏离）：传送直接跟随 MinimapAPI 的 `OverrideLost`（其菜单里叫 "Display During Curse"）—— 诅咒期间地图照常显示 → 传送照常开放；地图被藏起来（默认） → 传送一并停用。纯代理（只读写 `MinimapAPI.Config.OverrideLost`，不另存值），改哪边都同步 |
 | `TravelMode`（MCM 显示「可以传送到」） | 相邻房间 | v1.8.2 由 Fixed 的 `AllowNeighborRoom` + `AllowAnyRoom` **合并**而成的三选一：**任意房间**＝所有已显示房间全部放行（＝原 `AllowAnyRoom` 开）；**相邻房间**＝已清且可达房间旁「已显示但未清/未探索」的房间放行（＝原默认组合；普通房/boss/小 boss/献祭房除外；红钥匙房、一层与水层镜像的商店/宝箱房豁免；虚空 Delirium boss 房角落特判）；**已探索房间**＝只认自己已清怪的房（＝原 `AllowNeighborRoom` 关） |
-| `BlockCurseRoom`（MCM 显示「禁止传送进诅咒房」，v2.2.1 恢复） | **开** | 移植基底（MLX's Tweak）的同名选项（现行 Fixed 2.2.58 已无此项）：开启时**任何传送范围档位都不能把目标落在诅咒房上**（`RoomType.ROOM_CURSE`(10)，进出会按门咬血的那种；「任意房间」档也拦）；关掉则**完全按普通房间处理**，含「相邻房间」档的未探索邻居豁免（v2.2.2 修：Fixed 的类型白名单本来排除类型 10）。**只拦「传进去」，从诅咒房传出去不拦**（出去该扣的血照旧扣）。目标侧实现是 `scripts/gtp_curseblock.lua`，**包一层 `gt.check_teleble()`**；与 gtrep 白名单共用 `gt:block_curse_room()` |
+| `BlockCurseRoom`（MCM 显示「禁止传送进诅咒房」，v2.2.1 恢复） | **开** | 移植基底（MLX's Tweak）的同名选项（现行 Fixed 2.2.58 已无此项）：开启时**任何传送范围档位都不能把目标落在诅咒房上**（`RoomType.ROOM_CURSE`(10)，进出会按门咬血的那种；「任意房间」档也拦）；关掉则**完全按普通房间处理**。**只拦「传进去」，从诅咒房传出去不拦**（出去该扣的血照旧扣）。目标侧实现是 `scripts/gtp_curseblock.lua`，**登记为 ② target_entry 段的规则 `target.curse_blocked`**（2026-10-06 起不再包装函数） |
 | `FairTripPath` | 开 | 目标必须沿「已探索+已清怪」的房间逐真门抵达（门图 BFS） |
 | `ArriveAtDoor` | **开**（偏离 Fixed 的默认关） | 落地在走路会走进来的门口（跨屏大房间远途会先经过前一格） |
 | `FairTripTime` | 关 | 按传送距离与移速补回游戏时间 |
@@ -278,18 +278,21 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 （`curse_toll_free`：Flat File / 深渊书免伤，以撒的心脏 / 牙与甲照扣，
 尖刺状态从门两侧分别记录）仍照旧生效。
 
-**对 Fixed 的四处偏离**（都为了修实际 bug / 满足明确需求，理由都写在代码注释里）：
-1. `check_neigh_connected()` 的类型白名单放进隐藏房 → 已炸开的隐藏房可以传送进入（见第 2 节）；
-2. **回溯线放行「Mom / Ultra Greed 房一律禁传」这条规则**（`gt:teleport_to_grid_index()` 开头）：
-   回溯线里 **Depths II 那层的 boss 房名字就是 `Mom`**，但那里 boss 早在正着走时打完、只是路过，
-   于是正常传送被拦 —— 现象是"光标能呼出、能选格子，松手只响一声失败音"。
-   现在 `not level:IsAscent()` 时该规则才生效；正常路线的 Mom / Ultra Greed 房照旧禁。
-   诊断 dump 新增 `tripPrecheck` 行，会直接点名这条与"Mother's Shadow(867) 在场"这条静态失败规则。
+**对 Fixed 的偏离**（都为了修实际 bug / 满足明确需求，理由都写在代码注释里）：
+1. **准入里的类型白名单已整体删除**（2026-10-06，由用户实测触发）：Fixed 那份名单只放
+   普通房(1)/boss(5)/小 boss(6)/献祭(13)，另加红钥匙房、隐藏房、镜像世界与一层的水层商店宝箱房 ——
+   副作用是把「门已用钥匙打开、还没进去过」的**商店 / 宝藏房 / 星象房 / 挑战房**一并拒了。
+   现在改由「**那扇门现在能不能走**」把关（`gt:door_is_passage`：门锁着不算通路、解锁后算），
+   见第四节的「传送判定链」。此前为隐藏房(7/8/29)与诅咒房(10)打的两次名单补丁随之作废。
+2. **回溯线放行「Mom / Ultra Greed 房一律禁传」这条规则**：回溯线里 **Depths II 那层的
+   boss 房名字就是 `Mom`**，但那里 boss 早在正着走时打完、只是路过，于是正常传送被拦 ——
+   现象是「光标能呼出、能选格子，松手只响一声失败音」。现在 `not level:IsAscent()` 时该规则才生效。
+   这条现在是 ① departure 段的规则 `departure.mom_room`；原先诊断 dump 里那条 `tripPrecheck`
+   已删除（它要点名的两条现在由规则直接报出）。
 3. **迷失诅咒下能否传送改为跟随 MinimapAPI 的 `OverrideLost`**（取消独立的 `FollowCurseOfLost`，
-   见本节开头表格）。
-4. **`BlockCurseRoom` 关掉时，`check_neigh_connected()` 的类型白名单也放行诅咒房(10)**（v2.2.2）：
-   Fixed 没有这个开关、一律靠白名单把诅咒房排除；我们既把它恢复成默认开，就得让「关掉＝按普通
-   房间处理」名副其实 —— 否则「相邻房间」档永远传不进未探索的相邻诅咒房（用户实测报的 bug）。
+   见本节开头表格）—— 现在是 ① 的规则 `departure.lost_curse`。
+4. **`BlockCurseRoom` 是 Fixed 没有的开关**（移植基底 MLX's Tweak 的同名项，默认开）：
+   关掉＝诅咒房完全按普通房间处理。现在是 ② target_entry 段的规则 `target.curse_blocked`。
 
 核心机制（门图）：网格相邻分不清「门洞」和「隐藏房没炸开的墙」，所以按维度维护
 一张逐房间学出来的门图（`sweep_doors` 只读当前房的门、跳过 `DOOR_HIDDEN`、双向记录，
@@ -307,7 +310,8 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
   或 `door.TargetRoomIndex == GridRooms.ROOM_BOSSRUSH_IDX`(-5) / `ROOM_BLUE_WOOM_IDX`(-8，死寂/Hush)。
   **注意 `DoorVariant` 里没有这些门型**（只有 0~8 九个普通值），所以必须看门的目标房间。
 - **回溯线（The Ascent）不参与** —— 那里进门的就是 boss 房、只是路过，没有奖励门。
-- 实现是独立模块 `scripts/gtp_bosswindow.lua`，**包一层 `gt.check_teleble()`**（不改 `gtrep.lua`），
+- 实现是独立模块 `scripts/gtp_bosswindow.lua`，**登记为 ① departure 段的规则 `departure.reward_door`**
+  （2026-10-06 起不再包装 `gt.check_teleble()`），
   所以表现与其它准入拒绝完全一致：光标不高亮、按 TAB 不启用、松手也不会传。
 - **常开、无开关、不可绕过**（用户 2026-10-03 要求：这类保护不给可选配置；2026-10-06 起调试模式也不放行）。
 
@@ -528,13 +532,14 @@ issacMod/                       ← 工作区 git 仓库（可容纳多个 mod�
     │                                 TintedSkull.*（愚者骷髅房图标，本模组自有素材）
     │                                 MineButton.*（矿洞按钮房图标，本模组自有素材）
     └── scripts/
-        ├── gtrep.lua           ← 上游 MLX's Tweak 主逻辑（仅改名重写 + 准入判定扩展）
+        ├── gtrep.lua           ← 上游 MLX's Tweak 主逻辑（改名重写 + 门图/邻接/落点等「机制」）
+        ├── gtp_travel.lua      ← **传送判定策略层**：四段规则表 + can_open_cursor / can_travel_to（2026-10-06 新增）
         ├── gtp_rewindfix.lua   ← rewind 掉落物图标修复（不依赖具体回调的帧末监视）
         ├── gtp_delver.lua      ← 隐藏房候选标记的回调接线 + MCM 开关
         ├── gtp_skullroom.lua   ← 深牢 II 愚者骷髅房标记（读房间生成表 → MinimapAPI 房间图标）
         ├── gtp_minebuttons.lua ← 矿洞 II 黄色按钮房标记（读房间生成表 → MinimapAPI 房间图标）
-        ├── gtp_bosswindow.lua  ← 房间里有奖励门（恶魔/天使/Boss Rush/死寂）时禁传（常开，包装 check_teleble）
-        ├── gtp_curseblock.lua  ← 禁止传送进诅咒房（Fixed 的 BlockCurseRoom，默认开，包装 check_teleble）
+        ├── gtp_bosswindow.lua  ← 房间里有奖励门（恶魔/天使/Boss Rush/死寂）时禁传（常开，登记规则 departure.reward_door）
+        ├── gtp_curseblock.lua  ← 禁止传送进诅咒房（Fixed 的 BlockCurseRoom，默认开，登记规则 target.curse_blocked）
         └── delver/             ← 移植自 Lazy Delver（MIT），仅改了 require 路径
             ├── const.lua       ← 常量表
             ├── geometry.lua    ← 形状占据格、相邻格、门槽映射
@@ -557,13 +562,14 @@ issacMod/                       ← 工作区 git 仓库（可容纳多个 mod�
 
 | 位置 | 改动 |
 | --- | --- |
-| `scripts/gtrep.lua` | `RegisterMod` 名、ModConfigMenu 配置键 / 标题全部改为 `GoodTripPlus`；新增 MCM 开关 `ShowSecretMarkers`、`FoolsSkullRoom`、`BlockCurseRoom`（v2.2.1，恢复自 Fixed）；传送准入与传送判定整体移植自 GoodTrip [Fixed]（选项同名同默认值，见第四节） |
+| `scripts/gtrep.lua` | `RegisterMod` 名、ModConfigMenu 配置键 / 标题全部改为 `GoodTripPlus`；新增 MCM 开关 `ShowSecretMarkers`、`FoolsSkullRoom`、`BlockCurseRoom`（v2.2.1，恢复自 Fixed）。**2026-10-06 起只管「机制」**（门图、房间级邻接、可达岛、几何落点、投影与绘制、换房与过场），准入判定整体搬到 `gtp_travel.lua` |
 | `scripts/gtp_rewindfix.lua` | 新增文件，rewind 图标修复 |
 | `scripts/gtp_delver.lua` | 新增文件，隐藏房候选标记的回调接线 |
 | `scripts/gtp_skullroom.lua` | 新增文件，深牢 II 愚者骷髅房标记（自己写的，未参考任何 mod 的实现代码） |
 | `scripts/gtp_minebuttons.lua` | 新增文件，矿洞 II 黄色按钮房标记（同上，自研；识别值 4500/3 用原版 `.stb` 实测验证） |
-| `scripts/gtp_bosswindow.lua` | 新增文件，房间里出现「奖励房间的门」（恶魔房 / 天使房 / Boss Rush / 死寂）时禁用传送，常开（**包装 `gt.check_teleble`** 实现，不改 `gtrep.lua`） |
-| `scripts/gtp_curseblock.lua` | 新增文件，禁止传送进诅咒房（恢复移植基底 MLX's Tweak 的 `BlockCurseRoom` 选项，默认开；**包装 `gt.check_teleble`**）；配套改了 `gtrep.lua` 里 `check_neigh_connected` 的类型白名单（关掉该开关时放行诅咒房 10，v2.2.2） |
+| `scripts/gtp_bosswindow.lua` | 新增文件，房间里出现「奖励房间的门」（恶魔房 / 天使房 / Boss Rush / 死寂）时禁用传送，常开（**登记 ① departure 段的规则 `departure.reward_door`**；2026-10-06 起不再包装 `gt.check_teleble`） |
+| `scripts/gtp_curseblock.lua` | 新增文件，禁止传送进诅咒房（恢复移植基底 MLX's Tweak 的 `BlockCurseRoom` 选项，默认开；**登记 ② target_entry 段的规则 `target.curse_blocked`**）。原先配套改的 `gtrep.lua` 类型白名单已于 2026-10-06 整体删除 |
+| `scripts/gtp_travel.lua` | **2026-10-06 新增：传送判定策略层**。四段流水线（departure / target_entry / range / path）+ 每段一张有序规则表 + 两个入口（`can_open_cursor` / `can_travel_to`）+ 诊断浮层。呼出光标、房间高亮、松手传送共用同一套判定；执行层原先藏的四条拦截上移到这里。详见第四节「传送判定链」 |
 | `scripts/gtp_mapbounds.lua` | 新增文件，地图边界房间高亮（默认开；用一张 8×8 纯白贴图缩放画边） |
 | `scripts/delver/*` | 从 Lazy Delver 原样移植（仅改写 `require` 路径），`render.lua` 重写了定位部分 |
 | `resources/gfx/goodtripplus/*` | `marker.*` 从 Lazy Delver 复制（换到自己的路径避免与它本体冲突）；`TintedSkull.*` 是本模组自有的骷髅图标（16x16）；`MineButton.*` 是本模组自有的按钮图标（16x16）；`bounds.*` 是本模组自有的纯白贴图（8×8，画地图边界线用） |
