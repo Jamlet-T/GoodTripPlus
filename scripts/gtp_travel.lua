@@ -338,8 +338,11 @@ gt:add_travel_rule({
       if (rd.DisplayFlags & 1) == 0 then return false end
       if not (rd.VisitedCount > 0 and rd.Clear) then return false end
       if reach == nil then return true end
+      -- ⚠️ 这里必须用**严格版**（学到过的边），不能吃 rooms_linked 的几何兜底：
+      -- 继续存档 / rewind 后门图被清空、而游戏侧的「已访问」还在，兜底会把
+      -- 「访问过但没重扫」的房间当成与目标相连 → 门锁着也能传进去（2026-10-06 实测）。
       return reach[rd.SafeGridIndex] == true
-        and gt:rooms_linked(rd.SafeGridIndex, t.SafeGridIndex)
+        and gt:has_known_passage(rd.SafeGridIndex, t.SafeGridIndex)
     end)
     if near then return nil end
     return { branch = "channel_c", mode = ctx.mode }
