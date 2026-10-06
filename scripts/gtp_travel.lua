@@ -450,7 +450,13 @@ end
 
 -- 逐段逐条跑一遍并打印结果（体现短路：被拒之后的段标 skipped）。
 -- ⚠️ 会真跑一遍规则（含可达岛 BFS），只在诊断路径上调，别放进每帧渲染。
-function gt:travel_verdict_dump(gid)
+--
+-- `ascii` = true 时**只用 ASCII**：屏幕浮层必须用这个模式 —— 诊断字体是
+-- font/terminus.fnt（**位图 ASCII 字体，画不出中文**），中文在屏幕上会整段空白
+-- （2026-10-06 实测：屏幕上只剩 "[拒绝 gid=35]" 里的 ASCII 部分，理由那截是空的）。
+-- 所以 ascii 模式印**规则 id**而不是中文散文；中文散文留在 log.txt / 控制台里。
+-- 第二个返回值 = 是否可传送（浮层要靠它决定画不画）。
+function gt:travel_verdict_dump(gid, ascii)
   local ctx = gt:travel_ctx(gid)
   local L = { string.format("travelDiag: target gid=%s mode=%d fairPath=%s fairTime=%s",
     tostring(gid), ctx.mode, tostring(ctx.fair_path), tostring(ctx.fair_time)) }
@@ -475,7 +481,8 @@ function gt:travel_verdict_dump(gid)
         end
         table.sort(bits)
         L[#L + 1] = string.format("  [%s] REJECT %s  %s  {%s}",
-          sname, hit_rule.id, hit_rule.text, table.concat(bits, " "))
+          sname, hit_rule.id, ascii and "" or hit_rule.text,
+          table.concat(bits, " "))
         stopped = true
         verdict = hit_rule.id
       else
@@ -485,42 +492,42 @@ function gt:travel_verdict_dump(gid)
   end
   L[#L + 1] = verdict and ("  verdict: NOT teleportable (" .. verdict .. ")")
     or "  verdict: teleportable"
-  return table.concat(L, "\n")
+  return table.concat(L, "\n"), (verdict == nil)
 end
 
 -- ===== 屏幕理由浮层（仅调试模式）=====
--- 调试模式打开、且正按住地图键时，光标停在会被拒的房间上就实时画一行理由；
--- 通过时不画（保持安静）。正常游玩完全不出（仍只有失败音）。
+-- 调试模式打开、且正按住地图键时，光标停在会被拒的房间上就把**整条判定过程**
+-- 画在屏幕左上角（逐段逐条 + 短路 + 规则 id + detail）；通过时不画。
+-- 正常游玩完全不出（仍只有失败音）。
+--
+-- 为什么一次印一整段而不是一句话：2026-10-06 实测教训 —— 原来只印一句中文理由，
+-- 而诊断字体画不出中文，用户屏幕上只剩 "gid=35"，什么也判断不了。
+-- 印成 ASCII 的整段判定，一张截图就能定位到规则与它的入参。
 -- 为什么不复用 gt:show_diag_overlay：那个是给一次性 dump 用的帧数生存期浮层，
 -- 这里是「跟着光标实时变、松手即消失」。
-local reason_gid = nil
-local reason_text = nil
-
 function gt:render_travel_reason(cursor_pos, cursor_active)
-  if not gt:is_debug() or not cursor_active then
-    reason_gid, reason_text = nil, nil
-    return
-  end
-  local gid = gt:get_pos_grid_index(cursor_pos)
-  local res
-  if gid == -99 then
-    res = { ok = false, rule = "target.no_target", text = "光标没落在任何已显示的房间上" }
-  else
-    res = gt:can_travel_to(gid)
-  end
-  if res.ok then
-    reason_gid, reason_text = nil, nil
-  else
-    reason_gid, reason_text = gid, res.text
-  end
+  if not gt:is_debug() or not cursor_active then return end
   local font = gt:get_diag_font()
   if not font then return end
-  if reason_text then
-    font:DrawString("[拒绝 gid=" .. tostring(reason_gid) .. "] " .. reason_text,
-      16, 20, KColor(1, 0.45, 0.35, 1), 0, false)
+  local y = 20
+  local function draw(s, color)
+    font:DrawString(s, 16, y, color, 0, false)
+    y = y + 11
+  end
+  local gid = gt:get_pos_grid_index(cursor_pos)
+  if gid == -99 then
+    draw("[BLOCKED] cursor is not on any displayed room cell", KColor(1, 0.45, 0.35, 1))
+  else
+    -- ascii = true：诊断字体是位图 ASCII 字体，中文会整段空白
+    local text, ok = gt:travel_verdict_dump(gid, true)
+    if not ok then
+      for line in text:gmatch("[^\n]+") do
+        draw(line, KColor(1, 0.45, 0.35, 1))
+      end
+    end
   end
   if gt.shadow_mismatch_count and gt.shadow_mismatch_count > 0 then
-    font:DrawString("[GTPshadow] MISMATCH x" .. tostring(gt.shadow_mismatch_count),
-      16, 32, KColor(1, 1, 0.3, 1), 0, false)
+    draw("[GTPshadow] MISMATCH x" .. tostring(gt.shadow_mismatch_count),
+      KColor(1, 1, 0.3, 1))
   end
 end
