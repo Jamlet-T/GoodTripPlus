@@ -1,5 +1,9 @@
 # GoodTripPlus
 
+**任意房间档**：任意时刻传送至任意房间，极大破坏游戏平衡，请谨慎启用。
+该档允许随时呼出光标，传送至地图上可选的任何房间，绕过战斗、上锁门、挑战房条件、
+诅咒房禁令及连通/路线限制；相邻与已探索档继续使用原规则，默认仍为相邻房间。
+
 《以撒的结合：忏悔+》的小地图传送模组，基于 **Goodtrip MLX's Tweak**（Steam 创意工坊 3749565569）二次开发。
 
 > **项目定位（2026-10-03 起）**：**MinimapAPI 的外置传送插件**。
@@ -496,7 +500,7 @@ MinimapAPI 藏地图时管不到**本模组自己画的**元素。各元素的�
 ### 分享给朋友 / 分发单包
 
 `dist/goodtripplus-1.1.0.zip` 就是可直接发人的完整包——解压丢进 `mods/` 即可。
-它只含运行必需的 19 个文件，**不含 `deploy.sh`**（那是开发机上的同步脚本，里面写死了本机路径）。
+运行文件数量随版本变化，以实际打包清单为准；分发包不含 `deploy.sh` 等开发入口。
 
 朋友那边需要满足这几条：
 
@@ -535,7 +539,7 @@ issacMod/                       ← 工作区 git 仓库（可容纳多个 mod�
     ├── main.lua                ← 入口：加载 gtrep + gtp_rewindfix + gtp_delver + gtp_skullroom 等
     ├── metadata.xml            ← mod 元数据（name / directory / id）
     ├── gtconfig.lua            ← 静态默认值（可被 MCM 覆盖）
-    ├── deploy.sh               ← 同步到游戏 mods/goodtripplus（开发机用）
+    ├── deploy.sh               ← 兼容入口，转交根 dev.ps1 验证并部署
     ├── pack.sh                 ← 打包成 dist/goodtripplus-<版本>.zip（分发用）
     ├── dist/                   ← 打包产物（不进版本控制）
     ├── LICENSE                 ← MIT（仅覆盖本项目自有代码）
@@ -546,6 +550,12 @@ issacMod/                       ← 工作区 git 仓库（可容纳多个 mod�
     └── scripts/
         ├── gtrep.lua           ← 上游 MLX's Tweak 主逻辑（改名重写 + 门图/邻接/落点等「机制」）
         ├── gtp_travel.lua      ← **传送判定策略层**：四段规则表 + can_open_cursor / can_travel_to（2026-10-06 新增）
+        ├── gtp_doorgraph.lua   ← 纯门图状态：楼层身份、双向边、扫描变更去重
+        ├── gtp_doors.lua       ← 游戏门扫描、门图重置与存档适配
+        ├── gtp_passage.lua     ← 独立门通路判据
+        ├── gtp_menu.lua        ← 一次性 MCM 注册与 MinimapAPI 配置代理
+        ├── gtp_locale.lua      ← 中英文菜单文本与语言选择
+        ├── gtp_persist.lua     ← 门图状态文本序列化与解析
         ├── gtp_rewindfix.lua   ← rewind 掉落物图标修复（不依赖具体回调的帧末监视）
         ├── gtp_delver.lua      ← 隐藏房候选标记的回调接线 + MCM 开关
         ├── gtp_skullroom.lua   ← 深牢 II 愚者骷髅房标记（读房间生成表 → MinimapAPI 房间图标）
@@ -566,7 +576,10 @@ issacMod/                       ← 工作区 git 仓库（可容纳多个 mod�
 `deploy.sh` 用脚本自身所在目录当源码根，所以在仓库根跑 `bash goodtripplus/deploy.sh`
 或在 `goodtripplus/` 里跑 `bash deploy.sh` 都可以；仓库根还提供 `deploy-all.sh` 一次同步全部 mod。
 
-对应游戏内路径：`F:/Steam/steamapps/common/The Binding of Isaac Rebirth/mods/goodtripplus`
+对应游戏内路径：`F:/Steam/steamapps/common/The Binding of Isaac Rebirth/mods/goodtripplus_3813175350`
+
+当前开发首选根目录 `./dev.ps1 Verify`、`./dev.ps1 Deploy`、`./dev.ps1 Log`；
+配置集中在 `tools/dev.defaults.psd1`，完整目录导航见 [CODE-MAP](../docs/CODE-MAP.md)。
 
 ---
 
