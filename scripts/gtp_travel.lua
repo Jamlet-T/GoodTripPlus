@@ -482,6 +482,21 @@ function gt:travel_target_dump(gid)
     tostring(gt:is_secret_room(rd)), gt:get_travel_mode())
 end
 
+-- 目标房在**门图**里已学到的边（诊断用）：这是回答「这条通路是哪来的」的唯一办法 ——
+-- 上锁的门 passage=false，可如果先前某刻它的门是开的，这条边就已经记下了（门图只增不减），
+-- 而当前房间的门表**看不到别人房间的门**。
+function gt:travel_links_dump(gid)
+  local rd = gt:grid_room_desc(gid)
+  if not rd then return "  links: no target" end
+  local links, swept = gt:door_links_of(rd.SafeGridIndex)
+  local parts = {}
+  for _, e in ipairs(links) do
+    parts[#parts + 1] = tostring(e.other) .. "(slot " .. tostring(e.slot) .. ")"
+  end
+  return string.format("  links(sgi=%s swept=%s): %s", tostring(rd.SafeGridIndex),
+    tostring(swept), #parts > 0 and table.concat(parts, " ") or "none")
+end
+
 local function auto_log_travel_body(gid, res)
   if not gt:is_debug() then return end
   local probe = gt:challenge_probe(gid)
@@ -500,6 +515,7 @@ local function auto_log_travel_body(gid, res)
     " target (auto, no keypress needed)  rule=" .. tostring(res.rule or "-") }
   lines[#lines + 1] = gt:travel_verdict_dump(gid, true)
   lines[#lines + 1] = gt:travel_target_dump(gid)
+  lines[#lines + 1] = gt:travel_links_dump(gid)
   if probe then lines[#lines + 1] = probe end
   lines[#lines + 1] = gt:travel_doors_dump()
   Isaac.DebugString(table.concat(lines, "\n"))
