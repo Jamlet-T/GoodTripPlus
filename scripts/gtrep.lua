@@ -177,35 +177,21 @@ function gt:is_secret_room(rd)
     return t == 7 or t == 8 or t == 29
 end
 
--- 变体表（DoorVariant，见 enums）：
---   0 UNSPECIFIED / 1 LOCKED / 2 LOCKED_DOUBLE / 3 LOCKED_CRACKED /
---   4 LOCKED_BARRED / 5 LOCKED_KEYFAMILIAR / 6 LOCKED_GREED / 7 HIDDEN / 8 UNLOCKED
--- 这里用数字字面量而不是 DoorVariant.DOOR_LOCKED 之类的名字：**不确定那些枚举名在
--- 这个 API 版本里都有**（只有 DOOR_HIDDEN 是现用代码验证过的），索引不存在的名字会直接崩。
+-- 这扇门现在算不算「实际通路」？
+-- 判据就是**门此刻开没开**（`door:IsOpen()`）—— 2026-10-06 两次实测修正后的结论：
 --
--- 约定：0 与 8 是通的；1..6（要钥匙等额外条件）与 7（没炸开的墙）不算通路 ——
--- 传送不该绕过「还打不开的门」。这是 2026-10-06 用户要求：
--- **商店上锁时传不进去，解锁之后才行**。
---
--- ⚠️ 两条待实测确认（gtpdiag 的门表会逐门打印 variant / isOpen / 本函数的判定）：
---   ① 用钥匙开过的门，variant 是否真的变成 8；
---   ② boss 房清完后门开着，variant 会不会仍写着 LOCKED —— 这条由下面的
---      `door:IsOpen()` 兜底（门实际开着就一律算通，避免误判把已清房封死）。
-local LOCKED_DOOR_VARIANTS = {
-  [1] = true, [2] = true, [3] = true, [4] = true, [5] = true, [6] = true, [7] = true,
-}
-
--- 这扇门算不算「实际通路」。
--- 判据只有 door.Desc.Variant（变体表见上）：0/8 算通；1..6（各种 LOCKED）与 7（没炸开的墙）不算。
---
--- ⚠️ 这里曾经还有一句 `or door:IsOpen() == true` 当逃生口，理由是「万一 variant 还写着
--- LOCKED、门其实已经开着」——2026-10-06 实测**推翻并删除**：
---   · 手上每一份门表现场数据（普通门 / 炸开的隐藏房 / boss 房 / 红挑战房闸门）里，
---     variant 都是 8(UNLOCKED)，**从未出现 1..6** —— 这个逃生口没有任何数据支持，是凭空加的。
---   · 而它**会让锁着的门漏过去**：上锁的商店门只要 IsOpen() 报 true 就被当成通路，
---     于是商店能被传进去（用户实测报的 bug）。逃生口比它要防的问题更危险。
+--   · **不能用 DoorVariant 判「锁着」**：关着的门 variant 照样是 8(UNLOCKED)。
+--     真机日志实证：关着的挑战房闸门是 `variant=8 isOpen=false`；需要钥匙的
+--     商店 / 街机厅 / 宝藏房门同样是 `variant=8 isOpen=false`。按 variant 判会把它们
+--     全算成「通」→ 门图记下边 → 「相邻房间」档直接传进去
+--     （用户实测：道具房 / 游戏房门锁未开也能传）。
+--   · 用 `IsOpen()` 就都对：锁着 false、解锁后 true、炸开的隐藏房洞口 true、
+--     清完 boss 之后开着的门 true。
+--   · **战斗中普通门会短暂报 false** —— 不影响正确性：门图**只增不减**（换层才清），
+--     所以这只会让那条边晚几帧学到，不会丢边。
+--   · 没炸开的隐藏墙（variant 7 = DOOR_HIDDEN）在 sweep_doors 里已被外层判据跳过。
 function gt:door_is_passage(door)
-  return not LOCKED_DOOR_VARIANTS[door.Desc.Variant]
+  return door:IsOpen() == true
 end
 
 -- 当前房间里通向某格的那扇门（找不到返回 nil）。
@@ -237,8 +223,9 @@ function gt:sweep_doors()
     swept[here] = true
     for i = 0, 7 do
       local door = live:GetDoor(i)
-      --DOOR_HIDDEN is an unbombed wall, so no passage; locked doors are no passage
-      --either (see gt:door_is_passage). All read live so nothing is from different moments.
+      --DOOR_HIDDEN is an unbombed wall, so no passage; a door that is closed right now
+      --is no passage either (see gt:door_is_passage -- it only asks IsOpen()).
+      --All read live so nothing is from different moments.
       --（实测：炸开之后 variant 会变成 8，所以这条判据本身就够用，别再加「已炸开」判据）
       if door and door.Desc.Variant ~= DoorVariant.DOOR_HIDDEN then
         local tdes = lvl:GetRoomByIdx(door.TargetRoomIndex, -1)
