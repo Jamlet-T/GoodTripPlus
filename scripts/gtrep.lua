@@ -203,6 +203,21 @@ function gt:door_is_passage(door)
   return door:IsOpen() == true
 end
 
+-- 当前房间里通向某格的那扇门（找不到返回 nil）。
+-- 判红挑战房的进入条件要用它 —— 见 gtp_travel 的 target.challenge_gate：
+-- 「游戏自己把门开着」是「允许进」最直接的证据，比复刻它的血量公式可靠。
+function gt:door_to(gid)
+  local room = Game():GetRoom()
+  if not room then return nil end
+  for i = 0, 7 do
+    local door = room:GetDoor(i)
+    if door and door.TargetRoomIndex == gid then
+      return door
+    end
+  end
+  return nil
+end
+
 --read the current room's doors (the only room the game answers for) into the
 --graph both ways. DOOR_HIDDEN is an unbombed wall, so no passage; locked doors
 --are no passage either (a trip must not bypass a door nobody has opened yet --
