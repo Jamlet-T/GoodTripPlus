@@ -1299,9 +1299,10 @@ end
 function gt:update_cursor_room_highlight()
     local gid = gt:get_pos_grid_index(mmp_ctrl_pos)
     local res = gt:can_travel_to(gid)
-    -- 调试模式下免按键取证：光标扫到会被拒的房间就把判定过程 + 门表写进 log.txt
-    if gt.auto_log_travel_reject then
-      gt:auto_log_travel_reject(gid, res)
+    -- 调试模式下免按键取证：光标扫到目标就把判定过程 + 门表写进 log.txt
+    -- （被拒要记，挑战房被放行也要记 —— 放行同样可能判错）
+    if gt.auto_log_travel then
+      gt:auto_log_travel(gid, res)
     end
     if res.ok then
       mmp_highlight_gid = gid
@@ -1470,8 +1471,8 @@ function gt:step()
         local mgid = gt:get_pos_grid_index(mmp_ctrl_pos)
         gt:auto_log_secret_diag(mgid)
         local mres = gt:can_travel_to(mgid)
-        if gt.auto_log_travel_reject then
-          gt:auto_log_travel_reject(mgid, mres)
+        if gt.auto_log_travel then
+          gt:auto_log_travel(mgid, mres)
         end
         if (mres.ok and tele_cd < 1) then
           if crd.Data.Type == 7 or (crd.Data.Type == 8 and Game():IsGreedMode()) then
@@ -1539,8 +1540,8 @@ function gt:new_level()
     secret_pre_room_id = {}
     secret_diag_logged = {}
     -- 免按键取证的去重表（gtp_travel 里）：每层清空，免得跨层误判为「已记过」
-    if gt.travel_reset_reject_log then
-      gt:travel_reset_reject_log()
+    if gt.travel_reset_probe_log then
+      gt:travel_reset_probe_log()
     end
     --a new floor: everything learned about the old one goes
     door_link = {}

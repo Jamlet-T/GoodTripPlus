@@ -220,41 +220,54 @@ gt:add_travel_rule({
   end,
 })
 
+-- 挑战房的「进入条件现状」：规则本体与诊断探针都读这一份，避免两处漂移。
+-- 非挑战房 / 玩家不可用 时返回 nil。
+function gt:challenge_entry_state(gid)
+  local rd = gt:grid_room_desc(gid)
+  if not (rd and rd.Data and rd.Data.Type == 11) then return nil end
+  local p = Isaac.GetPlayer(0)
+  if not p or not p:Exists() then return nil end
+  local door = gt:door_to(gid)
+  local open = false
+  if door then
+    local okc, v = pcall(function() return door:IsOpen() end)
+    open = okc and v == true
+  end
+  local lvl = Game():GetLevel()
+  return {
+    done = rd.ChallengeDone == true,
+    door = door,
+    door_open = open,
+    hearts = p:GetHearts(),
+    soul = p:GetSoulHearts(),
+    black = p:GetBlackHearts(),
+    maxhearts = p:GetMaxHearts(),
+    stage = lvl and lvl:GetStage() or 0,
+  }
+end
+
 gt:add_travel_rule({
   id = "target.challenge_gate", stage = "target_entry", order = 60,
-  text = "目标是还没完成的挑战房，当前血量不满足进入条件",
+  text = "目标是挑战房，但现在进不去（红心 > 1 颗）",
   test = function(ctx)
-    if ctx.target.Data.Type ~= 11 or ctx.target.ChallengeDone then return nil end
-    local p = ctx.player
-    local hearts = p:GetHearts()
-    local soul = p:GetSoulHearts()
-    local black = p:GetBlackHearts()
-    local st = ctx.level:GetStage()
-    local door = gt:door_to(ctx.gid)
-    local door_open = door and door:IsOpen() == true
-    -- ① **游戏自己怎么说最算数**：当前房间通向目标的那扇门开着 = 它允许进。
-    --    红挑战房的门本身就是按血量条件开关的，直接用门的状态，比复刻它的公式可靠。
-    --    2026-10-06 实测（真机日志）：玩家 0 红心 + 1 魂心 + 半黑心（hearts=0 soul=2
-    --    black=1），游戏门开着 isOpen=true，而旧的 `hp = 红+魂+黑 = 3` 公式判拒 ——
-    --    游戏的条件只看**红心**，我们的口径不一致。
-    if door_open then return nil end
-    -- ② 门不在当前房间（隔着老远传 / 门还没学到）时，退回血量公式。
-    --    偶数层这一支只算**红心**，与游戏的门条件同口径（魂心/黑心不计入）。
-    --    注：其余层那一支仍沿用 Fixed 的「总血量 >= 最大红心」—— 没有实测数据说它错，
-    --    保持原样不动。
-    if st % 2 == 0 and st ~= 10 then
-      -- 原实现是「hp > 2 就拒绝」⇒ 放行要求 ≤1 心。⚠️ 这里曾被抄成「>2 就放行」（反了）。
-      if hearts <= 2 then return nil end
-      return { branch = "hp_even", stage = st, hearts = hearts, soul = soul,
-               black = black, door = door and tostring(door_open) or "none",
-               need = "hearts<=2" }
-    end
-    local hp = hearts + soul + black
-    local maxhp = p:GetMaxHearts()
-    if hp >= maxhp then return nil end
-    return { branch = "hp_other", stage = st, hearts = hearts, hp = hp,
-             maxhp = maxhp, door = door and tostring(door_open) or "none",
-             need = "hp>=" .. tostring(maxhp) }
+    local s = gt:challenge_entry_state(ctx.gid)
+    if not s then return nil end                -- 非挑战房 / 玩家不可用
+    if s.done then return nil end               -- 打完了的挑战房不再查条件（Fixed 原语义）
+    -- **唯一判据：红心 ≤ 1 颗（= 2 个半心）**，与游戏的门条件一致、**与层数无关**。
+    -- 真机实测三点（2026-10-06）：红心 0 → 门开；红心 1 → 门开；红心 2（满血）→ 门关。
+    --
+    -- ⚠️ 两个被实测推翻的写法，别再写回去：
+    --   ① Fixed 的奇偶分支（「偶数层要求 ≤1 心 / 其余层要求满血」）—— 在「2 心且满血的
+    --      奇数层」会放行，而游戏此时关着门。
+    --   ② 「当前房间通向目标的门 door:IsOpen() 为真就放行」—— 实测闸门关闭时它仍报 true，
+    --      于是闸门关着也能传进去（用户实测：进过一次没打完、再捡一颗心、2 心闸门关闭，
+    --      却依然能传）。所以**不拿 IsOpen() 当闸门**。
+    --      （它的值仍写进 detail 与 challenge_probe，供日后核对。）
+    if s.hearts <= 2 then return nil end
+    return { branch = "hearts", stage = s.stage, hearts = s.hearts,
+             soul = s.soul, black = s.black,
+             door = s.door and "yes" or "none", doorOpen = tostring(s.door_open),
+             need = "hearts<=2" }
   end,
 })
 
@@ -365,14 +378,19 @@ function gt:travel_verdict_dump(gid, ascii)
 end
 
 -- ===== 免按键取证（调试模式）=====
--- 光标停在一个**会被拒**的房间上时，自动把整段判定过程 + 当前房间的门表写进 log.txt。
+-- 光标停在一个目标上时，自动把整段判定过程 + 门表写进 log.txt。
 -- 为什么要这个：2026-10-06 反复踩到「用户报问题 → 我请用户按 F4/截图 → 用户没按/截不全
 -- → 白跑一轮」。光标扫过去就落盘，把取证负担从用户挪回代码。
--- 按 (gid, 规则) 去重、每层清空，不会刷屏。
-local travel_reject_logged = {}
+--
+-- **被拒要记，挑战房被放行也要记** —— 放行同样可能判错。2026-10-06 实测就撞上过
+-- 「闸门关着却放行」，而那时取证只在被拒时落盘，于是这件事在日志里完全看不见。
+-- 去重键带上现场状态（门状态 / 血量 / 打完没），所以状态一变就是新的一行；
+-- 否则第一次那条「正常放行」会把后来的错判盖住（用户那次正是先正常、后错判）。
+-- 每层清空，量有界。
+local travel_probe_logged = {}
 
-function gt:travel_reset_reject_log()
-  travel_reject_logged = {}
+function gt:travel_reset_probe_log()
+  travel_probe_logged = {}
 end
 
 -- 当前房间每扇门的一行摘要（变体 / 开着没 / 算不算通路 / 通向哪）
@@ -396,14 +414,31 @@ function gt:travel_doors_dump()
   return #L > 0 and table.concat(L, "\n") or "  doors: none"
 end
 
-function gt:auto_log_travel_reject(gid, res)
-  if not gt:is_debug() or res.ok then return end
-  local key = tostring(gid) .. "|" .. tostring(res.rule)
-  if travel_reject_logged[key] then return end
-  travel_reject_logged[key] = true
-  local text = gt:travel_verdict_dump(gid, true)
-  Isaac.DebugString("[GTPtrip] rejected target (auto, no keypress needed)\n" ..
-    text .. "\n" .. gt:travel_doors_dump())
+-- 挑战房的现场探针：把判据依赖的输入全打出来（非挑战房返回 nil）
+function gt:challenge_probe(gid)
+  local s = gt:challenge_entry_state(gid)
+  if not s then return nil end
+  return string.format(
+    "  challengeProbe gid=%s door=%s isOpen=%s hearts=%s soul=%s black=%s " ..
+    "maxHearts=%s stage=%s challengeDone=%s",
+    tostring(gid), s.door and "yes" or "none", tostring(s.door_open),
+    tostring(s.hearts), tostring(s.soul), tostring(s.black),
+    tostring(s.maxhearts), tostring(s.stage), tostring(s.done))
+end
+
+function gt:auto_log_travel(gid, res)
+  if not gt:is_debug() then return end
+  local probe = gt:challenge_probe(gid)
+  if res.ok and not probe then return end   -- 放行的普通房间是常态，不记
+  local key = tostring(gid) .. "|" .. tostring(res.rule) .. "|" .. (probe or "")
+  if travel_probe_logged[key] then return end
+  travel_probe_logged[key] = true
+  local lines = { "[GTPtrip] " .. (res.ok and "allowed" or "rejected") ..
+    " target (auto, no keypress needed)  rule=" .. tostring(res.rule or "-") }
+  lines[#lines + 1] = gt:travel_verdict_dump(gid, true)
+  if probe then lines[#lines + 1] = probe end
+  lines[#lines + 1] = gt:travel_doors_dump()
+  Isaac.DebugString(table.concat(lines, "\n"))
 end
 
 -- ===== 屏幕理由浮层（仅调试模式）=====
