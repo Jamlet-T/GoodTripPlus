@@ -238,9 +238,12 @@ function gt:challenge_entry_state(gid)
     done = rd.ChallengeDone == true,
     door = door,
     door_open = open,
+    -- 全按**半心**计（官方文档：GetHearts / GetSoulHearts / GetMaxHearts 都是半心单位）
     hearts = p:GetHearts(),
     soul = p:GetSoulHearts(),
-    black = p:GetBlackHearts(),
+    -- ⚠️ 这是**位掩码**不是数量（官方文档原文：「并不返回黑心的数量；而是返回一个位掩码，
+    -- 用于表示哪些灵魂心是黑心」）。**绝不能把它加进血量总和** —— 原 Fixed 公式就是那么错的。
+    black_mask = p:GetBlackHearts(),
     maxhearts = p:GetMaxHearts(),
     stage = lvl and lvl:GetStage() or 0,
   }
@@ -248,26 +251,30 @@ end
 
 gt:add_travel_rule({
   id = "target.challenge_gate", stage = "target_entry", order = 60,
-  text = "目标是挑战房，但现在进不去（红心 > 1 颗）",
+  text = "目标是挑战房，而现在进不去（门关着 / 血量条件不满足）",
   test = function(ctx)
     local s = gt:challenge_entry_state(ctx.gid)
     if not s then return nil end                -- 非挑战房 / 玩家不可用
     if s.done then return nil end               -- 打完了的挑战房不再查条件（Fixed 原语义）
-    -- **唯一判据：红心 ≤ 1 颗（= 2 个半心）**，与游戏的门条件一致、**与层数无关**。
-    -- 真机实测三点（2026-10-06）：红心 0 → 门开；红心 1 → 门开；红心 2（满血）→ 门关。
-    --
-    -- ⚠️ 两个被实测推翻的写法，别再写回去：
-    --   ① Fixed 的奇偶分支（「偶数层要求 ≤1 心 / 其余层要求满血」）—— 在「2 心且满血的
-    --      奇数层」会放行，而游戏此时关着门。
-    --   ② 「当前房间通向目标的门 door:IsOpen() 为真就放行」—— 实测闸门关闭时它仍报 true，
-    --      于是闸门关着也能传进去（用户实测：进过一次没打完、再捡一颗心、2 心闸门关闭，
-    --      却依然能传）。所以**不拿 IsOpen() 当闸门**。
-    --      （它的值仍写进 detail 与 challenge_probe，供日后核对。）
-    if s.hearts <= 2 then return nil end
-    return { branch = "hearts", stage = s.stage, hearts = s.hearts,
-             soul = s.soul, black = s.black,
-             door = s.door and "yes" or "none", doorOpen = tostring(s.door_open),
-             need = "hearts<=2" }
+    -- ① **当前房间能看到那扇门时，门的状态就是游戏的答案。**
+    --    实测可靠：闸门关时 door:IsOpen()=false、开时 true（2026-10-06 真机日志）。
+    --    不要用血量公式去复刻游戏的规则 —— 那已经错过两次。
+    if s.door then
+      if s.door_open then return nil end
+      return { branch = "door_closed", stage = s.stage, hearts = s.hearts,
+               soul = s.soul, blackMask = s.black, need = "door open" }
+    end
+    -- ② 门不在当前房间（远距离传送 / 门还没学到）：退回血量近似。
+    --    ⚠️⚠️ 只能算 **红心 + 魂心**，绝不能加 GetBlackHearts() ——
+    --    官方文档原文：「这个函数并不返回黑心的数量；而是返回一个位掩码，用于表示哪些
+    --    灵魂心是黑心」。原 Fixed 公式写成 红+魂+黑，等于把位掩码加进血量总和，从根上是错的。
+    --    近似判据「总量 ≤ 1 心（= 2 个半心）」拟合了实测两点（1 颗魂心 → 门开；2 颗 → 门关），
+    --    但没有实测覆盖更多血量/层数组合，所以只当作**看不到门时**的兜底。
+    local half = s.hearts + s.soul
+    if half <= 2 then return nil end
+    return { branch = "hp_fallback", stage = s.stage, hearts = s.hearts,
+             soul = s.soul, blackMask = s.black, half = half,
+             need = "hearts+soul<=2" }
   end,
 })
 
@@ -419,10 +426,10 @@ function gt:challenge_probe(gid)
   local s = gt:challenge_entry_state(gid)
   if not s then return nil end
   return string.format(
-    "  challengeProbe gid=%s door=%s isOpen=%s hearts=%s soul=%s black=%s " ..
-    "maxHearts=%s stage=%s challengeDone=%s",
+    "  challengeProbe gid=%s door=%s isOpen=%s hearts=%s soul=%s blackMask=%s " ..
+    "maxHearts=%s stage=%s challengeDone=%s  (hearts/soul/maxHearts 皆为半心，blackMask 是位掩码不是数量)",
     tostring(gid), s.door and "yes" or "none", tostring(s.door_open),
-    tostring(s.hearts), tostring(s.soul), tostring(s.black),
+    tostring(s.hearts), tostring(s.soul), tostring(s.black_mask),
     tostring(s.maxhearts), tostring(s.stage), tostring(s.done))
 end
 
