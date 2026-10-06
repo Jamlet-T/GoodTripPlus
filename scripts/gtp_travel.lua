@@ -422,15 +422,45 @@ function gt:travel_doors_dump()
 end
 
 -- 挑战房的现场探针：把判据依赖的输入全打出来（非挑战房返回 nil）
+--
+-- ⚠️ **两种挑战房**：`RoomType.ROOM_CHALLENGE (11)` 的文档注释区分了「普通挑战房」与
+-- 「头目挑战房」两种变体（引用两个不同图标）。本探针打出 variant / subtype / name /
+-- flags / 房间生成表摘要，就是为了在日志里**认出是哪一种** —— 不要假设它们同一套条件。
 function gt:challenge_probe(gid)
   local s = gt:challenge_entry_state(gid)
   if not s then return nil end
+  local rd = gt:grid_room_desc(gid)
+  local kind = "?"
+  pcall(function()
+    local d = rd and rd.Data or {}
+    local parts = {}
+    parts[#parts + 1] = "variant=" .. tostring(d.Variant)
+    parts[#parts + 1] = "subtype=" .. tostring(d.Subtype)
+    parts[#parts + 1] = "name=" .. tostring(d.Name)
+    parts[#parts + 1] = "flags=" .. tostring(rd and rd.Flags)
+    -- 房间生成表摘要（前 12 项 type/variant）—— 头目挑战房里应该有 boss 级条目
+    local sp = {}
+    local list = d.Spawns
+    if list then
+      local n = list.Size or #list
+      for i = 0, n - 1 do
+        local e = (list.Get and list:Get(i)) or list[i + 1]
+        if e then
+          sp[#sp + 1] = tostring(e.Type) .. "/" .. tostring(e.Variant)
+          if #sp >= 12 then break end
+        end
+      end
+    end
+    parts[#parts + 1] = "spawns=[" .. (#sp > 0 and table.concat(sp, " ") or "none") .. "]"
+    kind = table.concat(parts, " ")
+  end)
   return string.format(
     "  challengeProbe gid=%s door=%s isOpen=%s hearts=%s soul=%s blackMask=%s " ..
-    "maxHearts=%s stage=%s challengeDone=%s  (hearts/soul/maxHearts 皆为半心，blackMask 是位掩码不是数量)",
+    "maxHearts=%s stage=%s challengeDone=%s  (hearts/soul/maxHearts 皆为半心；blackMask 是位掩码)\n" ..
+    "    roomKind: %s",
     tostring(gid), s.door and "yes" or "none", tostring(s.door_open),
     tostring(s.hearts), tostring(s.soul), tostring(s.black_mask),
-    tostring(s.maxhearts), tostring(s.stage), tostring(s.done))
+    tostring(s.maxhearts), tostring(s.stage), tostring(s.done), kind)
 end
 
 function gt:auto_log_travel(gid, res)
