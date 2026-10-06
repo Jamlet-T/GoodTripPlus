@@ -251,30 +251,37 @@ end
 
 gt:add_travel_rule({
   id = "target.challenge_gate", stage = "target_entry", order = 60,
-  text = "目标是挑战房，而现在进不去（门关着 / 血量条件不满足）",
+  text = "目标是挑战房，而当前血量不满足它的进入条件",
   test = function(ctx)
     local s = gt:challenge_entry_state(ctx.gid)
     if not s then return nil end                -- 非挑战房 / 玩家不可用
     if s.done then return nil end               -- 打完了的挑战房不再查条件（Fixed 原语义）
-    -- ① **当前房间能看到那扇门时，门的状态就是游戏的答案。**
-    --    实测可靠：闸门关时 door:IsOpen()=false、开时 true（2026-10-06 真机日志）。
-    --    不要用血量公式去复刻游戏的规则 —— 那已经错过两次。
-    if s.door then
-      if s.door_open then return nil end
-      return { branch = "door_closed", stage = s.stage, hearts = s.hearts,
-               soul = s.soul, blackMask = s.black, need = "door open" }
+    -- 血量总和 = **红心 + 魂心**（两者都是半心单位）。
+    -- ⚠️⚠️ 绝不能加 GetBlackHearts() —— 官方文档原文：「这个函数并不返回黑心的数量；
+    --      而是返回一个**位掩码**」。原 Fixed 的 `红+魂+黑` 就错在这里，而且这一个错
+    --      把两种挑战房都带偏了（这条规则因此改了四轮）。
+    local hp = s.hearts + s.soul
+    -- ★ 判据就是**层数奇偶**（用户 2026-10-06 明确）—— 因为挑战房有两种，
+    --   而种类由出现楼层决定（所以奇偶 == 种类）：
+    --     普通挑战房 = 每章**第一层**（奇数 stage，含合并楼层）→ 要求**满血**
+    --     头目挑战房 = 每章**第二层**（偶数 stage；stage 10 特例除外）→ 要求 **≤1 心**
+    --   也就是说 Fixed 的奇偶分支本来就是对的，只有上面那处位掩码是 bug。
+    --   实测两例（stage=4 头目房）：红+魂=2 → 闸门开；红+魂=4 → 闸门关 —— 与本节判据一致。
+    if s.stage % 2 == 0 and s.stage ~= 10 then
+      -- 头目挑战房：hp > 2 就拒绝 ⇒ 放行要求 ≤1 心（= 2 个半心）
+      if hp <= 2 then return nil end
+      return { branch = "boss_challenge(hp<=2)", stage = s.stage, hp = hp,
+               hearts = s.hearts, soul = s.soul, blackMask = s.black_mask,
+               door = s.door and tostring(s.door_open) or "none", need = "hp<=2" }
     end
-    -- ② 门不在当前房间（远距离传送 / 门还没学到）：退回血量近似。
-    --    ⚠️⚠️ 只能算 **红心 + 魂心**，绝不能加 GetBlackHearts() ——
-    --    官方文档原文：「这个函数并不返回黑心的数量；而是返回一个位掩码，用于表示哪些
-    --    灵魂心是黑心」。原 Fixed 公式写成 红+魂+黑，等于把位掩码加进血量总和，从根上是错的。
-    --    近似判据「总量 ≤ 1 心（= 2 个半心）」拟合了实测两点（1 颗魂心 → 门开；2 颗 → 门关），
-    --    但没有实测覆盖更多血量/层数组合，所以只当作**看不到门时**的兜底。
-    local half = s.hearts + s.soul
-    if half <= 2 then return nil end
-    return { branch = "hp_fallback", stage = s.stage, hearts = s.hearts,
-             soul = s.soul, blackMask = s.black, half = half,
-             need = "hearts+soul<=2" }
+    -- 普通挑战房：hp < GetMaxHearts() 就拒绝 ⇒ 放行要求满血
+    -- （这一支**没有实测数据**覆盖；沿用 Fixed 的比较形状，只去掉位掩码。若日后发现
+    --  它不对，请按实测改，并把这个注释换成实测记录。）
+    if hp >= s.maxhearts then return nil end
+    return { branch = "challenge(hp>=max)", stage = s.stage, hp = hp,
+             maxhearts = s.maxhearts, hearts = s.hearts, soul = s.soul,
+             door = s.door and tostring(s.door_open) or "none",
+             need = "hp>=" .. tostring(s.maxhearts) }
   end,
 })
 
