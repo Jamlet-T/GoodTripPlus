@@ -827,8 +827,10 @@ end
 --   · gtconfig.lua 的 `gt.DebugMod = true` —— 开发者文件级开关。**故意让它优先于 MCM**：
 --     没装 MCM 时也能开，且不会被 MCM 注册时写入的默认 false 顶掉（MCM 的 Config 在注册瞬间
 --     就被填成默认值，普通选项都是 MCM 覆盖文件；调试开关反过来，免得改文件却没反应）。
--- 开启后只做一件事：**输出诊断**——按住地图键自动弹浮层、解锁「按住地图键 + 键盘 F4」
---   手动 dump、各模块往控制台 / log.txt 写诊断行。关着时以上全部静默（不画、不写 log）。
+-- 开启后只做一件事：**输出诊断**——光标停在目标上即自动落盘（`[GTPtrip]`）、
+--   解锁「按住地图键 + 键盘 F4」的手动 dump、屏幕上画**红色**的实时理由浮层
+--   （黄底的一次性 dump 浮层 2026-10-06 已删）、各模块往控制台 / log.txt 写诊断行。
+--   关着时以上全部静默（不画、不写 log）。
 -- ⚠️ 它**绝不改变任何传送判定或传送表现**（2026-10-06 用户拍板）。历史遗留的几处
 --   「debug 下放行 / 跳过」已全部移除：不再绕过保护性禁传（道具入口 / 奖励房门 / 诅咒房）、
 --   不再强制「立即出现」跳过过场、不再豁免诅咒房过路费、呼出光标的闸门也不再为它开绿灯。
@@ -1354,8 +1356,8 @@ end
 -- minimap art was painted on top of it afterwards, making the cursor appear
 -- to be stuck underneath the map with REPENTOGON installed.
 function gt:render_cursor()
-    gt:render_diag_overlay() -- 诊断浮层（画在 HUD 之上，与地图是否按住无关）
-    -- 调试模式下的实时拒绝理由（由 gtp_travel 提供；模块不在时跳过）
+    -- 调试模式下的实时拒绝理由（由 gtp_travel 提供；模块不在时跳过）。
+    -- 这是屏幕上唯一的诊断显示（黄色的一次性 dump 浮层 2026-10-06 已删）。
     if gt.render_travel_reason then
       gt:render_travel_reason(mmp_ctrl_pos, mmp_ctrl)
     end
@@ -1400,7 +1402,7 @@ function gt:tab_action()
     --    IsButtonTriggered 的手柄按钮码是「低位编号、超过 31 回绕」（见 enums 的 Controller，
     --    0=D_PAD_LEFT … 5=BUTTON_B …），而 Keyboard.KEY_F4 = 293，293 % 32 = 5 = 手柄 B 键。
     --    传手柄索引时这条判定会退化成「查该手柄的 B 键」，手柄玩家边按地图键边按到 B
-    --    就误判成 F4、弹出这份黄字浮层（2026-10-05 玩家实测）。键盘热键一律用索引 0。
+    --    就误判成 F4、白跑一次 dump（2026-10-05 玩家实测）。键盘热键一律用索引 0。
     if gt:is_debug()
         and Input.IsButtonTriggered(Keyboard.KEY_F4, 0)
         and Game():GetFrameCount() - last_diag_frame > 20 then
@@ -1440,11 +1442,6 @@ function gt:tab_action()
 end
 --
 function gt:step()
-    -- 控制台命令请求的浮层延到这一帧（渲染阶段）才弹：命令处理阶段不碰 Font/资源
-    if gt.diag_pending_overlay then
-      gt:show_diag_overlay(gt.diag_pending_overlay)
-      gt.diag_pending_overlay = nil
-    end
     --a wall can open under the player's feet (bomb, red key), so sweep every
     --tick; but not mid-transition, when the live room and the cached descriptor disagree
     if level:GetCurrentRoomDesc().SafeGridIndex == crid then
@@ -2024,7 +2021,7 @@ function gt:adjacent_secret_gid()
 end
 
 function gt:auto_log_secret_diag(gid)
-  -- 只在调试模式下自动弹诊断（MCM 的 Debug Mode 开关，或 gtconfig.lua 的 gt.DebugMod = true）：
+  -- 只在调试模式下自动落盘（MCM 的 Debug Mode 开关，或 gtconfig.lua 的 gt.DebugMod = true）：
   -- 正式游玩时不往 log.txt 写这些行，免得每次瞄隐藏房都刷十几行；
   -- 「按住地图键 + 键盘 F4」的手动 dump 同样归这个开关管（2026-10-05 起）。
   if not gt:is_debug() then
@@ -2043,7 +2040,7 @@ function gt:auto_log_secret_diag(gid)
     return
   end
   secret_diag_logged[key] = true
-  -- DebugMod 下：屏幕浮层 + 控制台 + log.txt 一次给全，连按键都不用
+  -- DebugMod 下：控制台 + log.txt 一次给全，连按键都不用（不再画屏幕浮层）
   gt:console_dump_diag(gid, "secretDiag")
 end
 
@@ -2060,17 +2057,19 @@ function gt:get_minapi_display_flags(listIndex)
   return nil
 end
 
--- ===== 屏幕诊断浮层 =====
+-- ===== 诊断字体 =====
 -- 控制台命令在部分环境（REPENTOGON 的 ImGui「Repentance+ Console」）里不会
 -- 分发给 MC_EXECUTE_CMD —— 实测输入 gtpdiag 触发不了我们的回调（log 里连
--- 「命令触发了」的留痕都没有），所以再给一条**一定看得见**的输出路：
--- 把最近一次 dump 直接画在屏幕左上角（15 秒后自动消失），同时照旧写 log.txt。
+-- 「命令触发了」的留痕都没有）。所以诊断一律走**控制台 + log.txt** 两条路。
+--
+-- 注：曾经还有一条「把 dump 画在屏幕左上角、15 秒后消失」的**黄色浮层**。
+-- 2026-10-06 按用户要求**删除** —— 它只是挡视线，而同样的内容 log.txt 里读得到。
+-- **屏幕上只剩红色的「传送理由浮层」**（gtp_travel，跟着光标实时变、松手即消失）。
 local diag_font = nil
-local diag_overlay_lines = nil
-local diag_overlay_until = 0
 
--- 诊断字体（惰性加载一次）。既有的诊断浮层与传送理由浮层（gtp_travel）共用，
--- 免得同一个字体加载两遍。
+-- 诊断字体（惰性加载一次）。供红色理由浮层用。
+-- ⚠️ `font/terminus.fnt` 是**位图 ASCII 字体，画不出中文** —— 屏幕路径上只能放 ASCII，
+-- 中文散文留在 log.txt / 控制台。
 function gt:get_diag_font()
   if not diag_font then
     local ok, font = pcall(function()
@@ -2084,33 +2083,6 @@ function gt:get_diag_font()
     diag_font = font
   end
   return diag_font
-end
-
-function gt:show_diag_overlay(text, frames)
-  if not gt:get_diag_font() then
-    return
-  end
-  local lines = {}
-  for line in tostring(text):gmatch("[^\n]+") do
-    lines[#lines + 1] = line
-  end
-  diag_overlay_lines = lines
-  diag_overlay_until = Game():GetFrameCount() + (frames or 900)
-end
-
-function gt:render_diag_overlay()
-  if not diag_overlay_lines or not diag_font then
-    return
-  end
-  if Game():GetFrameCount() > diag_overlay_until then
-    diag_overlay_lines = nil
-    return
-  end
-  local y = 34
-  for i = 1, #diag_overlay_lines do
-    diag_font:DrawString(diag_overlay_lines[i], 16, y, KColor(1, 1, 0.35, 1), 0, false)
-    y = y + 11
-  end
 end
 
 -- 逐行把诊断文本写进控制台输出缓冲（Isaac.ConsoleOutput 不认多行字符串，
@@ -2127,9 +2099,8 @@ end
 -- （2026-10-03 实测：日志里我们的输出打印完立刻 "Lua stack trace:"（空栈）+
 -- "Caught exception, writing minidump..."；同一环境里 MinimapAPI 的 mapitel
 -- 返回 nil 就能正常工作）。所以只走 ConsoleOutput（逐行直写，安全）+ DebugString，
--- 不碰返回值。defer_overlay：控制台回调里不立刻建 Font（免得在命令处理阶段
--- 碰资源），改成下一帧走渲染阶段再弹浮层。
-function gt:console_dump_diag(gid, tag, defer_overlay)
+-- 不碰返回值。**不再画屏幕浮层**（黄色那条 2026-10-06 已删）。
+function gt:console_dump_diag(gid, tag)
   local ok, result = pcall(gt.dump_tele_diag, gt, gid)
   if not ok then
     result = "teleDiag ERROR: " .. tostring(result)
@@ -2139,18 +2110,12 @@ function gt:console_dump_diag(gid, tag, defer_overlay)
     "\n===== " .. name .. " END ====="
   gt_console_out(result)
   Isaac.DebugString(result)
-  if defer_overlay then
-    gt.diag_pending_overlay = result
-  else
-    gt:show_diag_overlay(result)
-  end
 end
 
 -- 控制台诊断命令：gtpdiag [格子编号]（缺省 = 光标所在格子）、gtmapdiag；gtpd 是简写。
 -- 输出通道（**不要返回字符串**，见上）：
 --   ConsoleOutput  —— 逐行直写控制台输出（MinimapAPI 的 mapitel 也是这么做的，安全）
 --   DebugString    —— 落 log.txt（最可靠的一条）
---   （浮层延到下一帧渲染阶段弹，见 defer_overlay）
 -- 两个坑：①回调签名是 (Mod, command, args)，command 只有命令词，格子编号在 args 里；
 -- ②原版控制台要**再按一次回车 / 输入别的**才会把这批行刷出来，看到「没输出」先别急。
 gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command, args)
@@ -2176,7 +2141,7 @@ gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command, args)
     return
   end
   local gid = rest ~= "" and tonumber(rest) or nil
-  gt:console_dump_diag(gid, "gtpdiag v" .. tostring(gt.VERSION), true)
+  gt:console_dump_diag(gid, "gtpdiag v" .. tostring(gt.VERSION))
 end)
 --
 -- Draw the cursor on whichever render callback MinimapAPI itself draws its

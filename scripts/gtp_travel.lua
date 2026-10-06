@@ -493,8 +493,9 @@ end
 -- 为什么一次印一整段而不是一句话：2026-10-06 实测教训 —— 原来只印一句中文理由，
 -- 而诊断字体画不出中文，用户屏幕上只剩 "gid=35"，什么也判断不了。
 -- 印成 ASCII 的整段判定，一张截图就能定位到规则与它的入参。
--- 为什么不复用 gt:show_diag_overlay：那个是给一次性 dump 用的帧数生存期浮层，
--- 这里是「跟着光标实时变、松手即消失」。
+-- 为什么不复用一次性 dump 的那条路：那条浮层是**帧数生存期**的（要等 15 秒才消失），
+-- 而这里是「跟着光标实时变、松手即消失」。另外那条黄色浮层已于 2026-10-06 整体删除
+-- （只挡视线，内容 log.txt 里都有），所以屏幕上的诊断显示**只剩这一条**。
 function gt:render_travel_reason(cursor_pos, cursor_active)
   if not gt:is_debug() or not cursor_active then return end
   local font = gt:get_diag_font()
