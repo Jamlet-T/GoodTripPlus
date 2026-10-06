@@ -177,9 +177,37 @@ function gt:is_secret_room(rd)
     return t == 7 or t == 8 or t == 29
 end
 
+-- 变体表（DoorVariant，见 enums）：
+--   0 UNSPECIFIED / 1 LOCKED / 2 LOCKED_DOUBLE / 3 LOCKED_CRACKED /
+--   4 LOCKED_BARRED / 5 LOCKED_KEYFAMILIAR / 6 LOCKED_GREED / 7 HIDDEN / 8 UNLOCKED
+-- 这里用数字字面量而不是 DoorVariant.DOOR_LOCKED 之类的名字：**不确定那些枚举名在
+-- 这个 API 版本里都有**（只有 DOOR_HIDDEN 是现用代码验证过的），索引不存在的名字会直接崩。
+--
+-- 约定：0 与 8 是通的；1..6（要钥匙等额外条件）与 7（没炸开的墙）不算通路 ——
+-- 传送不该绕过「还打不开的门」。这是 2026-10-06 用户要求：
+-- **商店上锁时传不进去，解锁之后才行**。
+--
+-- ⚠️ 两条待实测确认（gtpdiag 的门表会逐门打印 variant / isOpen / 本函数的判定）：
+--   ① 用钥匙开过的门，variant 是否真的变成 8；
+--   ② boss 房清完后门开着，variant 会不会仍写着 LOCKED —— 这条由下面的
+--      `door:IsOpen()` 兜底（门实际开着就一律算通，避免误判把已清房封死）。
+local LOCKED_DOOR_VARIANTS = {
+  [1] = true, [2] = true, [3] = true, [4] = true, [5] = true, [6] = true, [7] = true,
+}
+
+-- 这扇门算不算「实际通路」
+function gt:door_is_passage(door)
+  if not LOCKED_DOOR_VARIANTS[door.Desc.Variant] then
+    return true
+  end
+  return door:IsOpen() == true
+end
+
 --read the current room's doors (the only room the game answers for) into the
---graph both ways. DOOR_HIDDEN is an unbombed wall, so no passage; everything
---else, locked included, is walkable. All read live so nothing is from different moments.
+--graph both ways. DOOR_HIDDEN is an unbombed wall, so no passage; locked doors
+--are no passage either (a trip must not bypass a door nobody has opened yet --
+--2026-10-06, the user: a locked shop must not be enterable, an unlocked one must).
+--Everything else is walkable. All read live so nothing is from different moments.
 function gt:sweep_doors()
     local live = Game():GetRoom()
     local lvl = Game():GetLevel()
@@ -189,9 +217,9 @@ function gt:sweep_doors()
     swept[here] = true
     for i = 0, 7 do
       local door = live:GetDoor(i)
-      --DOOR_HIDDEN is an unbombed wall, so no passage; everything
-      --else, locked included, is walkable. All read live so nothing is from different moments.
-      --（实测：炸开之后 variant 会变成 8，所以这行判据本身就够用，别再加「已炸开」判据）
+      --DOOR_HIDDEN is an unbombed wall, so no passage; locked doors are no passage
+      --either (see gt:door_is_passage). All read live so nothing is from different moments.
+      --（实测：炸开之后 variant 会变成 8，所以这条判据本身就够用，别再加「已炸开」判据）
       if door and door.Desc.Variant ~= DoorVariant.DOOR_HIDDEN then
         local tdes = lvl:GetRoomByIdx(door.TargetRoomIndex, -1)
         if tdes then
@@ -203,7 +231,7 @@ function gt:sweep_doors()
           elseif live:GetType() == RoomType.ROOM_CURSE then
             curse_bare_inside[here] = door.VarData ~= 0
           end
-          if there ~= here then
+          if there ~= here and gt:door_is_passage(door) then
             --this end knows its slot; the far end gets a bare mark until its own turn
             link[here][there] = i
             link[there] = link[there] or {}
@@ -263,55 +291,25 @@ function gt:get_room_neighbours()
     end
 end
 
--- 「已显示但未探索的目标」的类型放行名单。
--- 原本长在 check_neigh_connected 里，2026-10-06 抽成独立谓词给判定规则复用
--- （规则 target.type_gate）—— 条件一字未改，只是从「全部成立才拒绝」的否定式
--- 改写成「任一放行条件成立就放行」。
+-- 注：这里原来有一份「已显示但未探索目标的类型白名单」（Fixed 原逻辑：
+-- 只放普通房 1 / boss 5 / 小 boss 6 / 献祭 13，另加红钥匙房、隐藏房、镜像世界与
+-- 一层的水层商店宝箱房）。它已于 2026-10-06 **整体删除**（用户决定，原计划排在步 2，
+-- 因实测报出「门已用钥匙打开、还没进去过的商店/宝藏房/星象房/挑战房传不进去」而提前）：
 --
--- 本 mod 对 Fixed 的两处偏离（理由 + 实测）：
---   ① 隐藏房(7/8/29)：Fixed 的白名单只放普通房(1)/boss(5)/小 boss(6)/献祭(13)，
---      隐藏房不在里面 → **洞口已经炸开**的隐藏房照样被拦（用户报的「炸开隐藏房传不进去」）。
---      放行后安全性由调用方保证：最后一步要求 rooms_linked(邻居, 目标)，而实测炸开洞口
---      在门图里有真门（variant 7 -> 8），没炸开的墙没有 → 「已炸开的能进、还封着的进不去」。
---   ② 诅咒房(10)：同样不在白名单里 → 「相邻房间」档永远传不进没探索过的诅咒房。
---      可 BlockCurseRoom 关掉时用户的期望就是「诅咒房按普通房间处理」，白名单却把它拦在
---      准入本体里（用户实测报的 bug）。所以关掉时也放行类型 10，安全性同样交给后面那串
---      邻居条件（已显示 + 邻居已清且可达 + rooms_linked 真门）兜底。
--- 返回 true = 放行。
-function gt:unexplored_target_allowed(rd)
-    if rd.VisitedCount > 0 and rd.Clear then
-      return true   -- 已探索且已清怪：走「通道 B」，不归名单管
-    end
-    if rd.Flags & RoomDescriptor.FLAG_RED_ROOM ~= 0 then
-      return true   -- 红钥匙房：门本来就开着，不管里面是什么
-    end
-    if gt:is_secret_room(rd) then
-      return true   -- 隐藏房 7/8/29（见上 ①）
-    end
-    if rd.Data.Type == 10 and not gt:block_curse_room() then
-      return true   -- 诅咒房（见上 ②）
-    end
-    local t = rd.Data.Type
-    if t == 1 or t == 5 or t == 6 or t == 13 then
-      return true   -- 普通房 / boss / 小 boss / 献祭
-    end
-    -- 一层普通层（非忏悔版本）与水层镜像世界的商店(2)/宝箱房(4) 免费通行
-    if (((stage == 1 and level:GetStageType() < StageType.STAGETYPE_REPENTANCE) or room:IsMirrorWorld())
-        and ((not Game():IsGreedMode() and t == 4) or t == 2)) then
-      return true
-    end
-    return false
-end
-
+--   删它的理由：恶魔房/天使房/Boss Rush/黑市/贪婪出口本来就不会显示在地图上，
+--   「目标必须已显示」这条已经排除它们，白名单对它们是重复劳动；而副作用是把
+--   「门已开着、能走进去」的房间也拒了（二层以后的商店、已解锁的图书馆/骰子房/街机厅）。
+--   正确的窗口应该是**实际通路**：见 gt:door_is_passage —— 门锁着就不算通路，
+--   解锁之后才算。安全性不再依赖房间类型，而是「那扇门现在能不能走」。
+--
+-- 于是「未探索的相邻房能不能传」现在只由 ③ range 段决定：目标已显示 + 旁边有
+-- 「已显示 + 已探索 + 已清」的房 + 两者之间有**实际通路**。
+--
 --may I go there: the predicates a trip is checked against, the reachable set,
 --the fair distance, the door a walk would have come in by.
 function gt:check_neigh_connected(trd, cond)
     local tid = trd.SafeGridIndex
     if (trd.DisplayFlags & 1) ~= 0 then
-      -- 类型放行名单已抽到 gt:unexplored_target_allowed（理由与偏离说明都在那里）
-      if not gt:unexplored_target_allowed(trd) then
-        return false
-      end
       local function check_grid(off)
         local id = tid + off
         if id < 0 or id > 168 then
@@ -1916,15 +1914,18 @@ function gt:dump_tele_diag(gid)
     local door = room:GetDoor(i)
     if door then
       local busted, canblow, isopen = "-", "-", "-"
+      local passage = "-"
       pcall(function()
         busted = tostring(door.IsBusted and door:IsBusted() or door.Busted)
         canblow = tostring(door.CanBlowOpen and door:CanBlowOpen())
         isopen = tostring(door:IsOpen())
+        passage = tostring(gt:door_is_passage(door))
       end)
       p("  door slot=" .. i ..
         " variant=" .. tostring(door.Desc and door.Desc.Variant) ..
         " busted=" .. busted .. " canBlowOpen=" .. canblow ..
         " isOpen=" .. isopen ..
+        " passage=" .. passage ..
         " targetIdx=" .. tostring(door.TargetRoomIndex) ..
         " targetType=" .. tostring(door.TargetRoomType))
     end

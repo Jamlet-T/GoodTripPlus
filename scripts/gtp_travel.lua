@@ -78,27 +78,35 @@ end
 
 -- ===== 影子对照（临时：步 1c 删除）=====
 -- _legacy = 2.2.3 判定逻辑的逐行转写（check_teleble 本体 + 两个包装，包装在外），
--- 唯一改动是「读 gtrep 文件级 local」改为读访问器。返回 boolean。
--- 只在调试模式打开时与新判定同时跑，结论不一致就写 log（按 gid+规则去重防刷屏）。
+-- 唯一改动是「读 gtrep 文件级 local」改为读访问器。返回 (boolean, 理由标签)。
+-- 只在调试模式打开时与新判定同时跑，结论不一致就写 log（按 gid+理由去重防刷屏）。
 --
--- 上移进判定层的那四条规则**本来就是故意改的**（它们以前在执行层），
--- 所以它们造成的差异标 EXPECTED，不计入 MISMATCH。目标是真机跑一局后
--- 「零 MISMATCH」。
+-- **预期差异有两类，都不计入 MISMATCH：**
+--   ① 上移进判定层的那四条规则造成的（它们以前在执行层，是我们故意改的）；
+--   ② 旧判定因**类型白名单**拒绝、而新判定放行 —— 白名单已按用户要求整体删除，
+--      改由「那扇门现在能不能走」把关（gtrep 的 gt:door_is_passage）。
+-- 目标：真机跑一局后零 MISMATCH。
 local EXPECTED_DIFF = {
   ["departure.mothers_shadow"] = true,
   ["departure.mom_room"]       = true,
   ["target.challenge_gate"]    = true,
   ["path.walk_time"]           = true,
 }
+local EXPECTED_ALLOW = {
+  unexplored_type_gate = true,
+}
 
 local shadow_seen = {}
 gt.shadow_mismatch_count = 0
 
-function gt:shadow_check(gid, res, old_ok)
+function gt:shadow_check(gid, res, old_ok, old_why)
   if res.ok == old_ok then return end
-  local key = tostring(gid) .. "|" .. tostring(res.rule)
+  local key = tostring(gid) .. "|" .. tostring(res.rule or "-") .. "|" ..
+    tostring(old_why)
   local tag = "MISMATCH"
   if (not res.ok) and EXPECTED_DIFF[res.rule] then
+    tag = "EXPECTED"
+  elseif res.ok and EXPECTED_ALLOW[old_why] then
     tag = "EXPECTED"
   end
   if tag == "MISMATCH" then
@@ -107,8 +115,27 @@ function gt:shadow_check(gid, res, old_ok)
   if shadow_seen[key] then return end
   shadow_seen[key] = true
   Isaac.DebugString(string.format(
-    "[GTPshadow] %s gid=%s new=%s old=%s", tag, tostring(gid),
-    tostring(res.rule or "ok"), tostring(old_ok)))
+    "[GTPshadow] %s gid=%s new=%s old=%s(%s)", tag, tostring(gid),
+    tostring(res.rule or "ok"), tostring(old_ok), tostring(old_why)))
+end
+
+-- 2.2.3 类型白名单的原样副本。生产代码已把它删了（见 gtrep 里那段说明），
+-- 但 _legacy 要复现旧行为，所以自己带一份。**与 _legacy 一起在步 1c 删除。**
+local function _legacy_type_gate(rd)
+  if rd.VisitedCount > 0 and rd.Clear then return true end
+  if rd.Flags & RoomDescriptor.FLAG_RED_ROOM ~= 0 then return true end
+  if gt:is_secret_room(rd) then return true end
+  local t = rd.Data.Type
+  if t == 10 and not gt:block_curse_room() then return true end
+  if t == 1 or t == 5 or t == 6 or t == 13 then return true end
+  local lvl = gt:travel_cur_state().level
+  if lvl and (((lvl:GetStage() == 1
+          and lvl:GetStageType() < StageType.STAGETYPE_REPENTANCE)
+        or lvl:IsMirrorWorld())
+      and ((not Game():IsGreedMode() and t == 4) or t == 2)) then
+    return true
+  end
+  return false
 end
 
 -- 2.2.3 判定的逐行转写。每条都能在 git 的 gtrep.lua:543-598（check_teleble）
@@ -120,45 +147,53 @@ local function _legacy(gid)
   -- 包装层（原加载顺序：gtp_curseblock 在最外、gtp_bosswindow 在里；两者都拦任何 gid）
   if gt:block_curse_room() and type(gid) == "number" and gid >= 0 and gid <= 168 then
     local rd = gt:room_desc_at(gid)
-    if rd and rd.Data and rd.Data.Type == RoomType.ROOM_CURSE then return false end
+    if rd and rd.Data and rd.Data.Type == RoomType.ROOM_CURSE then
+      return false, "curse_block"
+    end
   end
   if level and not level:IsAscent() and gt.has_reward_door and gt:has_reward_door() then
-    return false
+    return false, "reward_door"
   end
 
   -- 本体
-  if gid == -99
-      or (not gt:curse_map_visible()
-          and (level:GetCurses() & LevelCurse.CURSE_OF_THE_LOST) ~= 0) then
-    return false
-  elseif gt:start_room_lock() then
-    return false
+  if gid == -99 then return false, "no_target" end
+  if (not gt:curse_map_visible()
+      and (level:GetCurses() & LevelCurse.CURSE_OF_THE_LOST) ~= 0) then
+    return false, "lost_curse"
   end
+  if gt:start_room_lock() then return false, "item_entrance" end
   local cid = cur.SafeGridIndex
   if gt:grid_room_desc(cid) == nil or not cur.Clear then
-    return false
-  elseif (cur.Data.Type == 6 or cur.Data.Type == 11) then
-    if not gt:check_room_open() then return false end
+    return false, "cur_uncleared"
   end
-  if gid == false then return true end
+  if (cur.Data.Type == 6 or cur.Data.Type == 11) and not gt:check_room_open() then
+    return false, "cur_door_closed"
+  end
+  if gid == false then return true, "ok" end
   -- 读的就是 grid_room，不是 GetRoomByIdx
-  if gt:grid_room_desc(gid) == nil then return false end
+  if gt:grid_room_desc(gid) == nil then return false, "unknown_cell" end
   local trd = gt:grid_room_desc(gid)
-  if trd.ListIndex == cur.ListIndex then return false end
+  if trd.ListIndex == cur.ListIndex then return false, "same_room" end
   local travel_mode = gt:get_travel_mode()
-  if travel_mode == 1 then return true end
+  if travel_mode == 1 then return true, "mode1" end
   local reach = gt:get_config_bool("FairTripPath", true) and gt:get_reachable_rooms() or nil
   if trd.VisitedCount > 0 and trd.Clear
       and (not reach or reach[trd.SafeGridIndex] == true) then
-    return true
-  elseif travel_mode == 3 then
-    return false
+    return true, "channel_b"
   end
-  return gt:check_neigh_connected(trd, function(rd)
+  if travel_mode == 3 then return false, "mode3" end
+  -- 旧实现的 check_neigh_connected 里含类型白名单，生产代码已删 → 这里自己判一次
+  if (trd.DisplayFlags & 1) ~= 0 and not _legacy_type_gate(trd) then
+    return false, "unexplored_type_gate"
+  end
+  if gt:check_neigh_connected(trd, function(rd)
       return (rd.DisplayFlags & 1 ~= 0) and rd.VisitedCount > 0 and rd.Clear
         and (not reach or (reach[rd.SafeGridIndex]
           and gt:rooms_linked(rd.SafeGridIndex, trd.SafeGridIndex)))
-  end)
+    end) then
+    return true, "channel_c"
+  end
+  return false, "channel_c_failed"
 end
 
 -- ===== 判定上下文 =====
@@ -203,7 +238,8 @@ end
 function gt:can_open_cursor()
   local res = gt:run_travel_stages({ "departure" }, gt:travel_ctx(nil))
   if gt:is_debug() then
-    gt:shadow_check(false, res, _legacy(false))
+    local old_ok, old_why = _legacy(false)
+    gt:shadow_check(false, res, old_ok, old_why)
   end
   return res
 end
@@ -212,7 +248,8 @@ end
 function gt:can_travel_to(gid)
   local res = gt:run_travel_stages(gt.travel_stages, gt:travel_ctx(gid))
   if gt:is_debug() then
-    gt:shadow_check(gid, res, _legacy(gid))
+    local old_ok, old_why = _legacy(gid)
+    gt:shadow_check(gid, res, old_ok, old_why)
   end
   return res
 end
@@ -310,18 +347,6 @@ gt:add_travel_rule({
   test = function(ctx)
     if ctx.target.ListIndex ~= ctx.cur.ListIndex then return nil end
     return { list_index = ctx.target.ListIndex }
-  end,
-})
-
-gt:add_travel_rule({
-  id = "target.type_gate", stage = "target_entry", order = 50,
-  text = "目标是「已显示但还没探索」的房型，不在放行名单里",
-  test = function(ctx)
-    -- 目标已显示才走名单（没显示的由 ③ 段拒，理由更准）
-    if (ctx.target.DisplayFlags & 1) == 0 then return nil end
-    if gt:unexplored_target_allowed(ctx.target) then return nil end
-    return { type = ctx.target.Data.Type, visited = ctx.target.VisitedCount,
-             clear = ctx.target.Clear, flags = ctx.target.Flags }
   end,
 })
 
