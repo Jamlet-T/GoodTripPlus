@@ -45,10 +45,10 @@ gt.TravelMode = 2
 --   true（默认） = 任何传送范围档位都不允许把目标落在诅咒房上（「任意房间」档也拦）；
 --   false        = 不拦，诅咒房按普通房间处理（含「相邻房间」档的未探索邻居豁免），
 --                  但仍照旧在进出时扣血。
--- 两个消费点都读同一个 gt:block_curse_room()：
---   · scripts/gtp_curseblock.lua —— 拦住「传送到诅咒房」这个目标；
---   · gtrep.lua 的 check_neigh_connected 类型白名单 —— 放行类型 10。
--- 仅调试模式可绕过。注：2026-10-05 恢复 —— 本 mod 早期移植时漏掉了 Fixed 的这条选项。
+-- 消费点只有一个：scripts/gtp_curseblock.lua 登记的 ② target_entry 段规则
+--   `target.curse_blocked`（原先配套的 gtrep 类型白名单已于 2026-10-06 整体删除）。
+-- **任何设置都不能绕过**（调试模式自 2026-10-06 起只出诊断、不改变判定）。
+-- 注：2026-10-05 恢复 —— 本 mod 早期移植时漏掉了 Fixed 的这条选项。
 gt.BlockCurseRoom = true
 
 -- 只能传送到经已清房间逐门连通的房间（Fixed: FairTripPath）
