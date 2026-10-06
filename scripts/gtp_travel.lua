@@ -377,15 +377,26 @@ gt:add_travel_rule({
   test = function(ctx)
     if ctx.target.Data.Type ~= 11 or ctx.target.ChallengeDone then return nil end
     local p = ctx.player
-    local hp = p:GetHearts() + p:GetSoulHearts() + p:GetBlackHearts()
+    -- hp 三项相加、全部按**半心**计（原 Fixed 逻辑）
+    local hearts = p:GetHearts()
+    local soul = p:GetSoulHearts()
+    local black = p:GetBlackHearts()
+    local hp = hearts + soul + black
     local st = ctx.level:GetStage()
     if st % 2 == 0 and st ~= 10 then
-      if hp > 2 then return nil end
-      return { stage = st, hp = hp, need = ">2" }
+      -- 偶数层：原实现是「hp > 2 就拒绝」⇒ 放行要求 hp <= 2（即 ≤1 心）。
+      -- ⚠️ 2026-10-06 实测事故：这里曾被写成「hp > 2 就放行」，恰好反了 ——
+      -- 结果是「符合开启条件的红色挑战房传不进去」。tools/test-travel.lua 第 9 段
+      -- 有断言锁死这两支的方向（影子对照照不到，原因见那里的注释）。
+      if hp <= 2 then return nil end
+      return { stage = st, hp = hp, hearts = hearts, soul = soul,
+               black = black, need = "<=2" }
     end
+    -- 其余（奇数层与 stage 10）：原实现是「hp < GetMaxHearts() 就拒绝」⇒ 放行要求满血
     local maxhp = p:GetMaxHearts()
     if hp >= maxhp then return nil end
-    return { stage = st, hp = hp, need = ">=" .. tostring(maxhp) }
+    return { stage = st, hp = hp, hearts = hearts, soul = soul,
+             black = black, need = ">=" .. tostring(maxhp) }
   end,
 })
 
