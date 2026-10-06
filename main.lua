@@ -29,6 +29,8 @@ require("scripts.gtrep")
 -- 传送判定策略层（2026-10-06 起）：四段规则表 + check 入口 + 调试浮层。
 -- 必须在 gtrep 之后 —— 它要拿 gtrep 定义的 gt 表与访问器。
 require("scripts.gtp_travel")
+-- 门图状态的序列化（纯函数；存档读写与时机在 gtrep 里）
+require("scripts.gtp_persist")
 require("scripts.gtp_rewindfix")
 require("scripts.gtp_delver")
 require("scripts.gtp_skullroom")
