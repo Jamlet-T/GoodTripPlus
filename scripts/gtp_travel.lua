@@ -362,18 +362,15 @@ gt:add_travel_rule({
   end,
 })
 
--- ===== ④ path：路线与代价 =====
-
-gt:add_travel_rule({
-  id = "path.walk_time", stage = "path", order = 10,
-  text = "「按距离增加游戏时间」开着，但找不到可步行的路线",
-  test = function(ctx)
-    if not ctx.fair_time then return nil end
-    local dist = gt:fair_trip(ctx.cur_gid, ctx.gid)
-    if dist ~= 999 then return nil end
-    return { dist = dist }
-  end,
-})
+-- ===== 计时代价：执行层调用，不参与准入 =====
+function gt:travel_time_distance(from, to)
+  if gt:get_travel_mode() == 1 or not gt:get_config_bool("FairTripTime", false) then
+    return 0
+  end
+  local dist = gt:fair_trip(from, to)
+  if dist == 999 then return 0 end -- BFS 的无路线哨兵，不是实际距离
+  return dist
+end
 
 -- ===== 诊断 =====
 

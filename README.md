@@ -263,7 +263,7 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 （呼出光标 / 房间高亮 / 松手传送三者共用同一套判定）。
 
 > 📖 **完整的判定逻辑说明见 [`docs/TRAVEL-RULES.md`](../docs/TRAVEL-RULES.md)**
-> （规则清单 14 条 / 数据依赖 / 执行层 / 诊断 / 易错点 / 与 Fixed 的偏离 / 未验证项）。
+> （规则清单 13 条 / 数据依赖 / 执行层 / 诊断 / 易错点 / 与 Fixed 的偏离 / 未验证项）。
 
 | 选项 | 默认 | 作用 |
 | --- | --- | --- |
@@ -272,7 +272,7 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 | `BlockCurseRoom`（MCM 显示「禁止传送进诅咒房」，v2.2.1 恢复） | **开** | 移植基底（MLX's Tweak）的同名选项（现行 Fixed 2.2.58 已无此项）：开启时**任何传送范围档位都不能把目标落在诅咒房上**（`RoomType.ROOM_CURSE`(10)，进出会按门咬血的那种；「任意房间」档也拦）；关掉则**完全按普通房间处理**。**只拦「传进去」，从诅咒房传出去不拦**（出去该扣的血照旧扣）。目标侧实现是 `scripts/gtp_curseblock.lua`，**登记为 ② target_entry 段的规则 `target.curse_blocked`**（2026-10-06 起不再包装函数） |
 | `FairTripPath` | 开 | 目标必须沿「已探索+已清怪」的房间逐真门抵达（门图 BFS） |
 | `ArriveAtDoor` | **开**（偏离 Fixed 的默认关） | 落地在走路会走进来的门口（跨屏大房间远途会先经过前一格） |
-| `FairTripTime` | 关 | 按传送距离与移速补回游戏时间 |
+| `FairTripTime` | 关 | 按可步行路线与移速补时间；无路线不补时，不限制准入 |
 | `TeleportTransition`（MCM 显示「传送过场」） | 淡入淡出（2） | 2026-10-05 由 Fixed 的 `TeleportAnimation` + `FastTransition` **合并**而成的三选一：**立即出现**＝`ChangeRoom` 无过场（＝原 `FastTransition` 开）；**淡入淡出**＝`StartRoomTransition(…, FADE = 1)`（＝Fixed 原默认组合）；**传送动画**＝`TELEPORT = 3` 白闪，等同使用传送道具。顺带决定传送冷却 `tele_cd`（1 / 10 / 45 帧）。调试模式不影响过场（2026-10-06 起） |
 | `HideInCombat`（MCM 显示「战斗时隐藏地图」） | 从不（1） | 同样是**代理 MinimapAPI 的同名设置**（三档：1 从不 / 2 仅 Boss 房 / 3 总是）。与 MCM → MinimapAPI → Map(2) 里那一项同一个值、双向同步；实现用自定义设置表（数字型要写 `Minimum` / `Maximum` / `ModifyBy`，首字母大写）。本 mod 自己的自绘元素不跟着藏（见「显示行为」一节） |
 | `HighlightCursorRoom` | 开 | 高亮光标下可传送的房间（不进 MCM 菜单，仅 gtconfig.lua 可覆盖） |

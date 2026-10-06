@@ -14,6 +14,13 @@
 [*]标记 Mines II 的 [b]Yellow Rail Button[/b]
 [*]支持为传送设置时间惩罚
 [/list]
+[h2]传送设置[/h2]
+[list]
+[*]默认使用相邻房间模式；也可选择仅传送至已探索房间
+[*]任意房间模式允许任意时刻传送至地图上任何可选房间，极大破坏游戏平衡，请谨慎启用。此模式忽略连通限制与计时补偿
+[*]计时补偿与准入独立：有可步行路线时按距离与移速补时间，无路线则不补时间，不会因此阻止传送
+[*]配置说明随所选传送模式实时切换
+[/list]
 [h2]MiniMAPI 兼容[/h2]
 兼容 MiniMAPI 的地图显示功能，包括：
 [list]
@@ -47,7 +54,7 @@
 [*][b]Lazy Delver[/b] — 隐藏房候选位置标记
 [/list]
 </description>
-    <version>2.3.2</version>
+    <version>2.3.3</version>
     <visibility>Public</visibility>
     <tag id="Lua"/>
     <tag id="Tweaks"/>
