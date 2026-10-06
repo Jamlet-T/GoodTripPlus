@@ -66,6 +66,7 @@ local last_diag_frame = -1000
 -- door graph, learned one room at a time: grid adjacency alone cannot tell a
 -- doorway from a secret room's unbombed wall. Per dimension: the mirror world
 -- reuses the same grid numbers for different rooms.
+local door_state_dirty = false -- 门图自上次落盘后有没有变（见 gt:save_door_state）
 local door_link = {}  --door_link[dim][a][b]: a passage, seen from either end
 local door_swept = {} --door_swept[dim][a]: a's own walls were read
 --curse-room door spikes seen from outside / inside; Flat File strips only the
@@ -235,14 +236,17 @@ function gt:sweep_doors()
           --once and for good, so the trinket in hand says nothing about this door
           if door.TargetRoomType == RoomType.ROOM_CURSE then
             curse_bare_outside[there] = door.VarData ~= 0
+            door_state_dirty = true
           elseif live:GetType() == RoomType.ROOM_CURSE then
             curse_bare_inside[here] = door.VarData ~= 0
+            door_state_dirty = true
           end
           if there ~= here and gt:door_is_passage(door) then
             --this end knows its slot; the far end gets a bare mark until its own turn
             link[here][there] = i
             link[there] = link[there] or {}
             if link[there][here] == nil then link[there][here] = true end
+            door_state_dirty = true
           end
         end
       end
@@ -390,6 +394,70 @@ function gt:check_neigh_connected(trd, cond)
       end
     end
     return false
+end
+
+-- ===== 层身份 + 门图跨会话持久化 =====
+-- 设计与取舍：docs/superpowers/specs/2026-10-06-door-graph-persistence-design.md
+-- 为什么要存：游戏**只对当前房间**回答门的状态（Room:GetDoor 属于 Game():GetRoom()），
+-- 别的房间只有 RoomConfigRoom.Doors（「哪几侧有门」的位掩码，不含锁没锁 / 墙炸没炸）。
+-- 所以进程一重启，「哪扇门能走」这份知识没有任何办法重新推导 —— 只能存下来。
+
+-- 层身份：一组「同一层内稳定」的字段（含**起始种子**）——
+-- 继续存档 / rewind 一致；换层或新局必然不同。
+function gt:level_identity()
+  local lvl = Game():GetLevel()
+  if not lvl then return nil end
+  local rooms = lvl:GetRooms()
+  return table.concat({
+    lvl:GetStage(),
+    lvl:GetStageType(),
+    lvl:GetAbsoluteStage(),
+    Game():GetSeeds():GetStartSeed(),
+    rooms and rooms.Size or -1,
+    lvl:IsAscent() and 1 or 0,
+  }, ":")
+end
+
+-- 把当前层的门图状态落盘（只在门图确实变了之后真写，见 door_state_dirty）。
+-- ⚠️ 全程 pcall：**持久化绝不允许弄坏它要保护的功能**（本仓库吃过一次这个亏）。
+function gt:save_door_state()
+  if not door_state_dirty then return end
+  if not gt.persist_serialize then return end
+  local ok, err = pcall(function()
+    local state = {
+      identity = gt:level_identity(),
+      link = door_link, swept = door_swept,
+      bare_out = curse_bare_outside, bare_in = curse_bare_inside,
+      pre = secret_pre_room_id,
+    }
+    gt:SaveData(gt.persist_serialize(state))
+  end)
+  if ok then
+    door_state_dirty = false
+  else
+    Isaac.DebugString("[GoodTripPlus][persist] 门图落盘失败（不影响传送）：" .. tostring(err))
+  end
+end
+
+-- 从存档恢复当前层的门图（无存档 / 身份不符 / 解析失败 -> 什么都不做，回到「从零学」）。
+function gt:load_door_state()
+  if not gt.persist_parse then return false end
+  local ok, state = pcall(function()
+    if not gt:HasData() then return nil end
+    return gt.persist_parse(gt:LoadData())
+  end)
+  if not ok then
+    Isaac.DebugString("[GoodTripPlus][persist] 读档失败（不影响传送）：" .. tostring(state))
+    return false
+  end
+  if not state or state.identity ~= gt:level_identity() then return false end
+  door_link = state.link
+  door_swept = state.swept
+  curse_bare_outside = state.bare_out
+  curse_bare_inside = state.bare_in
+  secret_pre_room_id = state.pre
+  door_state_dirty = false
+  return true
 end
 
 function gt:get_reachable_rooms()
@@ -1249,6 +1317,7 @@ function gt:pre_secret_room()
       end
     end
   end
+  door_state_dirty = true
 end
 --
 function gt:pre_secret_curse_room()
@@ -1269,6 +1338,7 @@ function gt:pre_secret_curse_room()
       end
     end
   end
+  door_state_dirty = true
 end
 --
 function gt:get_cursor_speed()
@@ -1557,6 +1627,8 @@ function gt:new_room()
     elseif crd.Data.Type == 10 then
       gt:pre_secret_curse_room()
     end
+    -- 门图一变就写（dirty 去重，不会每帧写）—— 不依赖退出路径是否触发，见 design §3.5
+    gt:save_door_state()
 end
 --
 function gt:new_level()
@@ -1574,6 +1646,10 @@ function gt:new_level()
     door_link = {}
     door_swept = {}
     curse_bare_outside, curse_bare_inside = {}, {}
+    door_state_dirty = false
+    -- 继续存档 / rewind 回到同一层时，把上次退出时的门图恢复回来。
+    -- （换层 / 新局的层身份不同，load 会自己拒绝；见 load_door_state）
+    if gt.load_door_state then gt:load_door_state() end
     --
     -- 重开（长按 TAB + R）时光标必须重新定位（2026-10-05 用户报的 bug）：
     -- 那张局是「玩家一直按着 TAB」—— 光标在重开前就已经呼出（mmp_ctrl = true），
@@ -1897,6 +1973,13 @@ gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
     )
   end
 end)
+-- 退出游戏时把门图落盘（「门图一变就写」已覆盖大部分情形，这条是多一层保险）。
+-- ⚠️ 各退出路径（退出到桌面 / Alt+F4 / 崩溃）是否都触发未实测，所以不把它当唯一保障。
+if ModCallbacks.MC_PRE_GAME_EXIT then
+  gt:AddCallback(ModCallbacks.MC_PRE_GAME_EXIT, function()
+    pcall(gt.save_door_state, gt)
+  end)
+end
 gt:AddCallback(ModCallbacks.MC_POST_RENDER, gt.step)
 gt:AddCallback(ModCallbacks.MC_POST_NEW_ROOM, gt.new_room)
 gt:AddCallback(ModCallbacks.MC_POST_NEW_LEVEL, gt.new_level)
