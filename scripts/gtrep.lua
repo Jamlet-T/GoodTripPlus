@@ -251,6 +251,17 @@ end
 
 --may a trip step between these rooms? A passage seen from either end: yes. A
 --swept room saying nothing: no. Neither swept (mod loaded mid-run): grid adjacency stands.
+-- **严格版**：只在门图里**真的学到过这条边**时才算连通 —— 不吃下面的几何兜底。
+-- 用途：判定的「最后一跳」（相邻豁免）必须走一扇我们**亲眼见过能过**的门。
+-- ⚠️ 2026-10-06 实测（真机日志 + 代码共同证明）：继续存档 / rewind 会清空我们的门图，
+-- 却保留游戏侧的「已访问」状态 —— 于是「访问过但本次没重扫」的房间既 swept=false 又
+-- VisitedCount>0，兜底 `not (swept[a] or swept[b])` 就把它们当成与目标相连，
+-- 门锁着的宝藏房 / 街机厅因此能被传进去（links=none 却 ③ 放行，只有兜底这一条路）。
+function gt:has_known_passage(a, b)
+  local link = door_graph()
+  return link[a] ~= nil and link[a][b] ~= nil
+end
+
 function gt:rooms_linked(a, b)
     local link, swept = door_graph()
     if link[a] and link[a][b] ~= nil then
