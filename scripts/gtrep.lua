@@ -1,7 +1,7 @@
 gt = RegisterMod("GoodTripPlus", 1)
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.3.2"
+gt.VERSION = "2.3.3"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -615,11 +615,7 @@ function gt:teleport_to_grid_index(gid)
       tele_maze = true
     end
 
-    local dist = 0
-    if gt:get_travel_mode() ~= 1 and gt:get_config_bool("FairTripTime", false) then
-      -- 不算 999 了：判定层 ④ path.walk_time 已经保证有可步行路线；这里纯为补时间
-      dist = gt:fair_trip(crd.SafeGridIndex, gid)
-    end
+    local dist = gt:travel_time_distance(crd.SafeGridIndex, gid)
 
     --an L room's anchor cell is not in grid_room, so the antechamber may be missing
     local from_pre = crd.Data.Type == 7 and secret_pre_room_id[crid] or nil

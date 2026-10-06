@@ -25,7 +25,9 @@ return function(gt)
       1, 3, 1, 2,
       L.travel_mode_name,
       L.travel_mode_values,
-      L.travel_mode_desc
+      function()
+        return L.travel_mode_desc[gt:get_travel_mode()] or L.travel_mode_desc[2]
+      end
     )
     -- 「禁止传送进诅咒房」= 恢复移植基底（MLX's Tweak）的同名选项（变量 gt.BlockCurseRoom，
     -- 默认开；现行 GoodTrip [Fixed] 2.2.58 已无此项，它靠 check_neigh_connected 的类型白名单
