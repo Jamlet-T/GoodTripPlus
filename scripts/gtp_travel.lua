@@ -76,6 +76,36 @@ function gt:run_travel_stages(stage_names, ctx)
   return { ok = true }
 end
 
+-- ===== 门通路口径（哪扇门算「实际通路」）=====
+-- 放在策略层而不是 gtrep：它是一条**口径**（门图与诊断共用），而且在这里能被 headless
+-- 测到 —— gtrep 加载不了，那边一行引用错误只有进游戏才暴露。2026-10-06 实测教训：
+-- 我按行号替换时误删了本表，door_is_passage 引用成了 nil 全局 → 每帧
+-- "attempt to index a nil value (global 'LOCKED_DOOR_VARIANTS')" → 渲染链崩 → 传送光标瞬消。
+--
+-- 实测数据（真机日志 `door slot=` 行逐门打印 variant/isOpen/passage）：
+--   普通门 / 炸开的隐藏房 / boss 房 / 红挑战房闸门 ......... variant=8
+--   上锁的宝藏房门 / 上锁的街机厅门 ...................... variant=1 isOpen=false
+--   没炸开的隐藏墙 ...................................... variant=7 isOpen=false
+--
+-- 判据：**variant 不是锁定型，或者门此刻开着**（两条任一成立即算通路）。
+--   · 1..6(各种 LOCKED) / 7(HIDDEN) 且门关着 → 不算通路（「商店上锁传不进去」的由来）
+--   · variant 锁定型但门开着 → 算通路，留给「解锁后 variant 未变、只有 IsOpen 变 true」；
+--     **实测反证它不误放**：上锁的门 isOpen=false，这条后路对它们不发作。
+--   · 0(UNSPECIFIED) / 8(UNLOCKED) → 算通路。
+--   · 没炸开的隐藏墙在 sweep_doors 里已被外层判据（variant ~= DOOR_HIDDEN）跳过。
+-- ⚠️ 这段被改过三次（只看 variant → 只看 IsOpen → 两条任一）。选它的理由是「门开着就能走」
+--    这个口径，而不是「哪条更简单」。
+local LOCKED_DOOR_VARIANTS = {
+  [1] = true, [2] = true, [3] = true, [4] = true, [5] = true, [6] = true, [7] = true,
+}
+
+function gt:door_is_passage(door)
+  if not LOCKED_DOOR_VARIANTS[door.Desc.Variant] then
+    return true
+  end
+  return door:IsOpen() == true
+end
+
 -- ===== 判定上下文 =====
 -- 每次调用新建一张小表；字段固定，不缓存、不跨帧复用（与仓库既有风格一致：
 -- get_reachable_rooms() 每次调用本来就建两张表）。

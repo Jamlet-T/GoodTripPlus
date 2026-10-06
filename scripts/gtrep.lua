@@ -177,35 +177,7 @@ function gt:is_secret_room(rd)
     return t == 7 or t == 8 or t == 29
 end
 
--- 这扇门现在算不算「实际通路」？
--- 判据 = **variant 不是锁定型，或者门此刻开着**（两条任一成立即算通路）。
---
--- 实测数据（2026-10-06 真机日志，`door slot=` 行逐门打印 variant/isOpen/passage）：
---   普通门 / 炸开的隐藏房 / boss 房 / 红挑战房闸门 ......... variant=8
---   **上锁的宝藏房门 / 上锁的街机厅门 .................... variant=1 isOpen=false**
---   没炸开的隐藏墙 ...................................... variant=7 isOpen=false
---
--- 由数据得到的两条结论：
---   · variant 1..6(各种 LOCKED) / 7(HIDDEN) 且门关着 → **不算通路**。
---     这就是「商店 / 街机厅上锁时传不进去」的由来。
---   · variant 锁定型但门**开着** → 算通路。留给「解锁之后 variant 没变、只有 IsOpen 变 true」
---     的情形（用户口径：解锁之后就该能传）。**实测反证它不会误放**：上锁的门实测
---     isOpen=false，这条后路对它们不发作。
---   · variant 0(UNSPECIFIED) / 8(UNLOCKED) → 算通路。
---
--- ⚠️ 战场上曾把它改成「只看 IsOpen()」（另一个会话的提交）：在那批实测门上结果**完全相同**
---   （上锁的门 isOpen=false 一样被拦），但它会把「解锁后 variant 仍为 1」的门也拦掉。
---   所以采用「两条任一成立」这个更宽、也更贴合「门开着就能走」的口径的写法。
-function gt:door_is_passage(door)
-  if not LOCKED_DOOR_VARIANTS[door.Desc.Variant] then
-    return true
-  end
-  return door:IsOpen() == true
-end
 
--- 当前房间里通向某格的那扇门（找不到返回 nil）。
--- 判红挑战房的进入条件要用它 —— 见 gtp_travel 的 target.challenge_gate：
--- 「游戏自己把门开着」是「允许进」最直接的证据，比复刻它的血量公式可靠。
 -- 门图诊断访问器（诊断用）：某房已学到的边 + 它的墙扫过没有。
 -- 判定层不许直接读 door_graph()（那是文件级 local），所以从这儿取。
 -- 用途：回答「这条通路是哪来的」—— 例如「上锁的房为什么能传进去」。
@@ -222,6 +194,9 @@ function gt:door_links_of(sgi)
   return out, swept[sgi] == true
 end
 
+-- 当前房间里通向某格的那扇门（找不到返回 nil）。
+-- 判红挑战房的进入条件要用它 —— 见 gtp_travel 的 target.challenge_gate：
+-- 「游戏自己把门开着」是「允许进」最直接的证据，比复刻它的血量公式可靠。
 function gt:door_to(gid)
   local room = Game():GetRoom()
   if not room then return nil end
@@ -249,7 +224,7 @@ function gt:sweep_doors()
     for i = 0, 7 do
       local door = live:GetDoor(i)
       --DOOR_HIDDEN is an unbombed wall, so no passage; a door that is closed right now
-      --is no passage either (see gt:door_is_passage -- it only asks IsOpen()).
+      --is no passage either (see gt:door_is_passage in gtp_travel).
       --All read live so nothing is from different moments.
       --（实测：炸开之后 variant 会变成 8，所以这条判据本身就够用，别再加「已炸开」判据）
       if door and door.Desc.Variant ~= DoorVariant.DOOR_HIDDEN then
@@ -331,7 +306,7 @@ end
 --   删它的理由：恶魔房/天使房/Boss Rush/黑市/贪婪出口本来就不会显示在地图上，
 --   「目标必须已显示」这条已经排除它们，白名单对它们是重复劳动；而副作用是把
 --   「门已开着、能走进去」的房间也拒了（二层以后的商店、已解锁的图书馆/骰子房/街机厅）。
---   正确的窗口应该是**实际通路**：见 gt:door_is_passage —— 门锁着就不算通路，
+--   正确的窗口应该是**实际通路**：见 gtp_travel 的 gt:door_is_passage —— 门锁着不算通路，
 --   解锁之后才算。安全性不再依赖房间类型，而是「那扇门现在能不能走」。
 --
 -- 于是「未探索的相邻房能不能传」现在只由 ③ range 段决定：目标已显示 + 旁边有
