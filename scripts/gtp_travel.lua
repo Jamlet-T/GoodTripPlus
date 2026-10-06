@@ -470,19 +470,50 @@ function gt:challenge_probe(gid)
     tostring(s.maxhearts), tostring(s.stage), tostring(s.done), kind)
 end
 
-function gt:auto_log_travel(gid, res)
+-- 目标房的现场摘要（每次取证都带）：类型 / 探过没 / 清怪没 / 显示旗标 / 是否隐藏房 / 当前档位
+-- —— 2026-10-06 加：报「传进未炸开的隐藏房」时，日志里必须能直接看出目标是什么房。
+function gt:travel_target_dump(gid)
+  local rd = gt:grid_room_desc(gid)
+  if not rd then return "  target: not in grid_room" end
+  return string.format(
+    "  target: type=%s visited=%s clear=%s dispFlags=0x%x isSecret=%s mode=%d",
+    tostring(rd.Data and rd.Data.Type), tostring(rd.VisitedCount),
+    tostring(rd.Clear), rd.DisplayFlags or 0,
+    tostring(gt:is_secret_room(rd)), gt:get_travel_mode())
+end
+
+local function auto_log_travel_body(gid, res)
   if not gt:is_debug() then return end
   local probe = gt:challenge_probe(gid)
-  if res.ok and not probe then return end   -- 放行的普通房间是常态，不记
+  -- 放过谁也要记：**非普通房**的放行都记（ROOM_DEFAULT 放行是常态，记了会刷屏）。
+  -- ⚠️ 2026-10-06 实测教训：原来只记「被拒 + 挑战房被放行」，于是「传进未炸开的隐藏房」
+  --    在日志里毫无痕迹、只能靠猜 —— 取证条件不能按「我怀疑什么」来收窄。
+  if res.ok and not probe then
+    local rd = gt:grid_room_desc(gid)
+    local t = rd and rd.Data and rd.Data.Type
+    if t == nil or t == 1 then return end
+  end
   local key = tostring(gid) .. "|" .. tostring(res.rule) .. "|" .. (probe or "")
   if travel_probe_logged[key] then return end
   travel_probe_logged[key] = true
   local lines = { "[GTPtrip] " .. (res.ok and "allowed" or "rejected") ..
     " target (auto, no keypress needed)  rule=" .. tostring(res.rule or "-") }
   lines[#lines + 1] = gt:travel_verdict_dump(gid, true)
+  lines[#lines + 1] = gt:travel_target_dump(gid)
   if probe then lines[#lines + 1] = probe end
   lines[#lines + 1] = gt:travel_doors_dump()
   Isaac.DebugString(table.concat(lines, "\n"))
+end
+
+-- 取证是**诊断**：绝不能因为诊断自身的 bug 把渲染链带崩（2026-10-06 实测教训 ——
+-- 影子对照一次 nil 调用就让光标 / 地图边界 / 未探索目标全废）。整段 pcall，
+-- 出错只留一行告警，绝不弄坏它要排查的功能。
+function gt:auto_log_travel(gid, res)
+  if not gt:is_debug() then return end
+  local okc, err = pcall(auto_log_travel_body, gid, res)
+  if not okc then
+    Isaac.DebugString("[GTPtrip] auto-log 抛错，本条取证已跳过：" .. tostring(err))
+  end
 end
 
 -- ===== 屏幕理由浮层（仅调试模式）=====

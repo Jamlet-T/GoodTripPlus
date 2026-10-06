@@ -23,6 +23,9 @@ local OTHER_SYM = {
   [C.CELL.CATEGORY.BOSS]    = "B",
   [C.CELL.CATEGORY.NORMAL]  = "N",
   [C.CELL.CATEGORY.SPECIAL] = "C",
+  -- SECRET 是必需的：const.lua 把 ROOM_SECRET / ROOM_SUPERSECRET 归到这一档，
+  -- 而这里原先没有它 —— 于是打印任何「格子里有隐藏房」的房间都会 nil 拼接崩。
+  [C.CELL.CATEGORY.SECRET]  = "S",
 }
 
 ---@type table<LevelStage, table<StageType, string>>
@@ -177,7 +180,11 @@ local function to_sym(cid, map)
     lb, rb = "{", "}"
   end
 
-  return lb .. OTHER_SYM[cell.category] .. rb
+  -- 未知分类兜底成 "?"：宁可日志难看一行，也绝不能因为少一个符号就把整个回调带崩。
+  -- 2026-10-06 实测：SECRET 没进 OTHER_SYM，矿道里撞上 "get doorslot failed" 那条
+  -- 错误分支要打印候选房，直接崩成 "Error in PostRoomLoad call: ... log.lua:180"。
+  local sym = OTHER_SYM[cell.category] or "?"
+  return lb .. sym .. rb
 end
 
 
