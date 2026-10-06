@@ -178,25 +178,50 @@ function gt:is_secret_room(rd)
 end
 
 -- 这扇门现在算不算「实际通路」？
--- 判据就是**门此刻开没开**（`door:IsOpen()`）—— 2026-10-06 两次实测修正后的结论：
+-- 判据 = **variant 不是锁定型，或者门此刻开着**（两条任一成立即算通路）。
 --
---   · **不能用 DoorVariant 判「锁着」**：关着的门 variant 照样是 8(UNLOCKED)。
---     真机日志实证：关着的挑战房闸门是 `variant=8 isOpen=false`；需要钥匙的
---     商店 / 街机厅 / 宝藏房门同样是 `variant=8 isOpen=false`。按 variant 判会把它们
---     全算成「通」→ 门图记下边 → 「相邻房间」档直接传进去
---     （用户实测：道具房 / 游戏房门锁未开也能传）。
---   · 用 `IsOpen()` 就都对：锁着 false、解锁后 true、炸开的隐藏房洞口 true、
---     清完 boss 之后开着的门 true。
---   · **战斗中普通门会短暂报 false** —— 不影响正确性：门图**只增不减**（换层才清），
---     所以这只会让那条边晚几帧学到，不会丢边。
---   · 没炸开的隐藏墙（variant 7 = DOOR_HIDDEN）在 sweep_doors 里已被外层判据跳过。
+-- 实测数据（2026-10-06 真机日志，`door slot=` 行逐门打印 variant/isOpen/passage）：
+--   普通门 / 炸开的隐藏房 / boss 房 / 红挑战房闸门 ......... variant=8
+--   **上锁的宝藏房门 / 上锁的街机厅门 .................... variant=1 isOpen=false**
+--   没炸开的隐藏墙 ...................................... variant=7 isOpen=false
+--
+-- 由数据得到的两条结论：
+--   · variant 1..6(各种 LOCKED) / 7(HIDDEN) 且门关着 → **不算通路**。
+--     这就是「商店 / 街机厅上锁时传不进去」的由来。
+--   · variant 锁定型但门**开着** → 算通路。留给「解锁之后 variant 没变、只有 IsOpen 变 true」
+--     的情形（用户口径：解锁之后就该能传）。**实测反证它不会误放**：上锁的门实测
+--     isOpen=false，这条后路对它们不发作。
+--   · variant 0(UNSPECIFIED) / 8(UNLOCKED) → 算通路。
+--
+-- ⚠️ 战场上曾把它改成「只看 IsOpen()」（另一个会话的提交）：在那批实测门上结果**完全相同**
+--   （上锁的门 isOpen=false 一样被拦），但它会把「解锁后 variant 仍为 1」的门也拦掉。
+--   所以采用「两条任一成立」这个更宽、也更贴合「门开着就能走」的口径的写法。
 function gt:door_is_passage(door)
+  if not LOCKED_DOOR_VARIANTS[door.Desc.Variant] then
+    return true
+  end
   return door:IsOpen() == true
 end
 
 -- 当前房间里通向某格的那扇门（找不到返回 nil）。
 -- 判红挑战房的进入条件要用它 —— 见 gtp_travel 的 target.challenge_gate：
 -- 「游戏自己把门开着」是「允许进」最直接的证据，比复刻它的血量公式可靠。
+-- 门图诊断访问器（诊断用）：某房已学到的边 + 它的墙扫过没有。
+-- 判定层不许直接读 door_graph()（那是文件级 local），所以从这儿取。
+-- 用途：回答「这条通路是哪来的」—— 例如「上锁的房为什么能传进去」。
+function gt:door_links_of(sgi)
+  local link, swept = door_graph()
+  local out = {}
+  local row = link[sgi]
+  if row then
+    for other, slot in pairs(row) do
+      out[#out + 1] = { other = other, slot = slot }
+    end
+    table.sort(out, function(a, b) return tostring(a.other) < tostring(b.other) end)
+  end
+  return out, swept[sgi] == true
+end
+
 function gt:door_to(gid)
   local room = Game():GetRoom()
   if not room then return nil end
