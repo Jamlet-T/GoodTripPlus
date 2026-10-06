@@ -121,17 +121,20 @@ end
 
 -- 2.2.3 类型白名单的原样副本。生产代码已把它删了（见 gtrep 里那段说明），
 -- 但 _legacy 要复现旧行为，所以自己带一份。**与 _legacy 一起在步 1c 删除。**
-local function _legacy_type_gate(rd)
+--
+-- ⚠️ 镜像世界是 **Room** 的方法，不是 Level 的（原实现用的是 gtrep 的 `room` local）。
+-- 2026-10-06 实测踩过：这里若写成 lvl:IsMirrorWorld() 会 nil 调用抛错，而影子抛错会把
+-- 整条 MC_POST_RENDER 链带崩（光标与地图边界一起消失、未探索目标一律传不进去）。
+local function _legacy_type_gate(rd, lvl, rm)
   if rd.VisitedCount > 0 and rd.Clear then return true end
   if rd.Flags & RoomDescriptor.FLAG_RED_ROOM ~= 0 then return true end
   if gt:is_secret_room(rd) then return true end
   local t = rd.Data.Type
   if t == 10 and not gt:block_curse_room() then return true end
   if t == 1 or t == 5 or t == 6 or t == 13 then return true end
-  local lvl = gt:travel_cur_state().level
-  if lvl and (((lvl:GetStage() == 1
+  if lvl and rm and (((lvl:GetStage() == 1
           and lvl:GetStageType() < StageType.STAGETYPE_REPENTANCE)
-        or lvl:IsMirrorWorld())
+        or rm:IsMirrorWorld())
       and ((not Game():IsGreedMode() and t == 4) or t == 2)) then
     return true
   end
@@ -142,7 +145,7 @@ end
 -- 与 gtp_curseblock / gtp_bosswindow 的包装段里找到原句。
 local function _legacy(gid)
   local st = gt:travel_cur_state()
-  local cur, level = st.cur, st.level
+  local cur, level, rm = st.cur, st.level, st.room
 
   -- 包装层（原加载顺序：gtp_curseblock 在最外、gtp_bosswindow 在里；两者都拦任何 gid）
   if gt:block_curse_room() and type(gid) == "number" and gid >= 0 and gid <= 168 then
@@ -183,7 +186,7 @@ local function _legacy(gid)
   end
   if travel_mode == 3 then return false, "mode3" end
   -- 旧实现的 check_neigh_connected 里含类型白名单，生产代码已删 → 这里自己判一次
-  if (trd.DisplayFlags & 1) ~= 0 and not _legacy_type_gate(trd) then
+  if (trd.DisplayFlags & 1) ~= 0 and not _legacy_type_gate(trd, level, rm) then
     return false, "unexplored_type_gate"
   end
   if gt:check_neigh_connected(trd, function(rd)
@@ -194,6 +197,24 @@ local function _legacy(gid)
     return true, "channel_c"
   end
   return false, "channel_c_failed"
+end
+
+-- 影子绝不允许把游戏带崩 —— 它只是临时验证代码，而它在 can_travel_to 里**同步**跑，
+-- 一抛错就会把整条 MC_POST_RENDER 链带崩（2026-10-06 实测：_legacy 里一次 nil 调用
+-- 让光标与地图边界一起消失、未探索的目标一律传不进去）。
+-- 所以这里一律 pcall；抛错一次就**永久停用影子**并写 log（宁可少一层验证，
+-- 也不能让验证代码弄坏玩家体验）。
+local shadow_broken = false
+local function legacy_safe(gid)
+  if shadow_broken then return nil, nil end
+  local ok, res_ok, res_why = pcall(_legacy, gid)
+  if not ok then
+    shadow_broken = true
+    Isaac.DebugString("[GTPshadow] _legacy 抛错，影子对照已停用（传送不受影响）：" ..
+      tostring(res_ok))
+    return nil, nil
+  end
+  return res_ok, res_why
 end
 
 -- ===== 判定上下文 =====
@@ -238,8 +259,8 @@ end
 function gt:can_open_cursor()
   local res = gt:run_travel_stages({ "departure" }, gt:travel_ctx(nil))
   if gt:is_debug() then
-    local old_ok, old_why = _legacy(false)
-    gt:shadow_check(false, res, old_ok, old_why)
+    local old_ok, old_why = legacy_safe(false)
+    if old_ok ~= nil then gt:shadow_check(false, res, old_ok, old_why) end
   end
   return res
 end
@@ -248,8 +269,8 @@ end
 function gt:can_travel_to(gid)
   local res = gt:run_travel_stages(gt.travel_stages, gt:travel_ctx(gid))
   if gt:is_debug() then
-    local old_ok, old_why = _legacy(gid)
-    gt:shadow_check(gid, res, old_ok, old_why)
+    local old_ok, old_why = legacy_safe(gid)
+    if old_ok ~= nil then gt:shadow_check(gid, res, old_ok, old_why) end
   end
   return res
 end
