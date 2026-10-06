@@ -226,26 +226,35 @@ gt:add_travel_rule({
   test = function(ctx)
     if ctx.target.Data.Type ~= 11 or ctx.target.ChallengeDone then return nil end
     local p = ctx.player
-    -- hp 三项相加、全部按**半心**计（原 Fixed 逻辑）
     local hearts = p:GetHearts()
     local soul = p:GetSoulHearts()
     local black = p:GetBlackHearts()
-    local hp = hearts + soul + black
     local st = ctx.level:GetStage()
+    local door = gt:door_to(ctx.gid)
+    local door_open = door and door:IsOpen() == true
+    -- ① **游戏自己怎么说最算数**：当前房间通向目标的那扇门开着 = 它允许进。
+    --    红挑战房的门本身就是按血量条件开关的，直接用门的状态，比复刻它的公式可靠。
+    --    2026-10-06 实测（真机日志）：玩家 0 红心 + 1 魂心 + 半黑心（hearts=0 soul=2
+    --    black=1），游戏门开着 isOpen=true，而旧的 `hp = 红+魂+黑 = 3` 公式判拒 ——
+    --    游戏的条件只看**红心**，我们的口径不一致。
+    if door_open then return nil end
+    -- ② 门不在当前房间（隔着老远传 / 门还没学到）时，退回血量公式。
+    --    偶数层这一支只算**红心**，与游戏的门条件同口径（魂心/黑心不计入）。
+    --    注：其余层那一支仍沿用 Fixed 的「总血量 >= 最大红心」—— 没有实测数据说它错，
+    --    保持原样不动。
     if st % 2 == 0 and st ~= 10 then
-      -- 偶数层：原实现是「hp > 2 就拒绝」⇒ 放行要求 hp <= 2（即 ≤1 心）。
-      -- ⚠️ 2026-10-06 实测事故：这里曾被写成「hp > 2 就放行」，恰好反了 ——
-      -- 结果是「符合开启条件的红色挑战房传不进去」。tools/test-travel.lua 第 9 段
-      -- 有断言锁死这两支的方向（影子对照照不到，原因见那里的注释）。
-      if hp <= 2 then return nil end
-      return { stage = st, hp = hp, hearts = hearts, soul = soul,
-               black = black, need = "<=2" }
+      -- 原实现是「hp > 2 就拒绝」⇒ 放行要求 ≤1 心。⚠️ 这里曾被抄成「>2 就放行」（反了）。
+      if hearts <= 2 then return nil end
+      return { branch = "hp_even", stage = st, hearts = hearts, soul = soul,
+               black = black, door = door and tostring(door_open) or "none",
+               need = "hearts<=2" }
     end
-    -- 其余（奇数层与 stage 10）：原实现是「hp < GetMaxHearts() 就拒绝」⇒ 放行要求满血
+    local hp = hearts + soul + black
     local maxhp = p:GetMaxHearts()
     if hp >= maxhp then return nil end
-    return { stage = st, hp = hp, hearts = hearts, soul = soul,
-             black = black, need = ">=" .. tostring(maxhp) }
+    return { branch = "hp_other", stage = st, hearts = hearts, hp = hp,
+             maxhp = maxhp, door = door and tostring(door_open) or "none",
+             need = "hp>=" .. tostring(maxhp) }
   end,
 })
 
