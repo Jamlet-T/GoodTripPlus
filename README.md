@@ -631,3 +631,16 @@ git add -A && git commit -m "..."
 
 如果本项目的分发方式需要调整，或作为相关内容权利人的您希望修改署名 / 撤下部分或全部内容，
 欢迎通过 [GitHub Issues](https://github.com/Jamlet-T/GoodTripPlus/issues) 联系我，我会尽快处理。
+
+## 战斗时保留大地图
+
+在 GoodTripPlus 菜单中，将“战斗时隐藏地图”设为“总是”或“仅 Boss 房”，
+再开启“战斗时保留大地图”（默认关闭），即可在对应战斗中隐藏小地图、
+长按地图键（默认 Tab）照常呼出大地图。切换为常驻大地图也会保留显示；
+“从不”档没有变化。关闭新开关后恢复 MinimapAPI 原有的整张地图隐藏行为。
+
+原三档仍代理同一份 MinimapAPI.Config.HideInCombat，与上游菜单双向同步、
+由上游保存；新开关独立保存于 GoodTripPlus 的 MCM 配置。
+实现不修改 MinimapAPI 文件或存档，也尊重其它模组的 OverrideConfig。
+Boss 开场过场、Mega Satan、Beast 和层间过场的上游强制隐藏仍保留。
+地图可见不会改变传送准入规则。

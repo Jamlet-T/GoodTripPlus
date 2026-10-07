@@ -26,6 +26,7 @@
 --      关掉该选项后诅咒房完全按普通房间处理（gtrep 的 check_neigh_connected 白名单同步放行）
 
 require("scripts.gtrep")
+require("scripts.gtp_combatmap")(gt, MinimapAPI)
 -- 传送判定策略层（2026-10-06 起）：四段规则表 + check 入口 + 调试浮层。
 -- 必须在 gtrep 之后 —— 它要拿 gtrep 定义的 gt 表与访问器。
 require("scripts.gtp_travel")

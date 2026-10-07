@@ -76,6 +76,9 @@ gt.FoolsSkullRoom = true
 -- 地图边界高亮：按住地图键时，把贴着地图边界（13×13 最外圈）的房间、靠边的那条边画出来
 gt.ShowMapBounds = true
 
+-- 战斗隐藏仍由 MinimapAPI 的三档配置决定；开启后仅隐藏小地图，保留大地图。
+gt.CombatKeepLargeMap = false
+
 -- 虚空层（The Void）标记精神错乱（Delirium）的 boss 房（超定位的显示功能，默认关）
 gt.DeliriumRoom = false
 

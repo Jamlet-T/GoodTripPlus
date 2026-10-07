@@ -171,6 +171,13 @@ return function(gt)
     end
     ModConfigMenu.AddBooleanSetting(
       "GoodTripPlus", nil,
+      "CombatKeepLargeMap",
+      false,
+      L.combat_keep_large_name,
+      L.combat_keep_large_desc
+    )
+    ModConfigMenu.AddBooleanSetting(
+      "GoodTripPlus", nil,
       "FoolsSkullRoom",
       true,
       L.fools_skull_name,
