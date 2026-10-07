@@ -11,6 +11,7 @@ local seed = nil
 local stage = nil
 ---@type StageType?
 local stage_type = nil
+local room_count = nil
 
 local dimension = C.DIMENSION.MAIN
 function M.get_dimension() return dimension end
@@ -109,7 +110,10 @@ function M.update(level)
   stage = level:GetStage()
   seed = Game():GetSeeds():GetStageSeed(stage)
   stage_type = level:GetStageType()
+  room_count = level:GetRooms().Size
   dimension = get_current_dimension(level)
+  lost_cursed = level:GetCurses() & LevelCurse.CURSE_OF_THE_LOST ~= 0
+  off_grid = level:GetCurrentRoomDesc().GridIndex < 0
   for type, _ in pairs(M.items.passive) do
     M.items.passive[type].possess = false
   end
@@ -140,9 +144,22 @@ function M.check()
   if current_stage ~= stage or current_stage_type ~= stage_type then
     has_changed = true
   end
+  -- 神庙逃亡 / 红房生成会改变同层房间列表，种子与 stage 都可能不变。
+  if level:GetRooms().Size ~= room_count then
+    has_changed = true
+  end
 
   if not has_changed then
+    local previous = dimension
     dimension = get_current_dimension(level)
+    if previous ~= dimension then
+      pcall(function()
+        if gt and gt.is_debug and gt:is_debug() then
+          Isaac.DebugString('[GTPdelver] dimension ' .. previous .. '->' .. dimension
+            .. ' stage=' .. current_stage .. ' rooms=' .. room_count)
+        end
+      end)
+    end
   end
 
   lost_cursed = level:GetCurses() & LevelCurse.CURSE_OF_THE_LOST ~= 0
