@@ -133,7 +133,7 @@ function M.door_check()
     end
   end
 
-  log.print_room(lid, map):info()
+  -- log.info 为 no-op；错误分支的 print_room(...):error() 仍保留。
 end
 
 ---@param effect EntityEffect

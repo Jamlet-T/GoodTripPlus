@@ -1,7 +1,7 @@
 gt = RegisterMod("GoodTripPlus", 1)
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.3.5"
+gt.VERSION = "2.4.0"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -922,10 +922,12 @@ end
 --
 function gt:get_pos_grid_index(pos)
     if MinimapAPI then
+      local project
       -- 与 gid_to_rtmap_pos 同一套投影（含同一锚点），直接复用
       for gid, rd in pairs(grid_room) do
         if gt:is_grid_room_displayed(gid) then
-          local p = gt:gid_to_rtmap_pos(gid)
+          project = project or gt:make_rtmap_projector()
+          local p = project(gid)
           if math.abs(pos.X - p.X) < 8.5 and math.abs(pos.Y - p.Y) < 7.5 then
             return gid
           end
@@ -941,39 +943,12 @@ function gt:get_pos_grid_index(pos)
     end
 end
 --
+local make_projection = require("scripts.gtp_projection")
+function gt:make_rtmap_projector()
+    return make_projection(gt, MinimapAPI, Vector)
+end
 function gt:gid_to_rtmap_pos(gid)
-    if MinimapAPI then
-      local offsetVec = gt:get_minapi_offset_vec()
-      local gsx = MinimapAPI.GlobalScaleX or 1
-      local col = gid % 13
-      local row = math.floor(gid / 13)
-      local maxx, miny = gt:get_minapi_map_anchor()
-      local rx, ry
-      if maxx and miny then
-        -- 与 renderUnboundedMinimap 同锚点：roomOffset = (gsx*pos - maxx) * 房宽
-        if gsx >= 0 then
-          rx = offsetVec.X + (col * gsx - maxx) * 17 + 9
-        else
-          rx = offsetVec.X + (col * gsx - maxx) * 17 - 17
-        end
-        ry = offsetVec.Y + (row - miny) * 15 + 8
-      else
-        -- 还没有任何显示房间（大地图本就什么都不画）时的旧回退
-        local ltroom = gt:get_corner_room(1)
-        local rtroom = gt:get_corner_room(2)
-        if gsx >= 0 then
-          rx = offsetVec.X + (col - rtroom.X - 1) * 17 + 9
-        else
-          rx = offsetVec.X + (ltroom.X - col) * 17 - 17
-        end
-        ry = offsetVec.Y + (row - ltroom.Y) * 15 + 8
-      end
-      return Vector(rx, ry)
-    end
-    local ltx, lty = gt:get_rtmap_info()
-    local col = gid % 13
-    local row = (gid - col) / 13
-    return Vector(ltx + col * 17 + 8, lty + row * 15 + 7)
+    return gt:make_rtmap_projector()(gid)
 end
 --
 function gt:get_current_room_cursor_gid()

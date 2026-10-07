@@ -79,7 +79,7 @@ local function draw_line(cx, cy, w, h)
 end
 
 -- 单个格子：贴哪条边就画哪条（角房两条）
-local function draw_cell(gid)
+local function draw_cell(gid, project)
   local col = gid % COLS
   local row = math.floor(gid / COLS)
   if row < 0 or row >= ROWS then
@@ -90,7 +90,7 @@ local function draw_cell(gid)
   if not (left or right or top or bottom) then
     return -- 内部格：不算投影（gid_to_rtmap_pos 的锚点虽按帧缓存，能不调就不调）
   end
-  local pos = gt:gid_to_rtmap_pos(gid)
+  local pos = project(gid)
   if left then
     draw_line(pos.X - CELL_W / 2, pos.Y, LINE_T, LINE_H)
   elseif right then
@@ -144,6 +144,7 @@ function M.render()
     return
   end
   local zero = Vector(0, 0)
+  local project = gt:make_rtmap_projector()
   for _, mr in ipairs(map) do
     if mr.Shape and mr.Position and mr:IsVisible() then
       local base = mr.DisplayPosition or mr.Position
@@ -151,7 +152,7 @@ function M.render()
         local col = base.X + off.X
         local row = base.Y + off.Y
         if col >= 0 and col < COLS and row >= 0 and row < ROWS then
-          draw_cell(math.floor(row * COLS + col + 0.5))
+          draw_cell(math.floor(row * COLS + col + 0.5), project)
         end
       end
     end

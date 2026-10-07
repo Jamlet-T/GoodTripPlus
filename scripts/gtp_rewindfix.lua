@@ -64,6 +64,7 @@
 ]]
 
 local GTP = {}
+local Snapshot = require("scripts.gtp_iconsnapshot")
 
 local LOG_LIMIT = 16
 
@@ -150,28 +151,9 @@ end
 --   identity 层身份
 --   arrays   各维度的房间数组本身（用来识别 MinimapAPI 是否重建过地图）
 --   icons    各维度「有图标的房间」的图标副本，键是 Descriptor.ListIndex
--- 这里做的是真正的深拷贝，所以即使 MinimapAPI 之后原地改动也不会污染快照。
+-- 内容不变时复用已有不可变副本；有变化才复制，因此原地改动仍不会污染上一帧快照。
 local function read_state()
-  local state = {
-    identity = level_identity(),
-    arrays = {},
-    icons = {},
-  }
-  if MinimapAPI and MinimapAPI.Levels then
-    for dimension, rooms in pairs(MinimapAPI.Levels) do
-      state.arrays[dimension] = rooms
-      local dimension_icons = {}
-      for _, room in ipairs(rooms) do
-        local descriptor = room.Descriptor
-        local icons = room.ItemIcons
-        if descriptor and descriptor.ListIndex and icons and #icons > 0 then
-          dimension_icons[descriptor.ListIndex] = copy_icons(icons)
-        end
-      end
-      state.icons[dimension] = dimension_icons
-    end
-  end
-  return state
+  return Snapshot.read(MinimapAPI and MinimapAPI.Levels, level_identity(), prev_state)
 end
 
 -- 统计「上一帧有图标、这一帧变空」的房间数，以及被整个换掉的房间数组数量。
