@@ -359,8 +359,7 @@ function M.reload()
   find_ultra_fakes()
 
   log.info("Map loading complete!\n")
-  log.print_map(M):info()
-  log.draw_map(M):info()
+  -- log.info 当前为 no-op；不再构建随后被丢弃的整层文本/ASCII 地图。
 
   state.done()
   -- 自动取证：每次重建一次；诊断异常不得阻断候选渲染。
