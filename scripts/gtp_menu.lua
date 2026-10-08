@@ -26,6 +26,13 @@ return function(gt)
       L.cursor_grid_step_name,
       L.cursor_grid_step_desc
     )
+    ModConfigMenu.AddBooleanSetting(
+      "GoodTripPlus", nil,
+      "MouseTeleport",
+      true,
+      L.mouse_teleport_name,
+      L.mouse_teleport_desc
+    )
     ModConfigMenu.AddNumberSetting(
       "GoodTripPlus", nil,
       "TravelMode",
