@@ -631,7 +631,7 @@ git add -A && git commit -m "..."
 | 本项目自有代码（传送功能、地图记忆与相关修复） | MIT | ✅ |
 | Lazy Delver（`scripts/delver/*`、`resources/gfx/goodtripplus/marker.*`，作者 dokee） | MIT | ✅ 已随包携带其许可证 |
 | **Goodtrip MLX's Tweak**（`scripts/gtrep.lua` 的基底） | 已取得作者公开发布许可；许可不由本仓库 MIT 扩大 | ✅ |
-| **tarako 的 GoodTrip**（原始上游） | 保留原作者署名。据项目维护者说明，该项目已五年未更新；如原作者希望讨论、修改或移除上游代码，可通过 GitHub Issues 联系维护者 | ✅ |
+| **tarako 的 GoodTrip**（原始上游） | 保留原作者署名；如原作者希望讨论、修改或移除上游代码，可通过 GitHub Issues 联系维护者 | ✅ |
 | MinimapAPI | 仅运行时依赖，本仓库不含其任何代码/素材 | ✅ 无需许可 |
 
 ---
