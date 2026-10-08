@@ -600,7 +600,8 @@ function gt:render_travel_reason(cursor_pos, cursor_active)
     font:DrawString(s, 16, y, color, 0, false)
     y = y + 11
   end
-  local gid = gt:get_pos_grid_index(cursor_pos)
+  local gid = gt.get_cursor_grid_index and gt:get_cursor_grid_index(cursor_pos)
+    or gt:get_pos_grid_index(cursor_pos)
   if gid == -99 then
     draw("[BLOCKED] cursor is not on any displayed room cell", KColor(1, 0.45, 0.35, 1))
   else
