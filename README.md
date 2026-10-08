@@ -6,6 +6,8 @@
 
 《以撒的结合：忏悔+》的小地图传送模组，基于 **Goodtrip MLX's Tweak**（Steam 创意工坊 3749565569）二次开发。
 
+GoodTrip 与 Goodtrip MLX's Tweak 的原作者如希望讨论、修改或移除相关上游代码，请联系我：**xxjxxxx**。
+
 操作：按住地图键，使用射击方向键移动光标，松开地图键传送；也可移动鼠标让光标跟随，
 左键点击目标房间立即传送。鼠标模式下松开地图键只关闭地图；再次按方向键会切回键盘操作，
 光标从当前房间重新起步。持续按键继续移动，不反复归位；再次移动鼠标即可切回鼠标光标。
@@ -273,8 +275,8 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 **2026-10-06 起判定收敛成 `scripts/gtp_travel.lua` 里的四段流水线 + 规则表**
 （呼出光标 / 房间高亮 / 松手传送三者共用同一套判定）。
 
-> 📖 **完整的判定逻辑说明见 [`docs/TRAVEL-RULES.md`](../docs/TRAVEL-RULES.md)**
-> （规则清单 13 条 / 数据依赖 / 执行层 / 诊断 / 易错点 / 与 Fixed 的偏离 / 未验证项）。
+> 📖 完整规则见 `scripts/gtp_travel.lua`、`scripts/gtp_bosswindow.lua` 和 `scripts/gtp_curseblock.lua`；
+> 门图适配与落点逻辑见 `scripts/gtrep.lua`、`scripts/gtp_doors.lua`。
 
 | 选项 | 默认 | 作用 |
 | --- | --- | --- |
@@ -494,10 +496,10 @@ MinimapAPI 藏地图时管不到**本模组自己画的**元素。各元素的�
 
 ## 九、安装 / 与上游共存
 
-1. 把本仓库同步到游戏 mods 目录（mod 目录名必须是 `goodtripplus`）：
+1. 将源码或 `bash pack.sh` 生成的压缩包放入游戏 mods 目录，确保最终 mod 目录名为 `goodtripplus`：
 
    ```bash
-   bash deploy.sh
+   ./pack.sh
    ```
 
 2. 本模组与上游 `goodtrip_mlxtweak`（以及原版 Goodtrip）功能完全重叠，
@@ -510,8 +512,8 @@ MinimapAPI 藏地图时管不到**本模组自己画的**元素。各元素的�
 
 ### 分享给朋友 / 分发单包
 
-`dist/goodtripplus-1.1.0.zip` 就是可直接发人的完整包——解压丢进 `mods/` 即可。
-运行文件数量随版本变化，以实际打包清单为准；分发包不含 `deploy.sh` 等开发入口。
+`./pack.sh` 会按 `metadata.xml` 中的版本号生成 `dist/goodtripplus-<版本>.zip`。
+解压后放入 `mods/` 即可；压缩包不包含打包脚本和游戏禁用标记。
 
 朋友那边需要满足这几条：
 
@@ -545,12 +547,10 @@ bash pack.sh        # 产出 dist/goodtripplus-<版本>.zip
 ## 十、目录结构
 
 ```
-issacMod/                       ← 工作区 git 仓库（可容纳多个 mod）
-└── goodtripplus/               ← 本 mod 的源码目录（自包含，可独立打包/拆出）
+GoodTripPlus/                   ← 独立模组仓库根目录
     ├── main.lua                ← 入口：加载 gtrep + gtp_rewindfix + gtp_delver + gtp_skullroom 等
     ├── metadata.xml            ← mod 元数据（name / directory / id）
     ├── gtconfig.lua            ← 静态默认值（可被 MCM 覆盖）
-    ├── deploy.sh               ← 兼容入口，转交根 dev.ps1 验证并部署
     ├── pack.sh                 ← 打包成 dist/goodtripplus-<版本>.zip（分发用）
     ├── dist/                   ← 打包产物（不进版本控制）
     ├── LICENSE                 ← MIT（仅覆盖本项目自有代码）
@@ -584,13 +584,8 @@ issacMod/                       ← 工作区 git 仓库（可容纳多个 mod�
             └── LICENSE-lazy-delver.txt
 ```
 
-`deploy.sh` 用脚本自身所在目录当源码根，所以在仓库根跑 `bash goodtripplus/deploy.sh`
-或在 `goodtripplus/` 里跑 `bash deploy.sh` 都可以；仓库根还提供 `deploy-all.sh` 一次同步全部 mod。
-
-对应游戏内路径：`F:/Steam/steamapps/common/The Binding of Isaac Rebirth/mods/goodtripplus_3813175350`
-
-当前开发首选根目录 `./dev.ps1 Verify`、`./dev.ps1 Deploy`、`./dev.ps1 Log`；
-配置集中在 `tools/dev.defaults.psd1`，完整目录导航见 [CODE-MAP](../docs/CODE-MAP.md)。
+将仓库内容安装到 `<游戏目录>/mods/goodtripplus`。开发者可运行 `./pack.sh` 打包；
+压缩包会携带 `LICENSE`、`THIRD_PARTY.md` 与 Lazy Delver 的 MIT 许可证文本。
 
 ---
 
@@ -609,7 +604,7 @@ issacMod/                       ← 工作区 git 仓库（可容纳多个 mod�
 | `scripts/gtp_mapbounds.lua` | 新增文件，地图边界房间高亮（默认开；用一张 8×8 纯白贴图缩放画边） |
 | `scripts/delver/*` | 从 Lazy Delver 原样移植（仅改写 `require` 路径），`render.lua` 重写了定位部分 |
 | `resources/gfx/goodtripplus/*` | `marker.*` 从 Lazy Delver 复制（换到自己的路径避免与它本体冲突）；`TintedSkull.*` 是本模组自有的骷髅图标（16x16）；`MineButton.*` 是本模组自有的按钮图标（16x16）；`bounds.*` 是本模组自有的纯白贴图（8×8，画地图边界线用） |
-| `main.lua` / `metadata.xml` / `gtconfig.lua` / `deploy.sh` | 新增 / 重写 |
+| `main.lua` / `metadata.xml` / `gtconfig.lua` | 新增 / 重写 |
 
 ---
 
@@ -617,7 +612,7 @@ issacMod/                       ← 工作区 git 仓库（可容纳多个 mod�
 
 ```bash
 # 改完源码后
-bash deploy.sh          # 同步到游戏目录
+./pack.sh               # 打包完整模组
 # 重启游戏（Lua 不会热重载）
 
 git add -A && git commit -m "..."
@@ -633,15 +628,16 @@ git add -A && git commit -m "..."
 
 | 来源 | 授权 | 状态 |
 | --- | --- | --- |
-| 本项目自有代码（rewind 修复、隐藏房标记对接、构建脚本） | MIT | ✅ |
+| 本项目自有代码（传送功能、地图记忆与相关修复） | MIT | ✅ |
 | Lazy Delver（`scripts/delver/*`、`resources/gfx/goodtripplus/marker.*`，作者 dokee） | MIT | ✅ 已随包携带其许可证 |
-| **Goodtrip MLX's Tweak**（`scripts/gtrep.lua` 的基底）+ 其上游 **tarako 的 GoodTrip** | **无许可证文件 = 保留所有权利** | ⚠️ **未获授权** |
+| **Goodtrip MLX's Tweak**（`scripts/gtrep.lua` 的基底） | 已取得作者公开发布许可；许可不由本仓库 MIT 扩大 | ✅ |
+| **tarako 的 GoodTrip**（原始上游） | 保留署名；原作者如希望讨论、修改或移除上游代码，请联系 `xxjxxxx` | ✅ |
 | MinimapAPI | 仅运行时依赖，本仓库不含其任何代码/素材 | ✅ 无需许可 |
 
 ---
 
-如果本项目的分发方式需要调整，或作为相关内容权利人的您希望修改署名 / 撤下部分或全部内容，
-欢迎通过 [GitHub Issues](https://github.com/Jamlet-T/GoodTripPlus/issues) 联系我，我会尽快处理。
+GoodTrip 与 Goodtrip MLX's Tweak 的原作者如希望讨论、修改或移除相关上游代码，请联系我：**xxjxxxx**。
+其他分发问题可通过 [GitHub Issues](https://github.com/Jamlet-T/GoodTripPlus/issues) 联系。
 
 ## 战斗时保留大地图
 
