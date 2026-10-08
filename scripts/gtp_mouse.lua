@@ -16,14 +16,15 @@ function Mouse:update(input)
   local moved = self.x ~= nil and dx * dx + dy * dy >= 4
   local clicked = input.down and not self.down
   self.down = input.down
-  if self.x == nil or not input.active or input.keyboard or moved or clicked or self.mode == 'mouse' then
+  if self.x == nil or not input.active or input.mouse_enabled == false
+    or input.keyboard or moved or clicked or self.mode == 'mouse' then
     self.x, self.y = x, y
   end
   if not input.active then
     self.mode = 'keyboard'
     return false, false
   end
-  if input.keyboard then
+  if input.mouse_enabled == false or input.keyboard then
     self.mode = 'keyboard'
   elseif moved or clicked then
     self.mode = 'mouse'

@@ -10,6 +10,8 @@ gt.FastRestartEnable = true
 
 -- 键盘传送光标每次按键移动一个 1x1 房间格距；关闭时按光标速度连续移动。
 gt.CursorGridStep = false
+-- 鼠标跟随光标与左键点击传送；关闭后仍可用键盘/手柄。
+gt.MouseTeleport = true
 
 -- 传送过场（落地时的表现）：1 = 立即出现 / 2 = 淡入淡出 / 3 = 传送动画（白闪）。
 -- MCM 里对应「传送过场」项（装了 MCM 时以它为准）；这里只是没装 MCM 时的文件级默认。

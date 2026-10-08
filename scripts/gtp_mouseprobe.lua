@@ -14,9 +14,10 @@ function Probe:update(state, input)
         local x, y = input.motion_x or input.x, input.motion_y or input.y
         local dx, dy = x-(anchorX or x), y-(anchorY or y)
         self.write(string.format(
-          '[GTPmouse] mode %s->%s key=%s prevkey=%s move=%s click=%s raw=%.3f,%.3f delta=%.3f,%.3f screen=%.3f,%.3f screenDelta=%.3f,%.3f %s',
+          '[GTPmouse] mode %s->%s key=%s prevkey=%s move=%s click=%s mouseEnabled=%s raw=%.3f,%.3f delta=%.3f,%.3f screen=%.3f,%.3f screenDelta=%.3f,%.3f %s',
           from, state.mode, tostring(input.keyboard or false), tostring(prev.keyboard or false),
           tostring(anchorX ~= nil and dx*dx+dy*dy >= 4), tostring(input.down and not wasDown),
+          tostring(input.mouse_enabled ~= false),
           x, y, dx, dy, input.x, input.y, input.x-prev.x, input.y-prev.y, self.context()))
       end
       self.previous = input
