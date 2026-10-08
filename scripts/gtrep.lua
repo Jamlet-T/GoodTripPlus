@@ -2,7 +2,7 @@ gt = RegisterMod("GoodTripPlus", 1)
 local console_output = require("scripts.gtp_console").write
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.5.2"
+gt.VERSION = "2.5.3"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -145,6 +145,7 @@ gt.ArriveAtDoor = true
 gt.FairTripTime = false
 gt.HighlightCursorRoom = true
 gt.CursorGridStep = false
+gt.MouseTeleport = true
 gt.ShowSecretMarkers = true
 local _, err = pcall(require, "gtconfig")
 ----
@@ -1386,6 +1387,7 @@ end
 -- 键盘松开地图键与鼠标点击共用准入、冷却、诊断和隐藏/诅咒房前室准备。
 -- 来源：原 step() 松键传送分支。
 function gt:try_cursor_travel(gid, source)
+    if source == 'mouse' and not gt:get_config_bool('MouseTeleport', true) then return false end
     gt:auto_log_secret_diag(gid)
     local res = gt:can_travel_to(gid)
     if source == 'mouse' then
@@ -1459,6 +1461,7 @@ function gt:tab_action()
       local keyboard_pressed = gt:cursor_keyboard_pressed()
       local follow, clicked, switched_keyboard = mouse_probe:update(mouse_cursor, {x=pos.X, y=pos.Y,
         motion_x=motion.X, motion_y=motion.Y,
+        mouse_enabled=gt:get_config_bool('MouseTeleport', true),
         down=Input.IsMouseBtnPressed(0), active=true, keyboard=keyboard_pressed})
       if switched_keyboard then
         mmp_ctrl_pos = gt:gid_to_rtmap_pos(gt:get_current_room_cursor_gid())
