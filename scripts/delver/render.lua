@@ -15,6 +15,7 @@ local geo = require("scripts.delver.geometry")
 local log = require("scripts.delver.log")
 local state = require("scripts.delver.state")
 local map = require("scripts.delver.map")
+local visibility = require("scripts.gtp_delvervisibility")
 
 local M = {}
 
@@ -81,6 +82,7 @@ local function check_real_and_clear_fake()
 
   for _, secret_type in pairs(C.SECRET_TYPE) do
     local all_found = true
+    local newly_found, removed = 0, 0
     for _, cand in pairs(map.candidates) do
       local lid = cand.lid
       if lid ~= nil and state.get_dimension() == C.DIMENSION.MIRROR then
@@ -88,10 +90,14 @@ local function check_real_and_clear_fake()
       end
       if lid ~= nil and cand.secret_type == secret_type then
         local desc = rooms:Get(lid)
-        if desc and desc.DisplayFlags == 0 then
+        if not desc or visibility.flags(desc, state.get_dimension()) == 0 then
           all_found = false
-        elseif secret_type ~= C.SECRET_TYPE.ULTRA then
-          map.clear_fake_neighbors(lid)
+          cand.marker_status = C.MARKER.STATUS.HIDDEN
+        else
+          -- 多隐藏房楼层：已发现的那个也立即隐藏自身标记，剩余候选仍需保留。
+          if cand.marker_status ~= C.MARKER.STATUS.FOUND then newly_found = newly_found + 1 end
+          cand.marker_status = C.MARKER.STATUS.FOUND
+          if secret_type ~= C.SECRET_TYPE.ULTRA then map.clear_fake_neighbors(lid) end
         end
       end
     end
@@ -101,12 +107,18 @@ local function check_real_and_clear_fake()
         if cand.secret_type == secret_type then
           if cand.lid == nil then
             map.candidates[cid] = nil
+            removed = removed + 1
           else
             cand.marker_status = C.MARKER.STATUS.FOUND
           end
         end
       end
     end
+    if newly_found > 0 or removed > 0 then visibility.trace(function()
+      return '[GTPdelver] reveal type=' .. secret_type .. ' dimension=' .. state.get_dimension()
+        .. ' newly-found=' .. newly_found .. ' all-found=' .. tostring(all_found)
+        .. ' removed-fake=' .. removed
+    end) end
   end
 end
 
@@ -155,7 +167,7 @@ local function update_marker()
       end
 
       local desc = rooms:Get(lid)
-      if desc and desc.DisplayFlags ~= 0 then
+      if desc and visibility.flags(desc, state.get_dimension()) ~= 0 then
         any_visible = true
       end
     end

@@ -42,6 +42,7 @@ local state = require("scripts.delver.state")
 local map = require("scripts.delver.map")
 local room = require("scripts.delver.room")
 local render = require("scripts.delver.render")
+local visibility = require("scripts.gtp_delvervisibility")
 
 -- 本项目对这个访问器有两处覆盖（都只改 gtp_delver 这一层，不动上游移植文件 delver/state.lua；
 -- 它的消费点只有两处「要不要画」的闸门：delver/render.lua 的 M.render 与 gtp_mapbounds.lua 的 render）：
@@ -106,8 +107,14 @@ gt:AddCallback(ModCallbacks.MC_POST_EFFECT_INIT, function(_, effect)
   if not enabled() then
     return
   end
-  room.bomb_check(effect)
+  local changed = room.bomb_check(effect)
   render.refresh()
+  visibility.trace(function()
+    return '[GTPdelver] bomb x=' .. tostring(effect.Position.X)
+      .. ' y=' .. tostring(effect.Position.Y) .. ' excluded-fake=' .. tostring(changed)
+      .. ' dimension=' .. tostring(state.get_dimension())
+      .. ' ignored=' .. tostring(state.is_ignored()) .. ' refresh=true'
+  end)
 end, EffectVariant.BOMB_EXPLOSION)
 
 -- 相关主动道具 / 卡牌 / 药丸使用后刷新候选
