@@ -1,7 +1,7 @@
 gt = RegisterMod("GoodTripPlus", 1)
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.4.1"
+gt.VERSION = "2.4.2"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -48,6 +48,8 @@ local mmp_highlight_gid = nil
 -- 玩家一按方向键就置 true，之后完全照旧 —— 光标放哪儿待在哪儿。
 -- 已知代价（2026-10-05 接受）：呼出后还没碰过光标时，走路换房它会跟着你走。
 local mmp_ctrl_moved = false
+local mouse_cursor = require("scripts.gtp_mouse").new()
+local mouse_hit = require("scripts.gtp_mousehit")
 -- 光标淡入（2026-10-05 用户要求：与隐藏房候选标记 / 地图边界高亮同一节奏）：
 -- 按住地图键后先等几帧、再渐显，免得光标在 MinimapAPI 的大地图还没就位时就先冒出来
 -- （2.1.2 修好「重开时光标贴回当前房间」之后尤其明显 —— 那时地图刚重建，光标已经画了）。
@@ -1185,6 +1187,7 @@ function gt:get_cursor_fade()
 end
 --
 function gt:mmp_ctrl_move()
+    local moved = false
     local speed = gt:get_cursor_speed()
     local xmin, xmax, ymin, ymax
     if MinimapAPI then
@@ -1216,17 +1219,44 @@ function gt:mmp_ctrl_move()
           mmp_ctrl_pos = newpos
           -- 玩家自己动过光标了：从此不再自动归位（照旧"你放哪儿就待在哪儿"）
           mmp_ctrl_moved = true
+          moved = true
         end
       end
     end
+    return moved
+end
+function gt:cursor_keyboard_pressed()
+    for i = 1, 4 do
+      if Input.IsActionPressed(key[i], player.ControllerIndex) then return true end
+    end
+    return false
 end
 --
 function gt:draw_rtmap_cursor()
     cursor:Render(mmp_ctrl_pos, Vector(0, 0), Vector(0, 0))
 end
+function gt:get_mouse_screen_pos()
+    -- Input 的 render-plane 坐标不能直接当 HUD 坐标；使用文档示例的世界到屏幕转换。
+    return Isaac.WorldToScreen(Input.GetMousePosition(true))
+end
+function gt:get_cursor_grid_index(pos)
+    if mouse_cursor.mode ~= 'mouse' or not MinimapAPI then
+      return gt:get_pos_grid_index(pos)
+    end
+    local mapRoom = mouse_hit(MinimapAPI, pos)
+    if not mapRoom then return -99 end
+    local rd = mapRoom.Descriptor
+    -- 大房间/L 形房的 descriptor 锚点未必是 grid_room 占据格，匹配同房间格。
+    local gid = rd.SafeGridIndex
+    if grid_room[gid] and grid_room[gid].ListIndex == rd.ListIndex then return gid end
+    for cell, descriptor in pairs(grid_room) do
+      if descriptor.ListIndex == rd.ListIndex then return cell end
+    end
+    return -99
+end
 --
 function gt:update_cursor_room_highlight()
-    local gid = gt:get_pos_grid_index(mmp_ctrl_pos)
+    local gid = gt:get_cursor_grid_index(mmp_ctrl_pos)
     local res = gt:can_travel_to(gid)
     -- 调试模式下免按键取证：光标扫到目标就把判定过程 + 门表写进 log.txt
     -- （被拒要记，挑战房被放行也要记 —— 放行同样可能判错）
@@ -1312,6 +1342,29 @@ end
 function gt:prep()
     player = Isaac.GetPlayer(0)
 end
+-- 键盘松开地图键与鼠标点击共用准入、冷却、诊断和隐藏/诅咒房前室准备。
+-- 来源：原 step() 松键传送分支。
+function gt:try_cursor_travel(gid, source)
+    gt:auto_log_secret_diag(gid)
+    local res = gt:can_travel_to(gid)
+    if source == 'mouse' then
+      -- 单击级取证：放行/拒绝都写，不依赖玩家打开调试或按 F4；日志失败不影响传送。
+      pcall(function()
+        Isaac.DebugString(string.format('[GTPmouse] click x=%.1f y=%.1f gid=%s ok=%s rule=%s cooldown=%s',
+          mmp_ctrl_pos.X, mmp_ctrl_pos.Y, tostring(gid), tostring(res.ok),
+          tostring(res.rule), tostring(tele_cd)))
+      end)
+    end
+    if gt.auto_log_travel then gt:auto_log_travel(gid, res) end
+    if not res.ok or tele_cd >= 1 then return false end
+    if crd.Data.Type == 7 or (crd.Data.Type == 8 and Game():IsGreedMode()) then
+      gt:pre_secret_room()
+    elseif crd.Data.Type == 10 then
+      gt:pre_secret_curse_room()
+    end
+    gt:teleport_to_grid_index(gid)
+    return true
+end
 --
 function gt:tab_action()
     local cp = Isaac.WorldToRenderPosition(Vector(320,280))
@@ -1334,7 +1387,7 @@ function gt:tab_action()
         and Input.IsButtonTriggered(Keyboard.KEY_F4, 0)
         and Game():GetFrameCount() - last_diag_frame > 20 then
       last_diag_frame = Game():GetFrameCount()
-      local cell = mmp_ctrl and gt:get_pos_grid_index(mmp_ctrl_pos)
+      local cell = mmp_ctrl and gt:get_cursor_grid_index(mmp_ctrl_pos)
         or gt:get_current_room_cursor_gid()
       gt:console_dump_diag(cell, "gtpdiag TAB+F4")
     end
@@ -1349,7 +1402,6 @@ function gt:tab_action()
         mmp_ctrl_moved = false
         mmp_ctrl_fade = CURSOR_FADE_MIN  -- 从「还没开始」重新起算淡入
         mmp_ctrl_pos = gt:gid_to_rtmap_pos(gt:get_current_room_cursor_gid())
-        gt:update_cursor_room_highlight()
       else
         -- 玩家还没自己动过光标 ⇒ 每帧都把它贴回当前房间（与隐藏房标记同一套做法：
         -- 标记也是每帧按当前地图重算投影，所以跨层/重开后过几帧会自己切回正确位置）。
@@ -1359,12 +1411,35 @@ function gt:tab_action()
         if not mmp_ctrl_moved then
           mmp_ctrl_pos = gt:gid_to_rtmap_pos(gt:get_current_room_cursor_gid())
         end
-        gt:mmp_ctrl_move()
-        gt:update_cursor_room_highlight()
         player:SetShootingCooldown(2)
+      end
+      local pos = gt:get_mouse_screen_pos()
+      -- 先按方向键输入切模式，再检查移动边界；鼠标在地图外也能夺回控制。
+      local keyboard_pressed = gt:cursor_keyboard_pressed()
+      local follow, clicked, switched_keyboard = mouse_cursor:update({x=pos.X, y=pos.Y,
+        down=Input.IsMouseBtnPressed(0), active=true, keyboard=keyboard_pressed})
+      if switched_keyboard then
+        mmp_ctrl_pos = gt:gid_to_rtmap_pos(gt:get_current_room_cursor_gid())
+        mmp_ctrl_moved = false
+      end
+      if follow then
+        mmp_ctrl_pos = Vector(pos.X, pos.Y)
+        mmp_ctrl_moved = true
+      elseif keyboard_pressed then
+        gt:mmp_ctrl_move()
+      end
+      gt:update_cursor_room_highlight()
+      if clicked then
+        gt:try_cursor_travel(gt:get_cursor_grid_index(mmp_ctrl_pos), 'mouse')
       end
       -- 淡入计数：按住期间逐帧 +1（与 delver/render.lua 的 tab_hold_cnt 同口径）
       mmp_ctrl_fade = math.min(mmp_ctrl_fade + 1, CURSOR_FADE_MAX)
+    else
+      mmp_ctrl = false
+      mmp_highlight_gid = nil
+      mmp_ctrl_fade = CURSOR_FADE_MIN
+      local pos = gt:get_mouse_screen_pos()
+      mouse_cursor:update({x=pos.X, y=pos.Y, down=Input.IsMouseBtnPressed(0), active=false})
     end
 end
 --
@@ -1377,6 +1452,9 @@ function gt:step()
     if Game():IsPaused() then
       mmp_ctrl = false
       mmp_ctrl_fade = CURSOR_FADE_MIN
+      mmp_highlight_gid = nil
+      local pos = gt:get_mouse_screen_pos()
+      mouse_cursor:update({x=pos.X, y=pos.Y, down=Input.IsMouseBtnPressed(0), active=false})
       return
     end
     if Input.IsActionTriggered(ButtonAction.ACTION_MAP,player.ControllerIndex)
@@ -1392,24 +1470,16 @@ function gt:step()
         mmp_ctrl = false
         mmp_highlight_gid = nil
         mmp_ctrl_fade = CURSOR_FADE_MIN
-        local mgid = gt:get_pos_grid_index(mmp_ctrl_pos)
-        gt:auto_log_secret_diag(mgid)
-        local mres = gt:can_travel_to(mgid)
-        if gt.auto_log_travel then
-          gt:auto_log_travel(mgid, mres)
-        end
-        if (mres.ok and tele_cd < 1) then
-          if crd.Data.Type == 7 or (crd.Data.Type == 8 and Game():IsGreedMode()) then
-            gt:pre_secret_room()
-          elseif crd.Data.Type == 10 then
-            gt:pre_secret_curse_room()
-          end
-          gt:teleport_to_grid_index(mgid)
+        if mouse_cursor.mode == 'keyboard' then
+          gt:try_cursor_travel(gt:get_pos_grid_index(mmp_ctrl_pos))
         end
       else
         mmp_ctrl = false
         mmp_ctrl_fade = CURSOR_FADE_MIN
+        mmp_highlight_gid = nil
       end
+      local pos = gt:get_mouse_screen_pos()
+      mouse_cursor:update({x=pos.X, y=pos.Y, down=Input.IsMouseBtnPressed(0), active=false})
     end
     if prep_alarm then
       prep_alarm = false
@@ -1489,6 +1559,7 @@ function gt:new_level()
     mmp_highlight_gid = nil
     mmp_ctrl_moved = false
     mmp_ctrl_fade = CURSOR_FADE_MIN
+    mouse_cursor:reset()
     -- 注意：这里**不要**放任何依赖玩家实体的逻辑（例如 gt:can_open_cursor）—— new_level 会在
     -- POST_GAME_STARTED（开局初始化中）被调到，那时玩家实体还没就绪，会原生崩溃（2026-10-05 踩过）。
 end
@@ -1519,7 +1590,7 @@ function gt:dump_tele_diag(gid)
   local L = {}
   local function p(s) L[#L + 1] = s end
   if not gid or grid_room[gid] == nil then
-    gid = gt:get_pos_grid_index(mmp_ctrl_pos)
+    gid = gt:get_cursor_grid_index(mmp_ctrl_pos)
   end
   p("teleDiag: target gid=" .. tostring(gid))
   -- 判定结论与理由：由判定层逐段跑一遍规则表（含短路），不再在这里重抄一份判定。
