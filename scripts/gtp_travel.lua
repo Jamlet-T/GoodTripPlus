@@ -393,7 +393,7 @@ end
 -- `ascii` = true 时**只用 ASCII**：屏幕浮层必须用这个模式 —— 诊断字体是
 -- font/terminus.fnt（**位图 ASCII 字体，画不出中文**），中文在屏幕上会整段空白
 -- （2026-10-06 实测：屏幕上只剩 "[拒绝 gid=35]" 里的 ASCII 部分，理由那截是空的）。
--- 所以 ascii 模式印**规则 id**而不是中文散文；中文散文留在 log.txt / 控制台里。
+-- 所以 ascii 模式印**规则 id**而不是中文散文；控制台也只用 ASCII，中文说明仅供日志使用。
 -- 第二个返回值 = 是否可传送（浮层要靠它决定画不画）。
 function gt:travel_verdict_dump(gid, ascii)
   local ctx = gt:travel_ctx(gid)

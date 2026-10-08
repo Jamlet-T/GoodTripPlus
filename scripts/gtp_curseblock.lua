@@ -82,7 +82,7 @@ gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command)
         " currentRoomType=" .. tostring(cur) ..
         (cur == RoomType.ROOM_CURSE and " (current room IS a curse room)" or "")
     pcall(function()
-        Isaac.ConsoleOutput(line .. "\n")
+        require("scripts.gtp_console").write(line .. "\n")
         Isaac.DebugString("[GoodTripPlus] " .. line)
     end)
 end)

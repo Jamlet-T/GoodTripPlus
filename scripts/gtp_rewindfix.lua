@@ -64,6 +64,7 @@
 ]]
 
 local GTP = {}
+local console_output = require("scripts.gtp_console").write
 local Snapshot = require("scripts.gtp_iconsnapshot")
 
 local LOG_LIMIT = 16
@@ -73,7 +74,7 @@ local events = {}
 local stats = {
   wipes = 0,
   restored_rooms = 0,
-  last_result = "尚未触发",
+  last_result = "not triggered",
 }
 
 local function push_event(text)
@@ -84,7 +85,7 @@ local function push_event(text)
 end
 
 local function out(message)
-  Isaac.ConsoleOutput("[GoodTripPlus] " .. message .. "\n")
+  console_output("[GoodTripPlus] " .. message .. "\n")
   Isaac.DebugString("[GoodTripPlus] " .. message)
 end
 
@@ -201,14 +202,14 @@ gt:AddCallback(ModCallbacks.MC_POST_UPDATE, function()
         stats.wipes = stats.wipes + 1
         stats.restored_rooms = stats.restored_rooms + restored_rooms
         stats.last_result = "frame=" .. Game():GetFrameCount() ..
-          " 恢复 " .. restored_rooms .. " 个房间，跳过 " .. skipped_unexplored .. " 个未探索房间"
+          " restored=" .. restored_rooms .. " rooms, skippedUnexplored=" .. skipped_unexplored
         push_event("RESTORE " .. restored_rooms .. " rooms, skip " ..
           skipped_unexplored .. " unexplored")
-        out("rewind fix: 检测到整批图标丢失，已恢复 " .. restored_rooms ..
-          " 个房间的图标（跳过 " .. skipped_unexplored .. " 个未探索房间）")
+        out("rewind fix: icon wipe detected; restored " .. restored_rooms ..
+          " rooms, skipped " .. skipped_unexplored .. " unexplored rooms")
         current = read_state() -- 重新读，避免下一帧拿恢复前的数据做比较
       else
-        stats.last_result = "检测到清空，但判定为换层/首次载入，未恢复"
+        stats.last_result = "icon wipe on a different floor or initial load; not restored"
       end
     end
   end

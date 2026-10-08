@@ -1,12 +1,13 @@
 gt = RegisterMod("GoodTripPlus", 1)
+local console_output = require("scripts.gtp_console").write
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.4.5"
+gt.VERSION = "2.5.0"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
 pcall(function()
-  Isaac.ConsoleOutput("[GoodTripPlus] v" .. gt.VERSION ..
+  console_output("[GoodTripPlus] v" .. gt.VERSION ..
     " loaded (console command: gtpdiag)\n")
   Isaac.DebugString("[GoodTripPlus] v" .. gt.VERSION .. " loaded")
   Isaac.DebugString("[GoodTripPlus] build=" .. gt.BUILD)
@@ -856,7 +857,7 @@ end
 --
 function gt:dump_map_diagnostics()
     local function out(message)
-      Isaac.ConsoleOutput("[GoodTripPlus] " .. message .. "\n")
+      console_output("[GoodTripPlus] " .. message .. "\n")
       Isaac.DebugString("[GoodTripPlus] " .. message)
     end
     local dim = gt:get_current_dimension()
@@ -1605,7 +1606,7 @@ function gt:dump_tele_diag(gid)
   -- 判定结论与理由：由判定层逐段跑一遍规则表（含短路），不再在这里重抄一份判定。
   -- 下面各段是「现场证据」——它们不决定任何事，只是把状态下打出来供对照。
   if gt.travel_verdict_dump then
-    p(gt:travel_verdict_dump(gid))
+    p(gt:travel_verdict_dump(gid, true))
   end
   local trd = grid_room[gid]
   if not trd then
@@ -1811,7 +1812,7 @@ end
 -- 整段丢进去容易只看到一行，所以自己按 \n 拆）
 local function gt_console_out(text)
   for line in tostring(text):gmatch("[^\n]+") do
-    Isaac.ConsoleOutput(line .. "\n")
+    console_output(line .. "\n")
   end
 end
 

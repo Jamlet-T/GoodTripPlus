@@ -73,7 +73,7 @@ local stats = {
   scans = 0,          -- 重新扫描生成表的次数（每层一次）
   found_rooms = 0,    -- 最近一次扫描找到的按钮房数量
   applied = 0,        -- 累计往房间图标表里补了多少次
-  last_result = "尚未触发",
+  last_result = "not triggered",
 }
 
 -- 本层「含黄色按钮」的房间集合，键为网格索引；层身份变化时重建
@@ -82,7 +82,7 @@ local marked_key = nil
 
 local function log(message)
   if gt:is_debug() then
-    Isaac.ConsoleOutput("[GoodTripPlus] " .. message .. "\n")
+    require("scripts.gtp_console").write("[GoodTripPlus] " .. message .. "\n")
     Isaac.DebugString("[GoodTripPlus] " .. message)
   end
 end
@@ -111,10 +111,10 @@ local function register_marker_icon()
   if ok and sprite then
     marker_icon_state = true
     MinimapAPI:AddIcon(MARKER_ICON_ID, sprite, MARKER_ICON_ANIM, 0)
-    log("矿洞按钮：已注册自定义按钮图标 " .. MARKER_ICON_ID)
+    log("mine buttons: registered custom icon " .. MARKER_ICON_ID)
   else
     marker_icon_state = false
-    log("矿洞按钮：图标注册失败，本功能不生效（不退回内置图标）")
+    log("mine buttons: icon registration failed; feature unavailable (no fallback icon)")
   end
   return marker_icon_state
 end
@@ -212,9 +212,9 @@ local function rebuild_marked_rooms(level)
   end
 
   stats.scans = stats.scans + 1
-  stats.last_result = string.format("扫描 %d 次，本层找到 %d 个按钮房",
+  stats.last_result = string.format("scans=%d, button rooms on floor=%d",
     stats.scans, stats.found_rooms)
-  log("矿洞按钮：本层找到 " .. stats.found_rooms .. " 个按钮房")
+  log("mine buttons: rooms found on floor=" .. stats.found_rooms)
 end
 
 -- 确保房间的 VisitedIcons 里有我们的图标（append；语义与骷髅房一致：
@@ -271,9 +271,9 @@ local function update()
     if grid_index and marked_rooms[grid_index] then
       if ensure_icon(room, descriptor) then
         stats.applied = stats.applied + 1
-        stats.last_result = string.format("已标记房间 %s（累计 %d 次）",
+        stats.last_result = string.format("marked room=%s, total applications=%d",
           tostring(grid_index), stats.applied)
-        log("矿洞按钮：房间 " .. tostring(grid_index) .. " 已加上按钮图标")
+        log("mine buttons: added icon to room " .. tostring(grid_index))
       end
     end
   end
@@ -325,7 +325,7 @@ gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command)
     diag = "mineButtons ERROR: " .. tostring(diag)
   end
   for line in tostring(diag):gmatch("[^\n]+") do
-    Isaac.ConsoleOutput("[GoodTripPlus] " .. line .. "\n")
+    require("scripts.gtp_console").write("[GoodTripPlus] " .. line .. "\n")
     Isaac.DebugString("[GoodTripPlus] " .. line)
   end
 end)

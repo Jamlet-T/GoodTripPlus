@@ -115,7 +115,7 @@ gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command)
   local line = "rewardDoor: present=" .. tostring(present) ..
     (present and (" hit{" .. tostring(last_hit_desc) .. "}") or " (no devil/angel/bossrush/hush door)")
   pcall(function()
-    Isaac.ConsoleOutput(line .. "\n")
+    require("scripts.gtp_console").write(line .. "\n")
     Isaac.DebugString("[GoodTripPlus] " .. line)
   end)
 end)
