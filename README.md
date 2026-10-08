@@ -6,7 +6,7 @@
 
 《以撒的结合：忏悔+》的小地图传送模组，基于 **Goodtrip MLX's Tweak**（Steam 创意工坊 3749565569）二次开发。
 
-GoodTrip 与 Goodtrip MLX's Tweak 的原作者如希望讨论、修改或移除相关上游代码，请联系我：**xxjxxxx**。
+GoodTrip 与 Goodtrip MLX's Tweak 的原作者如希望讨论、修改或移除相关上游代码，请通过 GitHub Issues 联系项目维护者。
 
 操作：按住地图键，使用射击方向键移动光标，松开地图键传送；也可移动鼠标让光标跟随，
 左键点击目标房间立即传送。鼠标模式下松开地图键只关闭地图；再次按方向键会切回键盘操作，
@@ -631,13 +631,12 @@ git add -A && git commit -m "..."
 | 本项目自有代码（传送功能、地图记忆与相关修复） | MIT | ✅ |
 | Lazy Delver（`scripts/delver/*`、`resources/gfx/goodtripplus/marker.*`，作者 dokee） | MIT | ✅ 已随包携带其许可证 |
 | **Goodtrip MLX's Tweak**（`scripts/gtrep.lua` 的基底） | 已取得作者公开发布许可；许可不由本仓库 MIT 扩大 | ✅ |
-| **tarako 的 GoodTrip**（原始上游） | 保留署名；原作者如希望讨论、修改或移除上游代码，请联系 `xxjxxxx` | ✅ |
+| **tarako 的 GoodTrip**（原始上游） | 保留原作者署名。据项目维护者说明，该项目已五年未更新；如原作者希望讨论、修改或移除上游代码，可通过 GitHub Issues 联系维护者 | ✅ |
 | MinimapAPI | 仅运行时依赖，本仓库不含其任何代码/素材 | ✅ 无需许可 |
 
 ---
 
-GoodTrip 与 Goodtrip MLX's Tweak 的原作者如希望讨论、修改或移除相关上游代码，请联系我：**xxjxxxx**。
-其他分发问题可通过 [GitHub Issues](https://github.com/Jamlet-T/GoodTripPlus/issues) 联系。
+GoodTrip 与 Goodtrip MLX's Tweak 的原作者如希望讨论、修改或移除相关上游代码，欢迎通过 [GitHub Issues](https://github.com/Jamlet-T/GoodTripPlus/issues) 联系项目维护者。
 
 ## 战斗时保留大地图
 

@@ -6,7 +6,7 @@
 # 排除项：
 #   pack.sh              —— 打包脚本本身不属于模组运行文件
 #   disable.it           —— 游戏生成的「禁用该 mod」标记，不属于源码
-#   .git / .workbuddy    —— 版本控制与工作区记忆
+#   .git                  —— 版本控制
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -38,7 +38,7 @@ import os, sys, zipfile
 
 out = sys.argv[1]
 EXCLUDE_FILES = {"deploy.sh", "pack.sh", "disable.it"}
-EXCLUDE_DIRS = {".git", ".workbuddy", "dist"}
+EXCLUDE_DIRS = {".git", "dist"}
 
 files = []
 for dirpath, dirnames, filenames in os.walk("."):

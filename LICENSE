@@ -17,7 +17,7 @@ GoodTripPlus —— 授权范围说明
 【3】上游基底 —— Goodtrip MLX's Tweak / GoodTrip
     scripts/gtrep.lua 基于 Goodtrip MLX's Tweak（Steam 创意工坊 3749565569），其上游为 tarako 的 GoodTrip。
     项目维护者确认已取得 MLX 作者的公开发布许可。该许可独立于下方 MIT 正文；
-    下方 MIT 不重新声明或扩大上游代码的授权范围。GoodTrip 原作者可通过 README 联系维护者。
+    下方 MIT 不重新声明或扩大上游代码的授权范围。GoodTrip 原作者可通过 README 中的 GitHub Issues 联系维护者。
 
 下方 MIT 正文只覆盖【1】与【2】中属于本项目的部分；上游代码依照其单独许可提供。
 
