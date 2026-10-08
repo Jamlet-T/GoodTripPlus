@@ -13,6 +13,7 @@
     * 明亮 = 所有相邻房间都已探查；暗淡 = 还有相邻房间没去过
     * 进房间后若门到墙的路径被挡（实心墙、无门）→ 排除该候选
     * 炸弹在门位附近爆炸 → 排除对应的假候选
+    * 破墙泪弹撞网格 / 铁镐挥动命中门位 → 排除对应假候选；同房间揭露立即刷新
     * 真隐藏房在地图上出现后，同类假候选自动清除
 
   与原版 Lazy Delver 的唯一实质差别
@@ -69,6 +70,7 @@ end
 local function enabled()
   return gt:get_config_bool("ShowSecretMarkers", true)
 end
+require("scripts.gtp_delverlive")(gt, state, map, room, render, enabled)
 
 -- 换房间：重算地图数据、做门位检查、标记需要刷新
 --
