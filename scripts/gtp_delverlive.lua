@@ -2,6 +2,7 @@
 -- HasTearFlags/CollidesWithGrid：IsaacDocs EntityTear/Entity；
 -- GetIsSwinging/GetHitboxParentKnife/NOTCHED_AXE：REPENTOGON EntityKnife/KnifeVariant。
 return function(gt, state, map, room, render, enabled)
+  local visibility = require('scripts.gtp_delvervisibility')
   -- 实体 Variant 9 是铁镐；KnifeVariant 的命名枚举由 REPENTOGON 添加，原版不存在。
   local axe_variant = (KnifeVariant and KnifeVariant.NOTCHED_AXE) or 9
   pcall(function()
@@ -31,8 +32,17 @@ return function(gt, state, map, room, render, enabled)
       local descriptors = Game():GetLevel():GetRooms()
       for _, lid in ipairs(real_rooms) do
         local descriptor = descriptors:Get(lid)
-        local value = descriptor and descriptor.DisplayFlags or 0
-        if flags[lid] ~= value then flags[lid], changed = value, true end
+        local value = visibility.flags(descriptor, dimension)
+        if flags[lid] ~= value then
+          local previous = flags[lid]
+          flags[lid], changed = value, true
+          if previous ~= nil then visibility.trace(function()
+            return '[GTPdelver] visibility lid=' .. lid .. ' dimension=' .. dimension
+              .. ' old=' .. previous .. ' effective=' .. value
+              .. ' native=' .. tostring(descriptor and descriptor.DisplayFlags)
+              .. ' refresh=true'
+          end) end
+        end
       end
     end
     if changed then render.refresh() end
