@@ -19,6 +19,13 @@ return function(gt)
       L.cursor_speed_name,
       L.cursor_speed_desc
     )
+    ModConfigMenu.AddBooleanSetting(
+      "GoodTripPlus", nil,
+      "CursorGridStep",
+      false,
+      L.cursor_grid_step_name,
+      L.cursor_grid_step_desc
+    )
     ModConfigMenu.AddNumberSetting(
       "GoodTripPlus", nil,
       "TravelMode",

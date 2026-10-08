@@ -1,7 +1,7 @@
 gt = RegisterMod("GoodTripPlus", 1)
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.4.2"
+gt.VERSION = "2.4.3"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -127,6 +127,7 @@ gt.FairTripPath = true
 gt.ArriveAtDoor = true
 gt.FairTripTime = false
 gt.HighlightCursorRoom = true
+gt.CursorGridStep = false
 gt.ShowSecretMarkers = true
 local _, err = pcall(require, "gtconfig")
 ----
@@ -1189,6 +1190,7 @@ end
 function gt:mmp_ctrl_move()
     local moved = false
     local speed = gt:get_cursor_speed()
+    local grid_step = gt:get_config_bool("CursorGridStep", false)
     local xmin, xmax, ymin, ymax
     if MinimapAPI then
       local offsetVec = gt:get_minapi_offset_vec()
@@ -1213,8 +1215,15 @@ function gt:mmp_ctrl_move()
       ymax = lty + 13 * 15
     end
     for i = 1, 4 do
-      if Input.IsActionPressed(key[i], player.ControllerIndex) then
-        local newpos = mmp_ctrl_pos + dir[i] * speed
+      local pressed
+      if grid_step then
+        pressed = Input.IsActionTriggered(key[i], player.ControllerIndex)
+      else
+        pressed = Input.IsActionPressed(key[i], player.ControllerIndex)
+      end
+      if pressed then
+        local amount = grid_step and ((i == 1 or i == 4) and 15 or 17) or speed
+        local newpos = mmp_ctrl_pos + dir[i] * amount
         if newpos.X >= xmin and newpos.Y >= ymin and newpos.X <= xmax and newpos.Y <= ymax then
           mmp_ctrl_pos = newpos
           -- 玩家自己动过光标了：从此不再自动归位（照旧"你放哪儿就待在哪儿"）
