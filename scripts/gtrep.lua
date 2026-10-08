@@ -2,7 +2,7 @@ gt = RegisterMod("GoodTripPlus", 1)
 local console_output = require("scripts.gtp_console").write
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.5.1"
+gt.VERSION = "2.5.2"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -29,6 +29,7 @@ cursor:SetFrame("Idle", 0)
 ---
 local mouse_pressed = {false, false, false, false, false}
 local key = {ButtonAction.ACTION_SHOOTUP,ButtonAction.ACTION_SHOOTLEFT,ButtonAction.ACTION_SHOOTRIGHT,ButtonAction.ACTION_SHOOTDOWN}
+local cursor_arrow_keys = {'KEY_UP', 'KEY_LEFT', 'KEY_RIGHT', 'KEY_DOWN'}
 local dir = {Vector(0, -1),Vector(-1, 0),Vector(1, 0),Vector(0, 1)}
 local scpos = Vector(0, 0)
 local grid_room = {}
@@ -50,6 +51,21 @@ local mmp_highlight_gid = nil
 -- 已知代价（2026-10-05 接受）：呼出后还没碰过光标时，走路换房它会跟着你走。
 local mmp_ctrl_moved = false
 local mouse_cursor = require("scripts.gtp_mouse").new()
+local mouse_probe = require("scripts.gtp_mouseprobe").new(function(line)
+  Isaac.DebugString(line)
+end, function()
+  local arrows = '-'
+  if Keyboard and Input.IsButtonPressed then
+    arrows = ''
+    for _, button in ipairs({Keyboard.KEY_UP, Keyboard.KEY_LEFT, Keyboard.KEY_RIGHT, Keyboard.KEY_DOWN}) do
+      arrows = arrows .. (Input.IsButtonPressed(button, 0) and '1' or '0')
+    end
+  end
+  return string.format('frame=%s controller=%s arrows=%s mouseControl=%s minimapMouseTeleport=%s',
+    tostring(Game():GetFrameCount()), tostring(player.ControllerIndex), arrows,
+    tostring(Options and Options.MouseControl),
+    tostring(MinimapAPI and MinimapAPI:GetConfig('MouseTeleport') or false))
+end)
 local mouse_hit = require("scripts.gtp_mousehit")
 -- 光标淡入（2026-10-05 用户要求：与隐藏房候选标记 / 地图边界高亮同一节奏）：
 -- 按住地图键后先等几帧、再渐显，免得光标在 MinimapAPI 的大地图还没就位时就先冒出来
@@ -1188,6 +1204,16 @@ function gt:get_cursor_fade()
     return mmp_ctrl_fade / CURSOR_FADE_MAX
 end
 --
+function gt:get_cursor_arrow_button(i)
+    -- 物理键盘用索引 0；手柄仍按动作映射，不能拿键盘码查手柄按钮。
+    if player.ControllerIndex ~= 0 or not Keyboard then return nil end
+    return Keyboard[cursor_arrow_keys[i]]
+end
+function gt:cursor_direction_pressed(i)
+    if Input.IsActionPressed(key[i], player.ControllerIndex) then return true end
+    local button = gt:get_cursor_arrow_button(i)
+    return button ~= nil and Input.IsButtonPressed(button, 0) or false
+end
 function gt:mmp_ctrl_move()
     local moved = false
     local speed = gt:get_cursor_speed()
@@ -1219,8 +1245,12 @@ function gt:mmp_ctrl_move()
       local pressed
       if grid_step then
         pressed = Input.IsActionTriggered(key[i], player.ControllerIndex)
+        if not pressed then
+          local button = gt:get_cursor_arrow_button(i)
+          pressed = button ~= nil and Input.IsButtonTriggered(button, 0) or false
+        end
       else
-        pressed = Input.IsActionPressed(key[i], player.ControllerIndex)
+        pressed = gt:cursor_direction_pressed(i)
       end
       if pressed then
         local amount = grid_step and ((i == 1 or i == 4) and 15 or 17) or speed
@@ -1237,7 +1267,7 @@ function gt:mmp_ctrl_move()
 end
 function gt:cursor_keyboard_pressed()
     for i = 1, 4 do
-      if Input.IsActionPressed(key[i], player.ControllerIndex) then return true end
+      if gt:cursor_direction_pressed(i) then return true end
     end
     return false
 end
@@ -1247,7 +1277,8 @@ function gt:draw_rtmap_cursor()
 end
 function gt:get_mouse_screen_pos()
     -- Input 的 render-plane 坐标不能直接当 HUD 坐标；使用文档示例的世界到屏幕转换。
-    return Isaac.WorldToScreen(Input.GetMousePosition(true))
+    -- 第二个返回值只用于输入意图：不受 WorldToScreen 投影变化影响。
+    return Isaac.WorldToScreen(Input.GetMousePosition(true)), Input.GetMousePosition(false)
 end
 function gt:get_cursor_grid_index(pos)
     if mouse_cursor.mode ~= 'mouse' or not MinimapAPI then
@@ -1423,10 +1454,11 @@ function gt:tab_action()
         end
         player:SetShootingCooldown(2)
       end
-      local pos = gt:get_mouse_screen_pos()
+      local pos, motion = gt:get_mouse_screen_pos()
       -- 先按方向键输入切模式，再检查移动边界；鼠标在地图外也能夺回控制。
       local keyboard_pressed = gt:cursor_keyboard_pressed()
-      local follow, clicked, switched_keyboard = mouse_cursor:update({x=pos.X, y=pos.Y,
+      local follow, clicked, switched_keyboard = mouse_probe:update(mouse_cursor, {x=pos.X, y=pos.Y,
+        motion_x=motion.X, motion_y=motion.Y,
         down=Input.IsMouseBtnPressed(0), active=true, keyboard=keyboard_pressed})
       if switched_keyboard then
         mmp_ctrl_pos = gt:gid_to_rtmap_pos(gt:get_current_room_cursor_gid())
@@ -1448,8 +1480,9 @@ function gt:tab_action()
       mmp_ctrl = false
       mmp_highlight_gid = nil
       mmp_ctrl_fade = CURSOR_FADE_MIN
-      local pos = gt:get_mouse_screen_pos()
-      mouse_cursor:update({x=pos.X, y=pos.Y, down=Input.IsMouseBtnPressed(0), active=false})
+      local pos, motion = gt:get_mouse_screen_pos()
+      mouse_probe:update(mouse_cursor, {x=pos.X, y=pos.Y, motion_x=motion.X, motion_y=motion.Y,
+        down=Input.IsMouseBtnPressed(0), active=false})
     end
 end
 --
@@ -1463,8 +1496,9 @@ function gt:step()
       mmp_ctrl = false
       mmp_ctrl_fade = CURSOR_FADE_MIN
       mmp_highlight_gid = nil
-      local pos = gt:get_mouse_screen_pos()
-      mouse_cursor:update({x=pos.X, y=pos.Y, down=Input.IsMouseBtnPressed(0), active=false})
+      local pos, motion = gt:get_mouse_screen_pos()
+      mouse_probe:update(mouse_cursor, {x=pos.X, y=pos.Y, motion_x=motion.X, motion_y=motion.Y,
+        down=Input.IsMouseBtnPressed(0), active=false})
       return
     end
     if Input.IsActionTriggered(ButtonAction.ACTION_MAP,player.ControllerIndex)
@@ -1488,8 +1522,9 @@ function gt:step()
         mmp_ctrl_fade = CURSOR_FADE_MIN
         mmp_highlight_gid = nil
       end
-      local pos = gt:get_mouse_screen_pos()
-      mouse_cursor:update({x=pos.X, y=pos.Y, down=Input.IsMouseBtnPressed(0), active=false})
+      local pos, motion = gt:get_mouse_screen_pos()
+      mouse_probe:update(mouse_cursor, {x=pos.X, y=pos.Y, motion_x=motion.X, motion_y=motion.Y,
+        down=Input.IsMouseBtnPressed(0), active=false})
     end
     if prep_alarm then
       prep_alarm = false

@@ -1,4 +1,4 @@
--- 纯输入状态：持续采样按钮边沿，鼠标与键盘按最后一次操作切换。
+-- 纯输入状态：按钮边沿与真实鼠标位移切换输入，不拿 HUD 投影变化判定移动。
 local Mouse = {}
 Mouse.__index = Mouse
 function Mouse.new()
@@ -9,10 +9,16 @@ function Mouse:reset()
 end
 function Mouse:update(input)
   local previous = self.mode
-  local moved = self.x ~= nil and
-    (input.x ~= self.x or input.y ~= self.y)
+  local x, y = input.motion_x or input.x, input.motion_y or input.y
+  local dx, dy = x - (self.x or x), y - (self.y or y)
+  -- 两个 render 像素的死区。键盘模式下保留锚点，慢速移动仍可累计越过死区；
+  -- 不累计逐帧距离，避免静止鼠标的小幅往返抖动最终抢走控制。
+  local moved = self.x ~= nil and dx * dx + dy * dy >= 4
   local clicked = input.down and not self.down
-  self.x, self.y, self.down = input.x, input.y, input.down
+  self.down = input.down
+  if self.x == nil or not input.active or input.keyboard or moved or clicked or self.mode == 'mouse' then
+    self.x, self.y = x, y
+  end
   if not input.active then
     self.mode = 'keyboard'
     return false, false
