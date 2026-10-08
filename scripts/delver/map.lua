@@ -48,19 +48,19 @@ M.rooms = {}
 ---@param room_desc RoomDescriptor
 local function parse_room(room_desc)
   local data = room_desc.Data
-  if not data then return end
+  if not data or room_desc.GridIndex < 0 or room_desc.GridIndex >= C.MAP.SIZE then return end
 
   local lid = room_desc.ListIndex
   local shape_offsets = geo.SHAPE_OFFSETS[data.Shape]
   local category = C.CELL.ROOM_TYPE_TO_CATEGORY[data.Type]
+  if not shape_offsets or not category then return end
 
   local cids = {}
   for i = 1, #shape_offsets do
     cids[i] = shape_offsets[i] + room_desc.GridIndex
 
     if M.cells[cids[i]] then
-      M.rooms[lid] = M.rooms[M.cells[cids[i]].lid]
-      M.rooms[lid].mirror_lid = lid
+      -- 重叠不是镜像身份证据；镜像对应关系在主维度解析完成后显式建立。
       return
     end
 
@@ -296,6 +296,7 @@ end
 
 
 function M.reload()
+  if gt and gt.delver_memory_before_reload then gt:delver_memory_before_reload() end
   local level = Game():GetLevel()
   state.update(level)
 
@@ -304,8 +305,43 @@ function M.reload()
   M.rooms = {}
 
   local rooms_raw = level:GetRooms()
+  local mirrors = {}
+  local allow_mirror = level:GetStage() == LevelStage.STAGE1_2
+    and (level:GetStageType() == StageType.STAGETYPE_REPENTANCE
+      or level:GetStageType() == StageType.STAGETYPE_REPENTANCE_B)
+  local included, excluded = 0, 0
   for lid = 0, rooms_raw.Size - 1 do
-    parse_room(rooms_raw:Get(lid))
+    local desc = rooms_raw:Get(lid)
+    if desc and desc.Data and desc.GridIndex >= 0 and desc.GridIndex < C.MAP.SIZE then
+      -- GetRooms 包含其它维度。与 MinimapAPI LoadDefaultMap 一样，显式查询
+      -- SafeGridIndex + 维度并核对描述符身份，不能靠占据格重叠猜镜像。
+      local main = level:GetRoomByIdx(desc.SafeGridIndex, C.DIMENSION.MAIN)
+      if main and main.Data and GetPtrHash(main) == GetPtrHash(desc) then
+        parse_room(desc)
+        included = included + 1
+      elseif allow_mirror then
+        local mirror = level:GetRoomByIdx(desc.SafeGridIndex, C.DIMENSION.MIRROR)
+        if mirror and mirror.Data and GetPtrHash(mirror) == GetPtrHash(desc) then
+          mirrors[#mirrors+1] = desc
+        else
+          excluded = excluded + 1
+        end
+      else
+        excluded = excluded + 1
+      end
+    else
+      excluded = excluded + 1
+    end
+  end
+  -- 两遍处理，避免镜像描述符排在主维度前面时反客为主。
+  for _, desc in ipairs(mirrors) do
+    local offsets = geo.SHAPE_OFFSETS[desc.Data.Shape]
+    local cell = offsets and M.cells[desc.GridIndex + offsets[1]]
+    local main = cell and M.rooms[cell.lid]
+    if main and main.tl_cid == desc.GridIndex and main.shape == desc.Data.Shape then
+      main.mirror_lid = desc.ListIndex
+      M.rooms[desc.ListIndex] = main
+    end
   end
   for cid, cell in pairs(M.cells) do
     if cell.category == C.CELL.CATEGORY.SECRET then
@@ -322,12 +358,25 @@ function M.reload()
 
   find_fakes()
   find_ultra_fakes()
+  M.fake_baseline={}
+  for cid,candidate in pairs(M.candidates) do
+    if candidate.lid==nil then M.fake_baseline[cid]=true end
+  end
 
   log.info("Map loading complete!\n")
-  log.print_map(M):info()
-  log.draw_map(M):info()
+  -- log.info 当前为 no-op；不再构建随后被丢弃的整层文本/ASCII 地图。
 
   state.done()
+  if gt and gt.delver_memory_after_reload then gt:delver_memory_after_reload() end
+  -- 自动取证：每次重建一次；诊断异常不得阻断候选渲染。
+  pcall(function()
+    if gt and gt.is_debug and gt:is_debug() then
+      Isaac.DebugString('[GTPdelver] rebuild stage=' .. level:GetStage()
+        .. ' stageType=' .. level:GetStageType() .. ' dimension=' .. state.get_dimension()
+        .. ' total=' .. rooms_raw.Size .. ' main=' .. included
+        .. ' mirror=' .. #mirrors .. ' excluded=' .. excluded)
+    end
+  end)
 end
 
 

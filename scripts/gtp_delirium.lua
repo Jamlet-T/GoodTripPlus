@@ -78,7 +78,7 @@ local stats = {
   found_rooms = 0,    -- 最近一次扫描找到的 Delirium 房数量
   applied = 0,        -- 累计往房间图标表里补了多少次
   used_fallback = 0,  -- 其中靠 DeliriumDistance 兜底命中的次数
-  last_result = "尚未触发",
+  last_result = "not triggered",
 }
 
 -- 本层「Delirium 房」集合，键为网格索引；层身份变化时重建
@@ -88,8 +88,8 @@ local marked_key = nil
 local last_scan_lines = {}
 
 local function log(message)
-  if gt.DebugMod then
-    Isaac.ConsoleOutput("[GoodTripPlus] " .. message .. "\n")
+  if gt:is_debug() then
+    require("scripts.gtp_console").write("[GoodTripPlus] " .. message .. "\n")
     Isaac.DebugString("[GoodTripPlus] " .. message)
   end
 end
@@ -117,10 +117,10 @@ local function register_marker_icon()
   if ok and sprite then
     marker_icon_state = true
     MinimapAPI:AddIcon(MARKER_ICON_ID, sprite, MARKER_ICON_ANIM, 0)
-    log("Delirium：已注册自定义精神错乱图标 " .. MARKER_ICON_ID)
+    log("Delirium: registered custom icon " .. MARKER_ICON_ID)
   else
     marker_icon_state = false
-    log("Delirium：图标注册失败，退回 " .. FALLBACK_ICON_ID)
+    log("Delirium: icon registration failed; fallback=" .. FALLBACK_ICON_ID)
   end
   return marker_icon_state
 end
@@ -214,10 +214,10 @@ local function rebuild_marked_rooms(level)
   last_scan_lines = scan
   stats.scans = stats.scans + 1
   stats.last_result = string.format(
-    "扫描 %d 次，本层找到 %d 个 Delirium 房%s",
+    "scans=%d, Delirium rooms on floor=%d%s",
     stats.scans, stats.found_rooms,
-    stats.used_fallback > 0 and ("（兜底 " .. stats.used_fallback .. "）") or "")
-  log("Delirium：本层找到 " .. stats.found_rooms .. " 个 Delirium 房")
+    stats.used_fallback > 0 and (" (fallback=" .. stats.used_fallback .. ")") or "")
+  log("Delirium: rooms found on floor=" .. stats.found_rooms)
 end
 
 -- 确保房间的 PermanentIcons 第 1 位是我们的图标；返回是否真的改动了
@@ -270,9 +270,9 @@ local function update()
     if gid and marked_rooms[gid] then
       if ensure_icon(room) then
         stats.applied = stats.applied + 1
-        stats.last_result = string.format("已标记房间 %s（累计 %d 次）",
+        stats.last_result = string.format("marked room=%s, total applications=%d",
           tostring(gid), stats.applied)
-        log("Delirium：房间 " .. tostring(gid) .. " 已加上精神错乱图标")
+        log("Delirium: added icon to room " .. tostring(gid))
       end
     end
   end
@@ -285,28 +285,9 @@ gt:AddCallback(ModCallbacks.MC_POST_NEW_LEVEL, function()
   marked_key = nil
 end)
 
--- MCM 开关（默认关；显示类功能，与隐藏房标记 / 骷髅房一样给开关）
---
--- ⚠️ 必须只注册一次：MCM 的 `AddSetting` 无脑 append、不按键去重，而
--- `MC_POST_GAME_STARTED` **每次 rewind 都会再触发一次** → 不设 once 标记的话，
--- 用几次 rewind 配置菜单里就多几份重复项（见 gtp_mapbounds.lua 同处注释）。
-local mcm_registered = false
-gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
-  if mcm_registered or not ModConfigMenu then
-    return
-  end
-  mcm_registered = true
-  local zh = type(Options.Language) == "string"
-    and Options.Language:lower():sub(1, 2) == "zh"
-  ModConfigMenu.AddBooleanSetting(
-    "GoodTripPlus", nil,
-    "DeliriumRoom",
-    false,
-    zh and "标记虚空层的精神错乱房" or "Mark the Delirium Room in The Void",
-    zh and "在虚空层（The Void）地图上，把属于精神错乱（Delirium）的那间 boss 房用专属图标标出来——虚空层有好几间 boss 房，只有一间是 Delirium。只要该房间在地图上显示出来就会标注，不必先进去过。默认关闭。"
-       or "On the map of The Void, mark the boss room that belongs to Delirium with a dedicated icon. The Void has several boss rooms but only one of them is Delirium. Shown as soon as the room is revealed on the map, no need to enter it first. Default: disabled"
-  )
-end)
+-- MCM 开关：不在本模块注册——2026-10-04 起全部 MCM 项集中在 gtrep.lua 的
+-- 统一注册块里按用户指定顺序注册（本功能配置键 = DeliriumRoom，默认关；
+-- 文案在 gtrep.lua 的 GT_STRINGS.delirium_*）。
 
 -- 把统计并入统一的 gtpdiag 输出（与骷髅房 / rewind 修复共用同一条命令）
 gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command)
@@ -348,7 +329,7 @@ gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command)
     diag = "delirium ERROR: " .. tostring(diag)
   end
   for line in tostring(diag):gmatch("[^\n]+") do
-    Isaac.ConsoleOutput("[GoodTripPlus] " .. line .. "\n")
+    require("scripts.gtp_console").write("[GoodTripPlus] " .. line .. "\n")
     Isaac.DebugString("[GoodTripPlus] " .. line)
   end
 end)

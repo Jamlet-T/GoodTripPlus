@@ -229,6 +229,7 @@ function M.render()
   if need_refresh then refresh() end
 
   local show_red = state.can_see_red()
+  local project
 
   for cid, cand in pairs(map.candidates) do
     if not show_red and cand.secret_type == C.SECRET_TYPE.ULTRA then
@@ -240,7 +241,8 @@ function M.render()
     end
 
     -- 与传送光标共用同一套投影，保证与 MinimapAPI 的地图逐像素对齐
-    local pos = gt:gid_to_rtmap_pos(cid)
+    project = project or gt:make_rtmap_projector()
+    local pos = project(cid)
 
     local colors = C.MARKER.COLORS[cand.secret_type]
     local alpha = C.MARKER.ALPHA[cand.marker_status]

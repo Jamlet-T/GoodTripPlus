@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 # 打包成可直接发人的 zip（dist/goodtripplus-<版本>.zip）
 #
-# 与 deploy.sh 的区别：deploy.sh 是把源码同步到本机的游戏 mods 目录，
-# 本脚本只是产出分发用的压缩包，不碰游戏目录。
+# 本脚本只产出分发用的压缩包，不碰游戏目录。
 #
 # 排除项：
-#   deploy.sh / pack.sh  —— 开发脚本，里面有本机绝对路径，对使用者无用
+#   pack.sh              —— 打包脚本本身不属于模组运行文件
 #   disable.it           —— 游戏生成的「禁用该 mod」标记，不属于源码
-#   .git / .workbuddy    —— 版本控制与工作区记忆
+#   .git                  —— 版本控制
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,7 +19,6 @@ OUT="$OUT_DIR/goodtripplus-$VERSION.zip"
 
 PY=""
 for candidate in \
-  "C:/Users/MECHREVO/.workbuddy/binaries/python/versions/3.13.12/python.exe" \
   "$(command -v python3 || true)" \
   "$(command -v python || true)"
 do
@@ -40,7 +38,7 @@ import os, sys, zipfile
 
 out = sys.argv[1]
 EXCLUDE_FILES = {"deploy.sh", "pack.sh", "disable.it"}
-EXCLUDE_DIRS = {".git", ".workbuddy", "dist"}
+EXCLUDE_DIRS = {".git", "dist"}
 
 files = []
 for dirpath, dirnames, filenames in os.walk("."):

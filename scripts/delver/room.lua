@@ -133,22 +133,23 @@ function M.door_check()
     end
   end
 
-  log.print_room(lid, map):info()
+  -- log.info 为 no-op；错误分支的 print_room(...):error() 仍保留。
 end
 
----@param effect EntityEffect
-function M.bomb_check(effect)
-  if state.is_ignored() then return end
+---@param position Vector
+---@param radius number
+function M.wall_hit_check(position, radius)
+  if state.is_ignored() then return false end
 
   local lid = Game():GetLevel():GetCurrentRoomDesc().ListIndex
   local room = map.rooms[lid]
-  if not room then return end
+  if not room then return false end
   lid = room.lid
 
   local room_obj = Game():GetRoom()
-  local bomb_pos = effect.Position
-  local bomb_gid = room_obj:GetGridIndex(bomb_pos)
-  if bomb_gid < 0 then return end
+  local hit_gid = room_obj:GetGridIndex(position)
+  if hit_gid < 0 then return false end
+  local changed = false
 
   for cid, cand in pairs(map.candidates) do
     if cand.secret_type == C.SECRET_TYPE.ULTRA then goto next_cand end
@@ -159,11 +160,12 @@ function M.bomb_check(effect)
       end
 
       local door_pos = room_obj:GetDoorSlotPosition(entry.doorslot)
-      local dist = (bomb_pos - door_pos):Length()
-      if dist < BOMB_RADIUS then
+      local dist = (position - door_pos):Length()
+      if dist < radius then
         if not cand.lid then
           map.candidates[cid] = nil
-          return
+          changed = true
+          break
         end
       end
 
@@ -172,6 +174,11 @@ function M.bomb_check(effect)
 
     ::next_cand::
   end
+  return changed
+end
+
+function M.bomb_check(effect)
+  return M.wall_hit_check(effect.Position, BOMB_RADIUS)
 end
 
 return M

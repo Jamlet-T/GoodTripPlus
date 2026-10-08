@@ -64,6 +64,8 @@
 ]]
 
 local GTP = {}
+local console_output = require("scripts.gtp_console").write
+local Snapshot = require("scripts.gtp_iconsnapshot")
 
 local LOG_LIMIT = 16
 
@@ -72,7 +74,7 @@ local events = {}
 local stats = {
   wipes = 0,
   restored_rooms = 0,
-  last_result = "尚未触发",
+  last_result = "not triggered",
 }
 
 local function push_event(text)
@@ -83,27 +85,17 @@ local function push_event(text)
 end
 
 local function out(message)
-  Isaac.ConsoleOutput("[GoodTripPlus] " .. message .. "\n")
+  console_output("[GoodTripPlus] " .. message .. "\n")
   Isaac.DebugString("[GoodTripPlus] " .. message)
 end
 
 -- 用一组在「同一层」内稳定的字段拼出层身份。
 -- 换层时 stage / absoluteStage / 种子 / 房间数 至少有一个会变，
 -- 而 rewind 回滚到同一层时这组值完全一致。
+-- 层身份的定义已收进 gtrep（gt:level_identity）—— 门图持久化也要用它判「是不是同一层」，
+-- 一处实现、两处使用（2026-10-06）。
 local function level_identity()
-  local level = Game():GetLevel()
-  if not level then
-    return nil
-  end
-  local rooms = level:GetRooms()
-  return table.concat({
-    level:GetStage(),
-    level:GetStageType(),
-    level:GetAbsoluteStage(),
-    Game():GetSeeds():GetStartSeed(),
-    rooms and rooms.Size or -1,
-    level:IsAscent() and 1 or 0,
-  }, ":")
+  return gt:level_identity()
 end
 
 local function copy_icons(icons)
@@ -160,28 +152,9 @@ end
 --   identity 层身份
 --   arrays   各维度的房间数组本身（用来识别 MinimapAPI 是否重建过地图）
 --   icons    各维度「有图标的房间」的图标副本，键是 Descriptor.ListIndex
--- 这里做的是真正的深拷贝，所以即使 MinimapAPI 之后原地改动也不会污染快照。
+-- 内容不变时复用已有不可变副本；有变化才复制，因此原地改动仍不会污染上一帧快照。
 local function read_state()
-  local state = {
-    identity = level_identity(),
-    arrays = {},
-    icons = {},
-  }
-  if MinimapAPI and MinimapAPI.Levels then
-    for dimension, rooms in pairs(MinimapAPI.Levels) do
-      state.arrays[dimension] = rooms
-      local dimension_icons = {}
-      for _, room in ipairs(rooms) do
-        local descriptor = room.Descriptor
-        local icons = room.ItemIcons
-        if descriptor and descriptor.ListIndex and icons and #icons > 0 then
-          dimension_icons[descriptor.ListIndex] = copy_icons(icons)
-        end
-      end
-      state.icons[dimension] = dimension_icons
-    end
-  end
-  return state
+  return Snapshot.read(MinimapAPI and MinimapAPI.Levels, level_identity(), prev_state)
 end
 
 -- 统计「上一帧有图标、这一帧变空」的房间数，以及被整个换掉的房间数组数量。
@@ -229,14 +202,14 @@ gt:AddCallback(ModCallbacks.MC_POST_UPDATE, function()
         stats.wipes = stats.wipes + 1
         stats.restored_rooms = stats.restored_rooms + restored_rooms
         stats.last_result = "frame=" .. Game():GetFrameCount() ..
-          " 恢复 " .. restored_rooms .. " 个房间，跳过 " .. skipped_unexplored .. " 个未探索房间"
+          " restored=" .. restored_rooms .. " rooms, skippedUnexplored=" .. skipped_unexplored
         push_event("RESTORE " .. restored_rooms .. " rooms, skip " ..
           skipped_unexplored .. " unexplored")
-        out("rewind fix: 检测到整批图标丢失，已恢复 " .. restored_rooms ..
-          " 个房间的图标（跳过 " .. skipped_unexplored .. " 个未探索房间）")
+        out("rewind fix: icon wipe detected; restored " .. restored_rooms ..
+          " rooms, skipped " .. skipped_unexplored .. " unexplored rooms")
         current = read_state() -- 重新读，避免下一帧拿恢复前的数据做比较
       else
-        stats.last_result = "检测到清空，但判定为换层/首次载入，未恢复"
+        stats.last_result = "icon wipe on a different floor or initial load; not restored"
       end
     end
   end
@@ -254,9 +227,12 @@ gt:AddCallback(ModCallbacks.MC_POST_NEW_ROOM, function()
 end)
 
 gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function(_, is_continued)
+  -- 继续存档由磁盘地图记忆恢复，不能用上一次会话的内存图标覆盖合法拾取。
+  -- 新开局同样清空；同一局中途 rewind 保留旧快照用于批量清空修复。
+  if is_continued or Game():GetFrameCount()<2 then prev_state=nil end
   push_event("frame=" .. Game():GetFrameCount() ..
     " POST_GAME_STARTED continued=" .. tostring(is_continued))
-  if gt.DebugMod then
+  if gt:is_debug() then
     out("POST_GAME_STARTED continued=" .. tostring(is_continued))
   end
 end)

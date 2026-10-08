@@ -32,11 +32,12 @@
   回溯线（The Ascent）排除：那里的 boss 房只是路过房、没有奖励门，直接跳过，
   免得任何边界情况误伤。
 
-  拦在哪（不改 gtrep.lua）
-  ------------------------
-  包一层 `gt.check_teleble()`：保存原函数再替换，命中时直接返回 false。
-  表现与其它准入拒绝完全一致 —— 光标不高亮、按 TAB 也不启用、松手也不会传。
-  常开、没有开关；唯一的例外是 `gt.DebugMod` 调试模式（它本来就要绕过全部准入）。
+  拦在哪
+  ------
+  登记为 ① departure 段的规则 `departure.reward_door`（2026-10-06 起不包装函数）。
+  ① 段是「现在能不能走」，它决定**光标能不能呼出** —— 所以房间里有奖励门时连光标都不出。
+  表现与其它准入拒绝完全一致。常开、没有开关；**任何设置都不能绕过**
+  （包括「调试模式」—— 2026-10-06 起调试模式只出诊断、不改变任何传送判定）。
 
   诊断
   ----
@@ -91,21 +92,18 @@ local function reward_door_blocks()
     return gt:has_reward_door()
 end
 
--- 包一层准入判定：有奖励门时整体拒绝
-local base_check_teleble = gt.check_teleble
-if type(base_check_teleble) == "function" then
-  gt.check_teleble = function(self, gid)
-    -- 常开（用户 2026-10-03 要求不给开关）；gt.DebugMod 调试模式仍可绕过，
-    -- 与 gtrep 里其它准入拒绝保持一致
-    if not gt.DebugMod and reward_door_blocks() then
-      return false
-    end
-    return base_check_teleble(self, gid)
-  end
-else
-  Isaac.DebugString("[GoodTripPlus][rewardDoor] WARNING: gt.check_teleble 不存在，" ..
-    "包装失败（加载顺序变了？）")
-end
+-- 登记判定规则（2026-10-06 起不再包装 gt.check_teleble）。
+-- 排在 ① departure 段 —— 「现在能不能走」，与目标无关：有奖励门时**连光标都呼不出**。
+-- 常开（用户 2026-10-03 要求不给开关），且**不可绕过**（调试模式自 2026-10-06 起
+-- 不再参与判定，只出诊断）。
+gt:add_travel_rule({
+  id = "departure.reward_door", stage = "departure", order = 70,
+  text = "房间里有通往奖励房间的门（恶魔房 / 天使房 / Boss Rush / 死寂）",
+  test = function(ctx)
+    if not reward_door_blocks() then return nil end
+    return { slot = last_hit_slot, door = last_hit_desc }
+  end,
+})
 
 -- gtpdiag 附带本模块状态（与其它模块共用同一条命令；回调只输出、不返回字符串）
 gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command)
@@ -117,7 +115,7 @@ gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command)
   local line = "rewardDoor: present=" .. tostring(present) ..
     (present and (" hit{" .. tostring(last_hit_desc) .. "}") or " (no devil/angel/bossrush/hush door)")
   pcall(function()
-    Isaac.ConsoleOutput(line .. "\n")
+    require("scripts.gtp_console").write(line .. "\n")
     Isaac.DebugString("[GoodTripPlus] " .. line)
   end)
 end)

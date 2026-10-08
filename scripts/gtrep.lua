@@ -1,11 +1,16 @@
 gt = RegisterMod("GoodTripPlus", 1)
+local console_output = require("scripts.gtp_console").write
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.0.0"
+gt.VERSION = "2.5.0"
+-- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
+local build_ok, build = pcall(require, "scripts.gtp_build")
+gt.BUILD = build_ok and type(build) == "string" and build or "source"
 pcall(function()
-  Isaac.ConsoleOutput("[GoodTripPlus] v" .. gt.VERSION ..
+  console_output("[GoodTripPlus] v" .. gt.VERSION ..
     " loaded (console command: gtpdiag)\n")
   Isaac.DebugString("[GoodTripPlus] v" .. gt.VERSION .. " loaded")
+  Isaac.DebugString("[GoodTripPlus] build=" .. gt.BUILD)
 end)
 -------------------------------------------
 local player = Isaac.GetPlayer(0)
@@ -39,6 +44,24 @@ local n_room_num = 0
 local mmp_ctrl = false
 local mmp_ctrl_pos = Vector(0, 0)
 local mmp_highlight_gid = nil
+-- 光标「出生后还没被玩家挪动过」：这个状态下**每帧**都把它贴回当前房间
+-- （跨层 / R 重开 / rewind 后地图重绘都能自愈，和隐藏房标记同一套做法）。
+-- 玩家一按方向键就置 true，之后完全照旧 —— 光标放哪儿待在哪儿。
+-- 已知代价（2026-10-05 接受）：呼出后还没碰过光标时，走路换房它会跟着你走。
+local mmp_ctrl_moved = false
+local mouse_cursor = require("scripts.gtp_mouse").new()
+local mouse_hit = require("scripts.gtp_mousehit")
+-- 光标淡入（2026-10-05 用户要求：与隐藏房候选标记 / 地图边界高亮同一节奏）：
+-- 按住地图键后先等几帧、再渐显，免得光标在 MinimapAPI 的大地图还没就位时就先冒出来
+-- （2.1.2 修好「重开时光标贴回当前房间」之后尤其明显 —— 那时地图刚重建，光标已经画了）。
+-- 计数口径刻意与 delver/render.lua 的 tab_hold_cnt 一致（THRESHOLD=3 / MAX=9：
+-- 第 4 帧起可见，alpha 由 1/9 渐到 1，约 0.2 秒）。**那边改了这边要一起改。**
+-- 为什么不直接复用 delver 的 get_fade()：它在「被忽略的层」（回溯线 / STAGE8 / 贪婪模式 /
+-- 镜像外维度）恒为 0，而传送光标在这些层必须照常工作（那些层只是**标记**没意义）。
+local CURSOR_FADE_MIN = -3
+local CURSOR_FADE_MAX = 9
+local mmp_ctrl_fade = CURSOR_FADE_MIN
+
 -- 隐藏房现场诊断的去重表（按「层 + 目标格」，new_level 清空）
 local secret_diag_logged = {}
 -- 上一次手动 dump 的帧号（F4 连按限流，避免刷屏）
@@ -50,11 +73,23 @@ local last_diag_frame = -1000
 -- door graph, learned one room at a time: grid adjacency alone cannot tell a
 -- doorway from a secret room's unbombed wall. Per dimension: the mirror world
 -- reuses the same grid numbers for different rooms.
-local door_link = {}  --door_link[dim][a][b]: a passage, seen from either end
-local door_swept = {} --door_swept[dim][a]: a's own walls were read
+local DoorGraph = require("scripts.gtp_doorgraph")
+local door_state = DoorGraph.new()
 --curse-room door spikes seen from outside / inside; Flat File strips only the
 --side it was used on, so the two are kept apart
 local curse_bare_outside, curse_bare_inside = {}, {}
+require("scripts.gtp_doors")(gt, {
+  state = door_state,
+  get_aux = function()
+    return { bare_out = curse_bare_outside, bare_in = curse_bare_inside, pre = secret_pre_room_id }
+  end,
+  reset_aux = function()
+    curse_bare_outside, curse_bare_inside, secret_pre_room_id = {}, {}, {}
+  end,
+  set_aux = function(state)
+    curse_bare_outside, curse_bare_inside, secret_pre_room_id = state.bare_out, state.bare_in, state.pre
+  end,
+})
 --each room shape's cell offsets beyond the anchor's four direct neighbours
 --（floor.lua 的 neighlut 原样；下标 = RoomDescriptor.Data.Shape）
 local neighlut = {
@@ -76,22 +111,28 @@ local room_neighbours = {}
 
 gt.DebugMod = false
 gt.FastRestartEnable = false
-gt.TeleportAnimation = true
-gt.FollowCurseOfLost = true
+-- 传送过场：1 = 立即出现 / 2 = 淡入淡出 / 3 = 传送白闪（见 gt:get_teleport_transition()）。
+-- 取代了原来的两个布尔项 FastTransition + TeleportAnimation（2026-10-05 用户要求做成三选一，
+-- 默认 2 = 淡入淡出；上游 GoodTrip [Fixed] 也把这两个效果放在 MCM 里）。
+gt.TeleportTransition = 2
+-- 注：迷失诅咒下是否禁用传送**已不再由我们的配置项控制**（2026-10-05 用户要求）——
+-- 改为跟随 MinimapAPI 的 OverrideLost（其菜单里的 "Display During Curse"），见 gt:curse_map_visible()。
+-- 这是对 GoodTrip [Fixed] 的第 3 处语义偏离（Fixed 是独立的 FollowCurseOfLost 开关）。
 -- 传送范围（本项目合并原 Fixed 的 AllowNeighborRoom + AllowAnyRoom 两项）：
 --   1 = 任意房间（原 AllowAnyRoom 开）
 --   2 = 相邻房间（原默认：AllowNeighborRoom 开、AllowAnyRoom 关）
 --   3 = 已探索房间（原 AllowNeighborRoom 关、AllowAnyRoom 关）
 gt.TravelMode = 2
 gt.FairTripPath = true
-gt.ArriveAtDoor = false
+-- 默认改为开：偏离 Fixed 的默认关（2026-10-04 用户决定）
+gt.ArriveAtDoor = true
 gt.FairTripTime = false
-gt.FastTransition = true
 gt.HighlightCursorRoom = true
+gt.CursorGridStep = false
 gt.ShowSecretMarkers = true
 local _, err = pcall(require, "gtconfig")
 ----
-local debug = gt.DebugMod
+-- 调试模式不再是一次性快照：改成 gt:is_debug() 每帧实时读（MCM 开关改了立刻生效，不用重启）。
 local fastrestartenable = gt.FastRestartEnable
 local tele_cd = 0
 -------------------------------
@@ -131,70 +172,50 @@ end
 -- ===== 以下准入与传送判定：忠实移植自 GoodTrip [Fixed]（scripts/rules.lua）=====
 --（floor.lua door_graph/sweep_doors/linked：门图，一格一格学出来）
 local function door_graph()
-    local d = Game():GetRoom():IsMirrorWorld() and 1 or 0
-    door_link[d] = door_link[d] or {}
-    door_swept[d] = door_swept[d] or {}
-    return door_link[d], door_swept[d]
+  return gt:get_door_graph()
 end
 
--- 必须炸开（或用钥匙打开）墙才能进的三种隐藏房：
--- 7 = ROOM_SECRET、8 = ROOM_SUPERSECRET、29 = ROOM_ULTRASECRET（红钥匙房）
---
--- 实测（2026-10-03，gtpdiag 门表，用户现场复现）：
---   墙还在   → variant=7(DOOR_HIDDEN) busted=false canBlowOpen=true  isOpen=false
---   已炸开   → variant=8(DOOR_UNLOCKED) busted=true  canBlowOpen=false isOpen=true
--- 也就是说炸开之后**变体确实会变**，Fixed 门图里那句
--- `door.Desc.Variant ~= DoorVariant.DOOR_HIDDEN` 是对的（已炸开的洞口本来就会被记进门图），
--- 所以这里不需要、也不该再加别的「已炸开」判据（曾经加过 hidden_door_open，已删）。
--- 真正卡住传送的是 check_neigh_connected 里那份「已显示但未探索目标」的类型白名单：
--- 隐藏房不在名单里 → 还没进去过的隐藏房一律拦，哪怕洞口已经炸开。
-function gt:is_secret_room(rd)
-    if not rd or not rd.Data then
-      return false
-    end
-    local t = rd.Data.Type
-    return t == 7 or t == 8 or t == 29
-end
-
---read the current room's doors (the only room the game answers for) into the
---graph both ways. DOOR_HIDDEN is an unbombed wall, so no passage; everything
---else, locked included, is walkable. All read live so nothing is from different moments.
-function gt:sweep_doors()
-    local live = Game():GetRoom()
-    local lvl = Game():GetLevel()
-    local here = lvl:GetCurrentRoomDesc().SafeGridIndex
-    local link, swept = door_graph()
-    link[here] = link[here] or {}
-    swept[here] = true
-    for i = 0, 7 do
-      local door = live:GetDoor(i)
-      --DOOR_HIDDEN is an unbombed wall, so no passage; everything
-      --else, locked included, is walkable. All read live so nothing is from different moments.
-      --（实测：炸开之后 variant 会变成 8，所以这行判据本身就够用，别再加「已炸开」判据）
-      if door and door.Desc.Variant ~= DoorVariant.DOOR_HIDDEN then
-        local tdes = lvl:GetRoomByIdx(door.TargetRoomIndex, -1)
-        if tdes then
-          local there = tdes.SafeGridIndex
-          --curse-room spikes are read off the door itself: Flat File strips them
-          --once and for good, so the trinket in hand says nothing about this door
-          if door.TargetRoomType == RoomType.ROOM_CURSE then
-            curse_bare_outside[there] = door.VarData ~= 0
-          elseif live:GetType() == RoomType.ROOM_CURSE then
-            curse_bare_inside[here] = door.VarData ~= 0
-          end
-          if there ~= here then
-            --this end knows its slot; the far end gets a bare mark until its own turn
-            link[here][there] = i
-            link[there] = link[there] or {}
-            if link[there][here] == nil then link[there][here] = true end
-          end
-        end
-      end
-    end
-end
-
+-- 门扫描、隐藏房分类和门图读写：scripts/gtp_doors.lua。
 --may a trip step between these rooms? A passage seen from either end: yes. A
 --swept room saying nothing: no. Neither swept (mod loaded mid-run): grid adjacency stands.
+-- **严格版**：只在门图里**真的学到过这条边**时才算连通 —— 不吃下面的几何兜底。
+-- 用途：判定的「最后一跳」（相邻豁免）必须走一扇我们**亲眼见过能过**的门。
+-- ⚠️ 2026-10-06 实测（真机日志 + 代码共同证明）：继续存档 / rewind 会清空我们的门图，
+-- 却保留游戏侧的「已访问」状态 —— 于是「访问过但本次没重扫」的房间既 swept=false 又
+-- VisitedCount>0，兜底 `not (swept[a] or swept[b])` 就把它们当成与目标相连，
+-- 门锁着的宝藏房 / 街机厅因此能被传进去（links=none 却 ③ 放行，只有兜底这一条路）。
+-- 网格步进方向 -> 那一侧的门槽位掩码（DoorSlotFlag：LEFT0=1<<0, UP0=1<<1, RIGHT0=1<<2,
+-- DOWN0=1<<3, LEFT1=1<<4 …）。用于判断「这一侧配置上有没有门」。
+function gt:side_door_mask(step)
+  if step == -1 then return 1 | 16            -- LEFT（slot 0 / 4）
+  elseif step == 1 then return 4 | 64         -- RIGHT（slot 2 / 6）
+  elseif step == -13 then return 2 | 32       -- UP（slot 1 / 5）
+  elseif step == 13 then return 8 | 128       -- DOWN（slot 3 / 7）
+  end
+  return nil
+end
+
+-- (a,b) 之间**配置上**有没有门（不看锁没锁）—— 用来区分「隔墙相邻」与「有门连通」。
+-- 读 RoomConfigRoom.Doors（官方文档：位掩码，由 DoorSlotFlag 构成），两面都要有门才算。
+-- ⚠️ 字段读不到（本 API 版本没暴露 / 返回非数字）时**一律返回 false** —— 宁可保守拦掉，
+-- 也不要凭猜测放行（这就是「隔墙也能传进去」那个洞的来源）。
+function gt:has_door_between(a, b)
+  local cell, step = gt:touching_cell(a, b)
+  if not cell or not step then return false end
+  local ra, rb = grid_room[a], grid_room[b]
+  local da = ra and ra.Data and ra.Data.Doors
+  local db = rb and rb.Data and rb.Data.Doors
+  if type(da) ~= "number" or type(db) ~= "number" then return false end
+  local m, opp = gt:side_door_mask(step), gt:side_door_mask(-step)
+  if not m or not opp then return false end
+  return (da & m) ~= 0 and (db & opp) ~= 0
+end
+
+function gt:has_known_passage(a, b)
+  local link = door_graph()
+  return link[a] ~= nil and link[a][b] ~= nil
+end
+
 function gt:rooms_linked(a, b)
     local link, swept = door_graph()
     if link[a] and link[a][b] ~= nil then
@@ -242,27 +263,25 @@ function gt:get_room_neighbours()
     end
 end
 
+-- 注：这里原来有一份「已显示但未探索目标的类型白名单」（Fixed 原逻辑：
+-- 只放普通房 1 / boss 5 / 小 boss 6 / 献祭 13，另加红钥匙房、隐藏房、镜像世界与
+-- 一层的水层商店宝箱房）。它已于 2026-10-06 **整体删除**（用户决定，原计划排在步 2，
+-- 因实测报出「门已用钥匙打开、还没进去过的商店/宝藏房/星象房/挑战房传不进去」而提前）：
+--
+--   删它的理由：恶魔房/天使房/Boss Rush/黑市/贪婪出口本来就不会显示在地图上，
+--   「目标必须已显示」这条已经排除它们，白名单对它们是重复劳动；而副作用是把
+--   「门已开着、能走进去」的房间也拒了（二层以后的商店、已解锁的图书馆/骰子房/街机厅）。
+--   正确的窗口应该是**实际通路**：见 gtp_travel 的 gt:door_is_passage —— 门锁着不算通路，
+--   解锁之后才算。安全性不再依赖房间类型，而是「那扇门现在能不能走」。
+--
+-- 于是「未探索的相邻房能不能传」现在只由 ③ range 段决定：目标已显示 + 旁边有
+-- 「已显示 + 已探索 + 已清」的房 + 两者之间有**实际通路**。
+--
 --may I go there: the predicates a trip is checked against, the reachable set,
 --the fair distance, the door a walk would have come in by.
 function gt:check_neigh_connected(trd, cond)
     local tid = trd.SafeGridIndex
     if (trd.DisplayFlags & 1) ~= 0 then
-      --a red-key room stands open already, whatever it turned out to hold
-      -- 本 mod 对 Fixed 的一处偏离（2026-10-03，理由 + 实测）：
-      -- Fixed 这份「已显示但未探索目标」的类型白名单只放普通房(1)/boss(5)/小 boss(6)/
-      -- 献祭(13)，隐藏房(7/8/29)不在里面 —— 于是**洞口已经炸开**的隐藏房照样被拦
-      -- （用户报的「炸开隐藏房传不进去」就是这个）。放行后安全性由调用方保证：
-      -- 最后一步还要求 rooms_linked(邻居, 目标)，而实测炸开洞口在门图里有真门
-      -- （variant 7 -> 8），没炸开的墙没有 → 「已炸开的能进、还封着的进不去」。
-      if (trd.VisitedCount == 0 or not trd.Clear) and
-        trd.Flags & RoomDescriptor.FLAG_RED_ROOM == 0 and
-        not gt:is_secret_room(trd) and
-        trd.Data.Type ~= 1 and trd.Data.Type ~= 5 and
-        trd.Data.Type ~= 6 and trd.Data.Type ~= 13 and
-        not (((stage == 1 and level:GetStageType() < StageType.STAGETYPE_REPENTANCE) or room:IsMirrorWorld())
-                and ((not Game():IsGreedMode() and trd.Data.Type == 4) or trd.Data.Type == 2)) then --free: stage-1 normal floor, or Downpour/Dross mirror world
-        return false
-      end
       local function check_grid(off)
         local id = tid + off
         if id < 0 or id > 168 then
@@ -300,6 +319,7 @@ function gt:check_neigh_connected(trd, cond)
     return false
 end
 
+-- 门图生命周期与持久化适配：scripts/gtp_doors.lua。
 function gt:get_reachable_rooms()
     --flood from the current room through visited+cleared rooms; each step needs
     --a door too, else a secret room counts as a corridor on all four sides
@@ -499,7 +519,10 @@ function gt:start_room_lock()
     -- 先说持有道具：房间里出现同名特效（例如玩家自己传送时的漩涡）时，
     -- 这一条能挡掉误判，也省下一次实体遍历。想纯按实体判定就把这段删掉。
     local p = player or Isaac.GetPlayer(0)
-    if not p then
+    -- ⚠️ 光判 nil 不够：开局初始化期间 / 过场里拿到的是「对象在、但还没就绪」的玩家，
+    -- 直接 HasCollectible 会在原生层崩溃（2026-10-05 实测：POST_GAME_STARTED 期间调用即闪退两次）。
+    -- 用 Exists() 兜底，任何调用时机都不会再把游戏带崩。
+    if not p or not p:Exists() then
       return false
     end
     if not (p:HasCollectible(CollectibleType.COLLECTIBLE_CARD_READING)
@@ -509,57 +532,11 @@ function gt:start_room_lock()
     return gt:has_start_room_entrance()
 end
 
-function gt:check_teleble(gid)
-    if gid == -99
-    or (gt:get_config_bool("FollowCurseOfLost", true)
-        and level:GetCurses() & LevelCurse.CURSE_OF_THE_LOST ~= 0) then
-      return false
-    elseif debug and grid_room[gid] then
-      return true
-    elseif gt:start_room_lock() then
-      -- 牌意解读 / 天堂阶梯：刚进层、还没离开初始房间 → 禁止传送（别顶掉道具效果）
-      return false
-    end
-    local cid = crd.SafeGridIndex
-    if grid_room[cid] == nil or not crd.Clear then
-      return false
-    elseif (crd.Data.Type == 6 or crd.Data.Type == 11) then --miniboss/challengeroom
-      if not gt:check_room_open() then
-        return false
-      end
-    end
-    if gid == false then return true end --current room only
-    if grid_room[gid] == nil then
-      return false
-    else
-      local trd = grid_room[gid]
-      if trd.ListIndex == crd.ListIndex then
-        return false
-      end
-      local travel_mode = gt:get_travel_mode()
-      if travel_mode == 1 then
-        -- 任意房间：地图上任何已显示房间都放行（等价旧的 AllowAnyRoom=开）
-        return true
-      end
-      --the room stepped off from must be on the player's own island, else an
-      --Emperor'd boss room is a free lift back across unexplored rooms
-      local reach = gt:get_config_bool("FairTripPath", true) and gt:get_reachable_rooms() or nil
-      if trd.VisitedCount > 0 and trd.Clear
-          and (not reach or reach[trd.SafeGridIndex] == true) then
-        --travel_mode=2 only widens this: an Emperor'd start room has no cleared neighbour
-        return true
-      elseif travel_mode == 3 then
-        -- 已探索房间：只认自己已清怪的房，不做邻居豁免（等价旧的 AllowNeighborRoom=关）
-        return false
-      end
-      --the last hop needs a door too; `reach` is nil exactly when path rules are off
-      return gt:check_neigh_connected(trd, function(rd)
-          return (rd.DisplayFlags & 1 ~= 0) and rd.VisitedCount > 0 and rd.Clear
-            and (not reach or (reach[rd.SafeGridIndex]
-              and gt:rooms_linked(rd.SafeGridIndex, trd.SafeGridIndex)))
-      end)
-    end
-end
+-- 注：准入判定已于 2026-10-06 整体搬到 scripts/gtp_travel.lua
+--（四段规则表 + 两个入口 gt:can_open_cursor / gt:can_travel_to）。
+-- 原来的 gt:check_teleble 已删除 —— 呼出光标、房间高亮、松手传送现在共用同一套规则，
+-- 不再有跨文件的函数包装链（规则顺序也不再由 main.lua 的 require 顺序决定）。
+-- 判定顺序与理由见 docs/superpowers/specs/2026-10-06-travel-judgment-refactor-design.md
 --
 function gt:hurt(n)
   player:TakeDamage(n, DamageFlag.DAMAGE_CURSED_DOOR | DamageFlag.DAMAGE_NO_PENALTIES, EntityRef(player), 0)
@@ -570,7 +547,7 @@ function gt:tele_failed()
 end
 --
 function gt:check_curse_room(gid)
-    if debug then return end
+    -- 诅咒房进/出的过路费：调试模式**不豁免**（2026-10-06 起 debug 只出诊断、不改行为）
     --a bombed secret-room wall has no spikes, so secret<->guard room is free
     --both ways, even when the guard is the curse room
     if secret_pre_room_id[crid] == gid or secret_pre_room_id[gid] == crid then
@@ -627,36 +604,13 @@ end
 
 --floor.* is read at each use, never copied at the top: an antechamber hop
 --mid-call changes the room, and with it the descriptor and the grid
+-- 落地前不再有准入拦截：原先这里开头的四条（Mother's Shadow 在场、Mom / Ultra Greed 房名、
+-- 目标挑战房血量、FairTripTime 找不到路线）已于 2026-10-06 **上移进判定层**
+-- （scripts/gtp_travel.lua 的 ① departure / ② target_entry / ④ path）—— 它们本质是
+-- 「这个目标不能去」，留在落地层会造成「光标高亮着、松手只响失败音」。
+-- 调用方进来之前已经保证 gt:can_travel_to(gid).ok，所以这里只负责「做什么」：
+-- 收代价（过路费）、摘迷宫诅咒、算落点、走过场。
 function gt:teleport_to_grid_index(gid)
-    for _,en in pairs(Isaac.GetRoomEntities()) do
-			if en.Type == 867 then
-        gt:tele_failed()
-        return
-			end
-		end
-    -- Mom / Ultra Greed 房：Fixed 里一律禁传（连清完怪之后也禁），防的是它们清怪后的
-    -- 后续流程被传送打断（Mom 房的门、Ultra Greed 房的奖杯）。但**回溯线（The Ascent）里
-    -- 的 Mom 房只是路过** —— boss 早在正着走时就打完了（Clear=true），房间里没有任何后续
-    -- 流程，拦它反而把正常传送拦掉（用户 2026-10-03 实测：回溯线 Depths II 的 boss 房能
-    -- 呼出光标、能移到格子，松手却只响失败音；dump 显示 startRoomLock=false / clear=true /
-    -- type=5 / 房间里没有 867，唯一命中的就是这一条）。所以回溯线上放行这一条。
-    if not level:IsAscent()
-        and (crd.Data.Name == "Mom" or crd.Data.Name == "Ultra Greed") then
-      gt:tele_failed()
-      return
-    elseif grid_room[gid].Data.Type == 11 and not grid_room[gid].ChallengeDone then
-      if stage%2 == 0 and stage ~= 10 then
-        if player:GetHearts()+player:GetSoulHearts()+ player:GetBlackHearts() > 2 then
-          gt:tele_failed()
-          return
-        end
-      else
-        if player:GetHearts() + player:GetSoulHearts() + player:GetBlackHearts() < player:GetMaxHearts() then
-          gt:tele_failed()
-          return
-        end
-      end
-    end
     gt:check_curse_room(gid)
     level.EnterDoor = -1
     level.LeaveDoor = -1
@@ -665,14 +619,7 @@ function gt:teleport_to_grid_index(gid)
       tele_maze = true
     end
 
-    local dist = 0
-    if gt:get_config_bool("FairTripTime", false) then
-      dist = gt:fair_trip(crd.SafeGridIndex, gid)
-      if dist == 999 then
-        gt:tele_failed()
-        return
-      end
-    end
+    local dist = gt:travel_time_distance(crd.SafeGridIndex, gid)
 
     --an L room's anchor cell is not in grid_room, so the antechamber may be missing
     local from_pre = crd.Data.Type == 7 and secret_pre_room_id[crid] or nil
@@ -711,7 +658,7 @@ function gt:teleport_to_grid_index(gid)
     local there = trd and trd.SafeGridIndex or gid
     tele_door_slot = -1
     local arrive = gid --the cell handed over; see rules.landing_route
-    if gt:get_config_bool("ArriveAtDoor", false) then
+    if gt:get_config_bool("ArriveAtDoor", true) then
       local cell, walked, slot = gt:landing_route(here, there)
       arrive = cell or gid
       tele_door_slot = slot
@@ -723,26 +670,26 @@ function gt:teleport_to_grid_index(gid)
         Game():ChangeRoom(walked, -1)
       end
     end
-    if debug then
-      Game():ChangeRoom(arrive,-1)
-    else
-        if dist ~= 0 then
-          local speed = player.MoveSpeed
-          local addTime = math.floor((60.0*dist/speed)+0.5)
-          Game().TimeCounter = Game().TimeCounter + addTime --boss rush reads TimeCounter; Hush does not
-        end
-      tele_cd = 45
-      if not gt:get_config_bool("TeleportAnimation", true) then tele_cd = 10 end
-      if debug or gt:get_config_bool("FastTransition", true) then tele_cd = 1 end
+    local tele_mode = gt:get_teleport_transition()  -- 1 立即出现 / 2 淡入淡出 / 3 传送白闪
+    -- 调试模式不再强制「立即出现」也不跳过计时补偿（2026-10-06 用户要求：debug 只出诊断、不改行为）
+    if dist ~= 0 then
+      local speed = player.MoveSpeed
+      local addTime = math.floor((60.0*dist/speed)+0.5)
+      Game().TimeCounter = Game().TimeCounter + addTime --boss rush reads TimeCounter; Hush does not
     end
-    if gt:get_config_bool("FastTransition", true) or debug then
+    -- 过场越短，冷却越短（沿用 Fixed 的三档：无过场 1 帧 / 淡入淡出 10 帧 / 传送白闪 45 帧）
+    if tele_mode == 1 then tele_cd = 1
+    elseif tele_mode == 3 then tele_cd = 45
+    else tele_cd = 10 end
+    if tele_mode == 1 then
       Game():ChangeRoom(arrive,-1)
       Game():GetRoom():PlayMusic()
       return
     end
-    local tele_anime = gt:get_config_bool("TeleportAnimation", true) and 3 or 1
+    -- RoomTransitionAnim（enums.lua）：1 = FADE（淡入淡出）/ 3 = TELEPORT（白闪）
+    local tele_anime = (tele_mode == 3) and 3 or 1
     Game():StartRoomTransition(arrive, Direction.NO_DIRECTION, tele_anime, player, -1) --direction is ignored, measured twice
-    tele_cd = tele_anime == 3 and 45 or 10
+    tele_cd = (tele_mode == 3) and 45 or 10
 end
 --
 function gt:is_mirror_world()
@@ -829,6 +776,27 @@ function gt:get_config_bool(key, default)
     return default
 end
 --
+-- 调试模式（**纯诊断开关**），默认关，两个开关任一为真即开：
+--   · MCM 的「调试模式」项（键 DebugMod）—— 玩家侧开关，改了立刻生效（每帧实时读）；
+--   · gtconfig.lua 的 `gt.DebugMod = true` —— 开发者文件级开关。**故意让它优先于 MCM**：
+--     没装 MCM 时也能开，且不会被 MCM 注册时写入的默认 false 顶掉（MCM 的 Config 在注册瞬间
+--     就被填成默认值，普通选项都是 MCM 覆盖文件；调试开关反过来，免得改文件却没反应）。
+-- 开启后只做一件事：**输出诊断**——光标停在目标上即自动落盘（`[GTPtrip]`）、
+--   解锁「按住地图键 + 键盘 F4」的手动 dump、屏幕上画**红色**的实时理由浮层
+--   （黄底的一次性 dump 浮层 2026-10-06 已删）、各模块往控制台 / log.txt 写诊断行。
+--   关着时以上全部静默（不画、不写 log）。
+-- ⚠️ 它**绝不改变任何传送判定或传送表现**（2026-10-06 用户拍板）。历史遗留的几处
+--   「debug 下放行 / 跳过」已全部移除：不再绕过保护性禁传（道具入口 / 奖励房门 / 诅咒房）、
+--   不再强制「立即出现」跳过过场、不再豁免诅咒房过路费、呼出光标的闸门也不再为它开绿灯。
+--   理由：开它去排查「为什么传不过去」时，若判定被绕过就看不到拦住的规则；要测的是
+--   「预期设置下」的行为。排查仍然可用：按住地图键 + F4 的手动 dump 不依赖光标是否呼出。
+function gt:is_debug()
+    if gt.DebugMod == true then
+      return true
+    end
+    return gt:get_config_bool("DebugMod", false) == true
+end
+--
 -- 传送范围（1=任意房间 2=相邻房间 3=已探索房间）。默认 2，等价于移植初期的
 -- AllowNeighborRoom=true / AllowAnyRoom=false。值一律夹到 1..3，防御 MCM 存的旧值 / 脏值。
 function gt:get_travel_mode()
@@ -837,6 +805,39 @@ function gt:get_travel_mode()
     if v < 1 then return 1 end
     if v > 3 then return 3 end
     return v
+end
+--
+-- 禁止传送进诅咒房（移植基底 MLX's Tweak 的 BlockCurseRoom，默认 true = 禁止）。
+-- 消费点：scripts/gtp_curseblock.lua 的准入包装（拦住「传送到诅咒房」这个目标），
+-- 以及本文件 check_neigh_connected 的类型白名单 —— 关掉本项后，诅咒房在「相邻房间」
+-- 档位也按普通房间参与邻居豁免（见那里的注释）。
+function gt:block_curse_room()
+    return gt:get_config_bool("BlockCurseRoom", true) == true
+end
+--
+-- 传送过场（落地时的表现）。默认 2，值一律夹到 1..3：
+--   1 = 立即出现：直接 Game():ChangeRoom()，没有任何过场（原来的 FastTransition = true）
+--   2 = 淡入淡出：StartRoomTransition(..., RoomTransitionAnim.FADE = 1)，短暂淡出淡入（像换房）
+--   3 = 传送白闪：StartRoomTransition(..., RoomTransitionAnim.TELEPORT = 3)，等同使用传送道具
+-- 顺带决定传送冷却 tele_cd（1 / 10 / 45 帧，沿用 Fixed 的档位）：过场越短，冷却越短。
+function gt:get_teleport_transition()
+    local v = tonumber(gt:get_config_bool("TeleportTransition", 2)) or 2
+    v = math.floor(v + 0.5)
+    if v < 1 then return 1 end
+    if v > 3 then return 3 end
+    return v
+end
+--
+-- 迷失诅咒期间 MinimapAPI 还会不会显示地图 = 它的 OverrideLost（MCM 里叫 "Display During Curse"，
+-- 默认 false）。MinimapAPI 自己的读法（main.lua）：`OverrideLost or (curse & CURSE_OF_THE_LOST <= 0)`
+-- —— 即 OverrideLost 为真时无视迷失诅咒照常画图。
+-- 我们把它作为「迷失诅咒下能否传送」的唯一依据（2026-10-05 用户要求），不再有独立开关：
+--   地图显示 → 传送照常；地图不显示 → 停用。没有 MinimapAPI 时按原版语义（诅咒期间不显示）处理。
+function gt:curse_map_visible()
+    if MinimapAPI and MinimapAPI.GetConfig then
+      return MinimapAPI:GetConfig("OverrideLost") == true
+    end
+    return false
 end
 --
 function gt:get_minapi_room_by_list_index(listIndex)
@@ -856,7 +857,7 @@ end
 --
 function gt:dump_map_diagnostics()
     local function out(message)
-      Isaac.ConsoleOutput("[GoodTripPlus] " .. message .. "\n")
+      console_output("[GoodTripPlus] " .. message .. "\n")
       Isaac.DebugString("[GoodTripPlus] " .. message)
     end
     local dim = gt:get_current_dimension()
@@ -925,10 +926,12 @@ end
 --
 function gt:get_pos_grid_index(pos)
     if MinimapAPI then
+      local project
       -- 与 gid_to_rtmap_pos 同一套投影（含同一锚点），直接复用
       for gid, rd in pairs(grid_room) do
         if gt:is_grid_room_displayed(gid) then
-          local p = gt:gid_to_rtmap_pos(gid)
+          project = project or gt:make_rtmap_projector()
+          local p = project(gid)
           if math.abs(pos.X - p.X) < 8.5 and math.abs(pos.Y - p.Y) < 7.5 then
             return gid
           end
@@ -944,52 +947,36 @@ function gt:get_pos_grid_index(pos)
     end
 end
 --
+local make_projection = require("scripts.gtp_projection")
+function gt:make_rtmap_projector()
+    return make_projection(gt, MinimapAPI, Vector)
+end
 function gt:gid_to_rtmap_pos(gid)
-    if MinimapAPI then
-      local offsetVec = gt:get_minapi_offset_vec()
-      local gsx = MinimapAPI.GlobalScaleX or 1
-      local col = gid % 13
-      local row = math.floor(gid / 13)
-      local maxx, miny = gt:get_minapi_map_anchor()
-      local rx, ry
-      if maxx and miny then
-        -- 与 renderUnboundedMinimap 同锚点：roomOffset = (gsx*pos - maxx) * 房宽
-        if gsx >= 0 then
-          rx = offsetVec.X + (col * gsx - maxx) * 17 + 9
-        else
-          rx = offsetVec.X + (col * gsx - maxx) * 17 - 17
-        end
-        ry = offsetVec.Y + (row - miny) * 15 + 8
-      else
-        -- 还没有任何显示房间（大地图本就什么都不画）时的旧回退
-        local ltroom = gt:get_corner_room(1)
-        local rtroom = gt:get_corner_room(2)
-        if gsx >= 0 then
-          rx = offsetVec.X + (col - rtroom.X - 1) * 17 + 9
-        else
-          rx = offsetVec.X + (ltroom.X - col) * 17 - 17
-        end
-        ry = offsetVec.Y + (row - ltroom.Y) * 15 + 8
-      end
-      return Vector(rx, ry)
-    end
-    local ltx, lty = gt:get_rtmap_info()
-    local col = gid % 13
-    local row = (gid - col) / 13
-    return Vector(ltx + col * 17 + 8, lty + row * 15 + 7)
+    return gt:make_rtmap_projector()(gid)
 end
 --
 function gt:get_current_room_cursor_gid()
-    local gid = crd.SafeGridIndex
-    if not crd.Data then
+    -- ⚠️ 读「游戏此刻」的当前房间，而不是文件级 local `crd` / `room`：
+    -- 跨层 / R 重开时，光标要定位的那一刻可能**早于** new_room() 刷新这些 local
+    -- （回调顺序与帧对齐不定 —— 2026-10-05 用户实测「TAB+R 间隔短就定位错」），
+    -- 用缓存值会把光标算到**上一层**的房间格子上。这两个调用都很便宜。
+    local lvl = Game():GetLevel()
+    local d = (lvl and lvl:GetCurrentRoomDesc()) or crd
+    if not d then
+      return crd and crd.SafeGridIndex or 0
+    end
+
+    local gid = d.SafeGridIndex
+    if not d.Data then
       return gid
     end
 
-    local tl = room:GetTopLeftPos()
-    local br = room:GetBottomRightPos()
+    local rm = Game():GetRoom() or room
+    local tl = rm:GetTopLeftPos()
+    local br = rm:GetBottomRightPos()
     local isRight = player.Position.X >= (tl.X + br.X) / 2
     local isBottom = player.Position.Y >= (tl.Y + br.Y) / 2
-    local shape = crd.Data.Shape
+    local shape = d.Data.Shape
 
     if shape == RoomShape.ROOMSHAPE_1x2 or shape == RoomShape.ROOMSHAPE_IIV then
       if isBottom then gid = gid + 13 end
@@ -1022,7 +1009,7 @@ function gt:get_current_room_cursor_gid()
     if grid_room[gid] then
       return gid
     end
-    return crd.SafeGridIndex
+    return d.SafeGridIndex
 end
 --
 function gt:get_grid_room()
@@ -1048,6 +1035,35 @@ function gt:get_grid_room()
         end
       end
     end
+end
+-- ===== 判定层访问器（gtp_travel 专用，2026-10-06）=====
+-- gtrep 的文件级 local 会被 get_grid_room() / new_room() / new_level() 整体重新赋值，
+-- 外部模块捕获它们的引用会拿到**过时的那一层** → 一律走这些访问器。
+
+-- ⚠️ grid_room 与 GetRoomByIdx **不可互换**：判定读目标用的就是这个表
+-- （L 形房的锚点格语义与 GetRoomByIdx 不同），所以两个访问器都留着。
+function gt:grid_room_desc(gid)
+  return grid_room[gid]
+end
+
+-- Level:GetRoomByIdx 的薄包装（诅咒房判定沿用 gtp_curseblock 移植时的原口径）
+function gt:room_desc_at(gid)
+  local lvl = Game():GetLevel()
+  if not lvl then return nil end
+  return lvl:GetRoomByIdx(gid, gt:get_current_dimension())
+end
+
+-- 当前房 / 层 / 房间 / 玩家的一份新鲜拷贝（判定上下文用）
+function gt:travel_cur_state()
+  local lvl = Game():GetLevel()
+  local d = lvl and lvl:GetCurrentRoomDesc() or nil
+  return {
+    cur = d,
+    cur_gid = d and d.SafeGridIndex or nil,
+    level = lvl,
+    room = Game():GetRoom(),
+    player = Isaac.GetPlayer(0),
+  }
 end
 --
 function gt:is_grid_room_displayed(gid)
@@ -1132,6 +1148,7 @@ function gt:pre_secret_room()
       end
     end
   end
+  door_state.dirty = true
 end
 --
 function gt:pre_secret_curse_room()
@@ -1152,6 +1169,7 @@ function gt:pre_secret_curse_room()
       end
     end
   end
+  door_state.dirty = true
 end
 --
 function gt:get_cursor_speed()
@@ -1161,8 +1179,19 @@ function gt:get_cursor_speed()
     return 2
 end
 --
+-- 光标的不透明度系数 [0, 1]。0 ＝ 这一刻还不该画（淡入还没开始，前 4 帧）。
+-- 节奏与隐藏房候选标记 / 地图边界高亮一致（同口径的帧计数，见文件上方 CURSOR_FADE_*）。
+function gt:get_cursor_fade()
+    if mmp_ctrl_fade <= 0 then
+      return 0
+    end
+    return mmp_ctrl_fade / CURSOR_FADE_MAX
+end
+--
 function gt:mmp_ctrl_move()
+    local moved = false
     local speed = gt:get_cursor_speed()
+    local grid_step = gt:get_config_bool("CursorGridStep", false)
     local xmin, xmax, ymin, ymax
     if MinimapAPI then
       local offsetVec = gt:get_minapi_offset_vec()
@@ -1187,22 +1216,64 @@ function gt:mmp_ctrl_move()
       ymax = lty + 13 * 15
     end
     for i = 1, 4 do
-      if Input.IsActionPressed(key[i], player.ControllerIndex) then
-        local newpos = mmp_ctrl_pos + dir[i] * speed
+      local pressed
+      if grid_step then
+        pressed = Input.IsActionTriggered(key[i], player.ControllerIndex)
+      else
+        pressed = Input.IsActionPressed(key[i], player.ControllerIndex)
+      end
+      if pressed then
+        local amount = grid_step and ((i == 1 or i == 4) and 15 or 17) or speed
+        local newpos = mmp_ctrl_pos + dir[i] * amount
         if newpos.X >= xmin and newpos.Y >= ymin and newpos.X <= xmax and newpos.Y <= ymax then
           mmp_ctrl_pos = newpos
+          -- 玩家自己动过光标了：从此不再自动归位（照旧"你放哪儿就待在哪儿"）
+          mmp_ctrl_moved = true
+          moved = true
         end
       end
     end
+    return moved
+end
+function gt:cursor_keyboard_pressed()
+    for i = 1, 4 do
+      if Input.IsActionPressed(key[i], player.ControllerIndex) then return true end
+    end
+    return false
 end
 --
 function gt:draw_rtmap_cursor()
     cursor:Render(mmp_ctrl_pos, Vector(0, 0), Vector(0, 0))
 end
+function gt:get_mouse_screen_pos()
+    -- Input 的 render-plane 坐标不能直接当 HUD 坐标；使用文档示例的世界到屏幕转换。
+    return Isaac.WorldToScreen(Input.GetMousePosition(true))
+end
+function gt:get_cursor_grid_index(pos)
+    if mouse_cursor.mode ~= 'mouse' or not MinimapAPI then
+      return gt:get_pos_grid_index(pos)
+    end
+    local mapRoom = mouse_hit(MinimapAPI, pos)
+    if not mapRoom then return -99 end
+    local rd = mapRoom.Descriptor
+    -- 大房间/L 形房的 descriptor 锚点未必是 grid_room 占据格，匹配同房间格。
+    local gid = rd.SafeGridIndex
+    if grid_room[gid] and grid_room[gid].ListIndex == rd.ListIndex then return gid end
+    for cell, descriptor in pairs(grid_room) do
+      if descriptor.ListIndex == rd.ListIndex then return cell end
+    end
+    return -99
+end
 --
 function gt:update_cursor_room_highlight()
-    local gid = gt:get_pos_grid_index(mmp_ctrl_pos)
-    if gt:check_teleble(gid) then
+    local gid = gt:get_cursor_grid_index(mmp_ctrl_pos)
+    local res = gt:can_travel_to(gid)
+    -- 调试模式下免按键取证：光标扫到目标就把判定过程 + 门表写进 log.txt
+    -- （被拒要记，挑战房被放行也要记 —— 放行同样可能判错）
+    if gt.auto_log_travel then
+      gt:auto_log_travel(gid, res)
+    end
+    if res.ok then
       mmp_highlight_gid = gid
     else
       mmp_highlight_gid = nil
@@ -1237,6 +1308,9 @@ end
 -- 初始房间的绿色高亮已移除（2026-10-03）：MinimapAPI 自带
 -- "Highlight Start Room"（HighlightStartRoom，其菜单里开），
 -- 按项目定位（MinimapAPI 的外置传送插件）不再自己画。
+-- 2026-10-05：这一项**已在我们自己的 MCM 里代理出来**（「高亮初始房间」，
+-- 见文件末尾 MCM 注册段的 ModConfigMenu.AddSetting：只读写 MinimapAPI.Config，
+-- 不另存一份，所以与 MinimapAPI 菜单里那项是同一个值）。这里依旧不自己绘制。
 -- 光标所在房间的高亮保留（HighlightCursorRoom，MinimapAPI 无对应功能），
 -- 由 render_cursor 直接绘制。
 --
@@ -1249,39 +1323,81 @@ end
 -- minimap art was painted on top of it afterwards, making the cursor appear
 -- to be stuck underneath the map with REPENTOGON installed.
 function gt:render_cursor()
-    gt:render_diag_overlay() -- 诊断浮层（画在 HUD 之上，与地图是否按住无关）
+    -- 调试模式下的实时拒绝理由（由 gtp_travel 提供；模块不在时跳过）。
+    -- 这是屏幕上唯一的诊断显示（黄色的一次性 dump 浮层 2026-10-06 已删）。
+    if gt.render_travel_reason then
+      gt:render_travel_reason(mmp_ctrl_pos, mmp_ctrl)
+    end
     if mmp_ctrl then
-      if gt:get_config_bool("HighlightCursorRoom", true) and mmp_highlight_gid then
-        local desc = grid_room[mmp_highlight_gid]
-        if desc then
-          gt:draw_minapi_room_highlight(
-            gt:get_minapi_room_by_list_index(desc.ListIndex),
-            -- RGB multipliers of 1 preserve the original room art.  Zeroing
-            -- them and applying a white RGB offset leaves only its silhouette.
-            Color(0, 0, 0, 0.45, 1, 1, 1)
-          )
+      -- 淡入：前几帧 fade == 0（不画），之后渐显 —— 与标记 / 地图边界同一节奏
+      local fade = gt:get_cursor_fade()
+      if fade > 0 then
+        if gt:get_config_bool("HighlightCursorRoom", true) and mmp_highlight_gid then
+          local desc = grid_room[mmp_highlight_gid]
+          if desc then
+            gt:draw_minapi_room_highlight(
+              gt:get_minapi_room_by_list_index(desc.ListIndex),
+              -- RGB multipliers of 1 preserve the original room art.  Zeroing
+              -- them and applying a white RGB offset leaves only its silhouette.
+              Color(0, 0, 0, 0.45 * fade, 1, 1, 1)
+            )
+          end
         end
+        cursor.Color = Color(1, 1, 1, fade, 0, 0, 0)
+        gt:draw_rtmap_cursor()
       end
-      gt:draw_rtmap_cursor()
     end
 end
 --
 function gt:prep()
     player = Isaac.GetPlayer(0)
 end
+-- 键盘松开地图键与鼠标点击共用准入、冷却、诊断和隐藏/诅咒房前室准备。
+-- 来源：原 step() 松键传送分支。
+function gt:try_cursor_travel(gid, source)
+    gt:auto_log_secret_diag(gid)
+    local res = gt:can_travel_to(gid)
+    if source == 'mouse' then
+      -- 单击级取证：放行/拒绝都写，不依赖玩家打开调试或按 F4；日志失败不影响传送。
+      pcall(function()
+        Isaac.DebugString(string.format('[GTPmouse] click x=%.1f y=%.1f gid=%s ok=%s rule=%s cooldown=%s',
+          mmp_ctrl_pos.X, mmp_ctrl_pos.Y, tostring(gid), tostring(res.ok),
+          tostring(res.rule), tostring(tele_cd)))
+      end)
+    end
+    if gt.auto_log_travel then gt:auto_log_travel(gid, res) end
+    if not res.ok or tele_cd >= 1 then return false end
+    if crd.Data.Type == 7 or (crd.Data.Type == 8 and Game():IsGreedMode()) then
+      gt:pre_secret_room()
+    elseif crd.Data.Type == 10 then
+      gt:pre_secret_curse_room()
+    end
+    gt:teleport_to_grid_index(gid)
+    return true
+end
 --
 function gt:tab_action()
     local cp = Isaac.WorldToRenderPosition(Vector(320,280))
     scpos = cp + cp
     --
-    -- 免控制台诊断入口：按住地图键 + F4 → 把光标所在格（光标没启用时用当前房间）
-    -- 的完整判定打到屏幕左上角 + 控制台 + log.txt。
+    -- 免控制台诊断入口：**调试模式打开后**，按住地图键 + 键盘 F4 → 把光标所在格
+    -- （光标没启用时用当前房间）的完整判定打到屏幕左上角 + 控制台 + log.txt。
     -- （控制台命令在 REPENTOGON 的 ImGui 控制台里不分发给 mod，所以这条是主力入口；
     -- 20 帧内连按只算一次，避免长按/连点刷屏）
-    if Input.IsButtonTriggered(Keyboard.KEY_F4, player.ControllerIndex)
+    --
+    -- 2026-10-05 用户拍板：本入口归「调试模式」总闸 —— 开关关着时按 F4 什么都不出（连 log 都不写），
+    -- 免得正式游玩时误按出一屏诊断。想用就先去 MCM 打开「调试模式」（即时生效，不用重启）。
+    --
+    -- ⚠️ 第二个参数必须写死 0（= 键盘玩家），绝不能传 player.ControllerIndex：
+    --    IsButtonTriggered 的手柄按钮码是「低位编号、超过 31 回绕」（见 enums 的 Controller，
+    --    0=D_PAD_LEFT … 5=BUTTON_B …），而 Keyboard.KEY_F4 = 293，293 % 32 = 5 = 手柄 B 键。
+    --    传手柄索引时这条判定会退化成「查该手柄的 B 键」，手柄玩家边按地图键边按到 B
+    --    就误判成 F4、白跑一次 dump（2026-10-05 玩家实测）。键盘热键一律用索引 0。
+    if gt:is_debug()
+        and Input.IsButtonTriggered(Keyboard.KEY_F4, 0)
         and Game():GetFrameCount() - last_diag_frame > 20 then
       last_diag_frame = Game():GetFrameCount()
-      local cell = mmp_ctrl and gt:get_pos_grid_index(mmp_ctrl_pos)
+      local cell = mmp_ctrl and gt:get_cursor_grid_index(mmp_ctrl_pos)
         or gt:get_current_room_cursor_gid()
       gt:console_dump_diag(cell, "gtpdiag TAB+F4")
     end
@@ -1290,25 +1406,54 @@ function gt:tab_action()
       Isaac.ExecuteCommand("restart")
     end
     --
-    if gt:check_teleble(false) or debug then
+    if gt:can_open_cursor().ok then
       if not mmp_ctrl then
         mmp_ctrl = true
+        mmp_ctrl_moved = false
+        mmp_ctrl_fade = CURSOR_FADE_MIN  -- 从「还没开始」重新起算淡入
         mmp_ctrl_pos = gt:gid_to_rtmap_pos(gt:get_current_room_cursor_gid())
-        gt:update_cursor_room_highlight()
       else
-        gt:mmp_ctrl_move()
-        gt:update_cursor_room_highlight()
+        -- 玩家还没自己动过光标 ⇒ 每帧都把它贴回当前房间（与隐藏房标记同一套做法：
+        -- 标记也是每帧按当前地图重算投影，所以跨层/重开后过几帧会自己切回正确位置）。
+        -- 之前用「呼出后 30 帧内才归位」的窗口，用户实测 TAB+R 间隔短时仍然错位
+        -- （地图重建要几帧，窗口可能已经走完），所以改成不设窗口。
+        -- 玩家一按方向键就置 mmp_ctrl_moved，从此完全照旧：光标放哪儿待在哪儿。
+        if not mmp_ctrl_moved then
+          mmp_ctrl_pos = gt:gid_to_rtmap_pos(gt:get_current_room_cursor_gid())
+        end
         player:SetShootingCooldown(2)
       end
+      local pos = gt:get_mouse_screen_pos()
+      -- 先按方向键输入切模式，再检查移动边界；鼠标在地图外也能夺回控制。
+      local keyboard_pressed = gt:cursor_keyboard_pressed()
+      local follow, clicked, switched_keyboard = mouse_cursor:update({x=pos.X, y=pos.Y,
+        down=Input.IsMouseBtnPressed(0), active=true, keyboard=keyboard_pressed})
+      if switched_keyboard then
+        mmp_ctrl_pos = gt:gid_to_rtmap_pos(gt:get_current_room_cursor_gid())
+        mmp_ctrl_moved = false
+      end
+      if follow then
+        mmp_ctrl_pos = Vector(pos.X, pos.Y)
+        mmp_ctrl_moved = true
+      elseif keyboard_pressed then
+        gt:mmp_ctrl_move()
+      end
+      gt:update_cursor_room_highlight()
+      if clicked then
+        gt:try_cursor_travel(gt:get_cursor_grid_index(mmp_ctrl_pos), 'mouse')
+      end
+      -- 淡入计数：按住期间逐帧 +1（与 delver/render.lua 的 tab_hold_cnt 同口径）
+      mmp_ctrl_fade = math.min(mmp_ctrl_fade + 1, CURSOR_FADE_MAX)
+    else
+      mmp_ctrl = false
+      mmp_highlight_gid = nil
+      mmp_ctrl_fade = CURSOR_FADE_MIN
+      local pos = gt:get_mouse_screen_pos()
+      mouse_cursor:update({x=pos.X, y=pos.Y, down=Input.IsMouseBtnPressed(0), active=false})
     end
 end
 --
 function gt:step()
-    -- 控制台命令请求的浮层延到这一帧（渲染阶段）才弹：命令处理阶段不碰 Font/资源
-    if gt.diag_pending_overlay then
-      gt:show_diag_overlay(gt.diag_pending_overlay)
-      gt.diag_pending_overlay = nil
-    end
     --a wall can open under the player's feet (bomb, red key), so sweep every
     --tick; but not mid-transition, when the live room and the cached descriptor disagree
     if level:GetCurrentRoomDesc().SafeGridIndex == crid then
@@ -1316,6 +1461,10 @@ function gt:step()
     end
     if Game():IsPaused() then
       mmp_ctrl = false
+      mmp_ctrl_fade = CURSOR_FADE_MIN
+      mmp_highlight_gid = nil
+      local pos = gt:get_mouse_screen_pos()
+      mouse_cursor:update({x=pos.X, y=pos.Y, down=Input.IsMouseBtnPressed(0), active=false})
       return
     end
     if Input.IsActionTriggered(ButtonAction.ACTION_MAP,player.ControllerIndex)
@@ -1327,22 +1476,20 @@ function gt:step()
     if Input.IsActionPressed(ButtonAction.ACTION_MAP,player.ControllerIndex) then
       gt:tab_action()
     else
-      if mmp_ctrl and gt:check_teleble(false) then
+      if mmp_ctrl and gt:can_open_cursor().ok then
         mmp_ctrl = false
         mmp_highlight_gid = nil
-        local mgid = gt:get_pos_grid_index(mmp_ctrl_pos)
-        gt:auto_log_secret_diag(mgid)
-        if (gt:check_teleble(mgid) and tele_cd < 1) then
-          if crd.Data.Type == 7 or (crd.Data.Type == 8 and Game():IsGreedMode()) then
-            gt:pre_secret_room()
-          elseif crd.Data.Type == 10 then
-            gt:pre_secret_curse_room()
-          end
-          gt:teleport_to_grid_index(mgid)
+        mmp_ctrl_fade = CURSOR_FADE_MIN
+        if mouse_cursor.mode == 'keyboard' then
+          gt:try_cursor_travel(gt:get_pos_grid_index(mmp_ctrl_pos))
         end
       else
         mmp_ctrl = false
+        mmp_ctrl_fade = CURSOR_FADE_MIN
+        mmp_highlight_gid = nil
       end
+      local pos = gt:get_mouse_screen_pos()
+      mouse_cursor:update({x=pos.X, y=pos.Y, down=Input.IsMouseBtnPressed(0), active=false})
     end
     if prep_alarm then
       prep_alarm = false
@@ -1387,6 +1534,8 @@ function gt:new_room()
     elseif crd.Data.Type == 10 then
       gt:pre_secret_curse_room()
     end
+    -- 门图一变就写（dirty 去重，不会每帧写）—— 不依赖退出路径是否触发，见 design §3.5
+    gt:save_door_state()
 end
 --
 function gt:new_level()
@@ -1396,147 +1545,51 @@ function gt:new_level()
     n_room_num = (level:GetRooms()).Size
     secret_pre_room_id = {}
     secret_diag_logged = {}
+    -- 免按键取证的去重表（gtp_travel 里）：每层清空，免得跨层误判为「已记过」
+    if gt.travel_reset_probe_log then
+      gt:travel_reset_probe_log()
+    end
     --a new floor: everything learned about the old one goes
-    door_link = {}
-    door_swept = {}
-    curse_bare_outside, curse_bare_inside = {}, {}
+    gt:reset_door_floor()
+    --
+    -- 重开（长按 TAB + R）时光标必须重新定位（2026-10-05 用户报的 bug）：
+    -- 那张局是「玩家一直按着 TAB」—— 光标在重开前就已经呼出（mmp_ctrl = true），
+    -- 于是新局里 tab_action() 走的是「已在呼出中」的移动分支，mmp_ctrl_pos 还是上一局
+    -- 留下的屏幕坐标；地图重绘后它落在另一间房上，松手就直接传到那间房去。
+    -- （重新按一次 TAB 反而是对的，因为那会走「首次呼出」分支按当前房间定位）。
+    -- 所以换层/开新局一律把光标状态清空：下一帧 tab_action 会当成首次呼出，重新定位到当前房间。
+    -- ⚠️ 只清一次不够（用户 2026-10-05 实测：TAB+R 间隔短时仍错位）—— 重定位那一刻，
+    -- MinimapAPI 的地图（锚点）或我们文件级 local 的房间缓存可能还没刷新完，先后取决于回调与帧。
+    -- 所以真正的兜底在 tab_action：玩家没自己动过光标（mmp_ctrl_moved == false）时**每帧**都贴回
+    -- 当前房间（不设时间窗口 —— 先试过「30 帧内归位」，实测不够），几帧内自愈；
+    -- 另有 get_current_room_cursor_gid 改读实时房间。二者见各自的注释。
+    -- 覆盖范围：MC_POST_NEW_LEVEL + MC_POST_GAME_STARTED（开局、R 重开、控制台 rewind）。
+    mmp_ctrl = false
+    mmp_ctrl_pos = Vector(0, 0)
+    mmp_highlight_gid = nil
+    mmp_ctrl_moved = false
+    mmp_ctrl_fade = CURSOR_FADE_MIN
+    mouse_cursor:reset()
+    -- 注意：这里**不要**放任何依赖玩家实体的逻辑（例如 gt:can_open_cursor）—— new_level 会在
+    -- POST_GAME_STARTED（开局初始化中）被调到，那时玩家实体还没就绪，会原生崩溃（2026-10-05 踩过）。
 end
 --
 -------------------------------
--- Mod Config Menu text, localized based on the game's language setting
--- (Options.Language). Anything not explicitly recognized falls back to
--- English.
-local GT_STRINGS = {
-  en = {
-    title = "GoodTripPlus",
-    cursor_speed_name = "Cursor Speed",
-    cursor_speed_desc = "Pixels the cursor moves per frame while holding a direction key. Default: 2",
-    follow_curse_name = "Disable On Curse Of Lost",
-    follow_curse_desc = "Disable GoodTrip teleport while the floor has the Curse of the Lost. Default: enabled",
-    travel_mode_name = "Can Teleport To",
-    travel_mode_values = {[1] = "Any Room", [2] = "Neighbor Room", [3] = "Explored Rooms"},
-    travel_mode_desc = "How far a trip may reach. Any Room: every room shown on the map. Neighbor Room: cleared rooms, plus a shown but not-yet-cleared room next to a cleared one. Explored Rooms: only rooms you have visited and cleared. Default: Neighbor Room",
-    fairpath_name = "Fair Trip Path",
-    fairpath_desc = "Only allow teleport to rooms reachable through cleared rooms, door by door. Default: enabled",
-    arrivedoor_name = "Arrive At Door",
-    arrivedoor_desc = "Arrive standing at the exact door a walk would have come in by. A far trip into a room bigger than the screen passes through the room before it, which shows for a moment. Default: disabled",
-    fairtime_name = "Fair Trip Time",
-    fairtime_desc = "Fairly increase game time according to player move speed and distance. Default: disabled",
-    secret_markers_name = "Secret Room Candidate Markers",
-    secret_markers_desc = "Marks where Secret / Super Secret / Ultra Secret rooms could be while holding the map key. Merged from Lazy Delver (MIT). Disable Lazy Delver itself to avoid drawing two sets of markers. Default: enabled",
-    fools_skull_name = "Mark The Fool Skull Room",
-    fools_skull_desc = "In Depths II a special skull always drops The Fool card when destroyed. This puts a skull icon on the room that contains it, so you can find it again. Only shown for rooms you have already visited, so it never spoils the layout. Default: enabled",
-  },
-  zh_hans = {
-    title = "GoodTripPlus",
-    cursor_speed_name = "光标速度",
-    cursor_speed_desc = "按住射击方向键时光标每帧移动的像素数。默认值：2",
-    follow_curse_name = "迷失诅咒下禁用传送",
-    follow_curse_desc = "层里带有迷失诅咒时禁用传送。默认开启。",
-    travel_mode_name = "可以传送到",
-    travel_mode_values = {[1] = "任意房间", [2] = "相邻房间", [3] = "已探索房间"},
-    travel_mode_desc = "决定传送能跳多远。任意房间：地图上显示的房间都能传。相邻房间：已清怪的房间，以及已清房旁那间已显示但未清的房间。已探索房间：只有你进过并且已清怪的房间。默认：相邻房间。",
-    fairpath_name = "只能传送到已清房连通的房间",
-    fairpath_desc = "传送目标必须能从当前房间沿已清怪的房间逐门抵达。默认开启。",
-    arrivedoor_name = "传送后站在门口",
-    arrivedoor_desc = "传送到走路会走进来的那扇门门口；跨屏大房间的远途传送会先经过房间前部，会短暂看到一瞬。默认关闭。",
-    fairtime_name = "按距离增加游戏时间",
-    fairtime_desc = "按传送距离和玩家移速公平地补回游戏时间（Boss Rush 计时用它）。默认关闭。",
-    secret_markers_name = "显示隐藏房候选标记",
-    secret_markers_desc = "按住地图键时标出隐藏房 / 超级隐藏房 / 究极隐藏房的可能位置（合并自 Lazy Delver，MIT）。请同时禁用 Lazy Delver 本体，否则会画出两套标记。默认开启。",
-    fools_skull_name = "标记深牢 II 的愚者骷髅房",
-    fools_skull_desc = "深牢 II 里有一个特殊骷髅，炸掉后固定掉落愚者卡牌。开启后会在地图上给它所在的房间加一个骷髅图标，方便回头再找。只在你已经进过该房间后才显示，不会剧透本层布局。默认开启。",
-  },
-}
--- A few plausible spellings/casings for each supported language, since the
--- exact string Options.Language returns can vary by game version/branch.
-local GT_LANG_ALIASES = {
-  zh_hans = { "zh", "zh_hans", "zh-hans", "zh_cn", "zh-cn", "zh_chs", "chinese_s", "chi_s" },
-}
-local function gt_get_lang_strings()
-  local raw = Options.Language
-  if type(raw) == "string" then
-    local lang = raw:lower()
-    for code, aliases in pairs(GT_LANG_ALIASES) do
-      for _, alias in ipairs(aliases) do
-        if lang == alias then
-          return GT_STRINGS[code]
-        end
-      end
-    end
-  end
-  return GT_STRINGS.en
-end
-local mcm_registered = false
+-- 生命周期编排保留在适配层；菜单内容与语言表独立维护。
+require("scripts.gtp_menu")(gt)
 gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
   gt:prep()
   gt:new_room()
   gt:new_level()
-  if not mcm_registered and ModConfigMenu then
-    mcm_registered = true
-    local L = gt_get_lang_strings()
-    ModConfigMenu.AddTitle("GoodTripPlus", nil, L.title)
-    ModConfigMenu.AddNumberSetting(
-      "GoodTripPlus", nil,
-      "CursorSpeed",
-      1, 5, 0.25, 2,
-      L.cursor_speed_name,
-      L.cursor_speed_desc
-    )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
-      "FollowCurseOfLost",
-      true,
-      L.follow_curse_name,
-      L.follow_curse_desc
-    )
-    ModConfigMenu.AddNumberSetting(
-      "GoodTripPlus", nil,
-      "TravelMode",
-      1, 3, 1, 2,
-      L.travel_mode_name,
-      L.travel_mode_values,
-      L.travel_mode_desc
-    )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
-      "FairTripPath",
-      true,
-      L.fairpath_name,
-      L.fairpath_desc
-    )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
-      "ArriveAtDoor",
-      false,
-      L.arrivedoor_name,
-      L.arrivedoor_desc
-    )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
-      "FairTripTime",
-      false,
-      L.fairtime_name,
-      L.fairtime_desc
-    )
-    -- FastTransition / HighlightCursorRoom 不注册 MCM 菜单项（2026-10-04 用户决定）：
-    -- 两者默认常开，仅可在 gtconfig.lua 里用文件覆盖。
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
-      "ShowSecretMarkers",
-      true,
-      L.secret_markers_name,
-      L.secret_markers_desc
-    )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
-      "FoolsSkullRoom",
-      true,
-      L.fools_skull_name,
-      L.fools_skull_desc
-    )
-  end
+  gt:register_menu()
 end)
+-- 退出游戏时把门图落盘（「门图一变就写」已覆盖大部分情形，这条是多一层保险）。
+-- ⚠️ 各退出路径（退出到桌面 / Alt+F4 / 崩溃）是否都触发未实测，所以不把它当唯一保障。
+if ModCallbacks.MC_PRE_GAME_EXIT then
+  gt:AddCallback(ModCallbacks.MC_PRE_GAME_EXIT, function()
+    pcall(gt.save_door_state, gt)
+  end)
+end
 gt:AddCallback(ModCallbacks.MC_POST_RENDER, gt.step)
 gt:AddCallback(ModCallbacks.MC_POST_NEW_ROOM, gt.new_room)
 gt:AddCallback(ModCallbacks.MC_POST_NEW_LEVEL, gt.new_level)
@@ -1547,9 +1600,14 @@ function gt:dump_tele_diag(gid)
   local L = {}
   local function p(s) L[#L + 1] = s end
   if not gid or grid_room[gid] == nil then
-    gid = gt:get_pos_grid_index(mmp_ctrl_pos)
+    gid = gt:get_cursor_grid_index(mmp_ctrl_pos)
   end
   p("teleDiag: target gid=" .. tostring(gid))
+  -- 判定结论与理由：由判定层逐段跑一遍规则表（含短路），不再在这里重抄一份判定。
+  -- 下面各段是「现场证据」——它们不决定任何事，只是把状态下打出来供对照。
+  if gt.travel_verdict_dump then
+    p(gt:travel_verdict_dump(gid, true))
+  end
   local trd = grid_room[gid]
   if not trd then
     p("  NOT in grid_room (cursor not on any displayed room cell)")
@@ -1569,25 +1627,6 @@ function gt:dump_tele_diag(gid)
     crd.SafeGridIndex, tostring(crd.Data and crd.Data.Name), tostring(crd.Clear),
     tostring(dswept[crd.SafeGridIndex]),
     tostring(dlink[crd.SafeGridIndex] ~= nil)))
-  -- 「准入判定过了、松手却响失败音」的预检：把 gt:teleport_to_grid_index() 开头那两条
-  -- 静态失败规则在这里点名（Mom/Ultra Greed 房名规则、Mother's Shadow 在场规则），
-  -- 免得只看到 verdict=可传送 却传不动（用户 2026-10-03 就是被 Mom 房名规则拦的）。
-  -- 只覆盖这两条；挑战房血量、FairTripTime 距离那两条不在内。
-  do
-    local why = nil
-    if not level:IsAscent()
-        and (crd.Data.Name == "Mom" or crd.Data.Name == "Ultra Greed") then
-      why = "Mom/Ultra Greed room rule"
-    end
-    for _, en in pairs(Isaac.GetRoomEntities()) do
-      if en.Type == EntityType.ENTITY_MOTHERS_SHADOW then
-        why = (why and (why .. " + ") or "") .. "Mother's Shadow (867) is in this room"
-        break
-      end
-    end
-    p("  tripPrecheck: " ..
-      (why and ("BLOCKED at landing by " .. why) or "no landing-block rule matched"))
-  end
   -- 道具入口禁令（牌意解读 / 天堂阶梯）：每一项都拆开打，方便看出是哪一步拦下的
   p("  startRoomLock=" .. tostring(gt:start_room_lock()) ..
     " (hasEntrance=" .. tostring(gt:has_start_room_entrance()) ..
@@ -1624,15 +1663,18 @@ function gt:dump_tele_diag(gid)
     local door = room:GetDoor(i)
     if door then
       local busted, canblow, isopen = "-", "-", "-"
+      local passage = "-"
       pcall(function()
         busted = tostring(door.IsBusted and door:IsBusted() or door.Busted)
         canblow = tostring(door.CanBlowOpen and door:CanBlowOpen())
         isopen = tostring(door:IsOpen())
+        passage = tostring(gt:door_is_passage(door))
       end)
       p("  door slot=" .. i ..
         " variant=" .. tostring(door.Desc and door.Desc.Variant) ..
         " busted=" .. busted .. " canBlowOpen=" .. canblow ..
         " isOpen=" .. isopen ..
+        " passage=" .. passage ..
         " targetIdx=" .. tostring(door.TargetRoomIndex) ..
         " targetType=" .. tostring(door.TargetRoomType))
     end
@@ -1654,18 +1696,9 @@ function gt:dump_tele_diag(gid)
         " dispFlags=" .. tostring(rd.DisplayFlags))
     end
   end
-  -- 可达岛
+  -- 可达岛：下面四邻证据要用它的 inReach 字段。
+  -- 判定结论本身已由上面的 travel_verdict_dump 给出，这里不再重算一遍结论。
   local reach = gt:get_config_bool("FairTripPath", true) and gt:get_reachable_rooms() or nil
-  if reach then
-    local n = 0
-    for _ in pairs(reach) do n = n + 1 end
-    p("  reach island: size=" .. n ..
-      " startInReach=" .. tostring(reach[crd.SafeGridIndex] == true) ..
-      " targetInReach=" .. tostring(reach[trd.SafeGridIndex] == true) ..
-      " (target needs VisitedCount>0+Clear+door-path to be an island member)")
-  else
-    p("  reach island: OFF (FairTripPath=false)")
-  end
   -- 目标四邻逐个体检（widen 通道 C 的证据链）
   local tid = trd.SafeGridIndex
   local col = tid % 13
@@ -1682,24 +1715,6 @@ function gt:dump_tele_diag(gid)
         reach and tostring(reach[rd.SafeGridIndex] == true) or "-",
         tostring(gt:rooms_linked(rd.SafeGridIndex, trd.SafeGridIndex))))
     end
-  end
-  p("  travelMode=" .. gt:get_travel_mode() .. " (1=任意房间 2=相邻房间 3=已探索房间)")
-  -- 按当前配置给出结论
-  if gt:get_travel_mode() == 1 then
-    p("  verdict: TravelMode=AnyRoom(1) -> should be teleportable")
-  elseif trd.VisitedCount > 0 and trd.Clear
-      and (not reach or reach[trd.SafeGridIndex] == true) then
-    p("  verdict: visited+clear+inReach -> should be teleportable (channel B)")
-  elseif gt:get_travel_mode() == 3 then
-    p("  verdict: TravelMode=ExploredRooms(3) -> NOT teleportable (neighbor exemption off)")
-  else
-    local ok = gt:check_neigh_connected(trd, function(rd)
-      return (rd.DisplayFlags & 1 ~= 0) and rd.VisitedCount > 0 and rd.Clear
-        and (not reach or (reach[rd.SafeGridIndex]
-          and gt:rooms_linked(rd.SafeGridIndex, trd.SafeGridIndex)))
-    end)
-    p("  verdict: check_neigh_connected=" .. tostring(ok) ..
-      (ok and " -> should be teleportable (channel C)" or " -> NOT teleportable (channel C failed; see neighbor evidence above)"))
   end
   return table.concat(L, "\n")
 end
@@ -1729,10 +1744,10 @@ function gt:adjacent_secret_gid()
 end
 
 function gt:auto_log_secret_diag(gid)
-  -- 只在开发模式（gtconfig.lua 的 gt.DebugMod = true）下自动弹诊断：
+  -- 只在调试模式下自动落盘（MCM 的 Debug Mode 开关，或 gtconfig.lua 的 gt.DebugMod = true）：
   -- 正式游玩时不往 log.txt 写这些行，免得每次瞄隐藏房都刷十几行；
-  -- 想临时看诊断按「按住地图键 + F4」，那条不依赖本开关。
-  if not debug then
+  -- 「按住地图键 + 键盘 F4」的手动 dump 同样归这个开关管（2026-10-05 起）。
+  if not gt:is_debug() then
     return
   end
   if gid == -99 then
@@ -1748,7 +1763,7 @@ function gt:auto_log_secret_diag(gid)
     return
   end
   secret_diag_logged[key] = true
-  -- DebugMod 下：屏幕浮层 + 控制台 + log.txt 一次给全，连按键都不用
+  -- DebugMod 下：控制台 + log.txt 一次给全，连按键都不用（不再画屏幕浮层）
   gt:console_dump_diag(gid, "secretDiag")
 end
 
@@ -1765,16 +1780,20 @@ function gt:get_minapi_display_flags(listIndex)
   return nil
 end
 
--- ===== 屏幕诊断浮层 =====
+-- ===== 诊断字体 =====
 -- 控制台命令在部分环境（REPENTOGON 的 ImGui「Repentance+ Console」）里不会
 -- 分发给 MC_EXECUTE_CMD —— 实测输入 gtpdiag 触发不了我们的回调（log 里连
--- 「命令触发了」的留痕都没有），所以再给一条**一定看得见**的输出路：
--- 把最近一次 dump 直接画在屏幕左上角（15 秒后自动消失），同时照旧写 log.txt。
+-- 「命令触发了」的留痕都没有）。所以诊断一律走**控制台 + log.txt** 两条路。
+--
+-- 注：曾经还有一条「把 dump 画在屏幕左上角、15 秒后消失」的**黄色浮层**。
+-- 2026-10-06 按用户要求**删除** —— 它只是挡视线，而同样的内容 log.txt 里读得到。
+-- **屏幕上只剩红色的「传送理由浮层」**（gtp_travel，跟着光标实时变、松手即消失）。
 local diag_font = nil
-local diag_overlay_lines = nil
-local diag_overlay_until = 0
 
-function gt:show_diag_overlay(text, frames)
+-- 诊断字体（惰性加载一次）。供红色理由浮层用。
+-- ⚠️ `font/terminus.fnt` 是**位图 ASCII 字体，画不出中文** —— 屏幕路径上只能放 ASCII，
+-- 中文散文留在 log.txt / 控制台。
+function gt:get_diag_font()
   if not diag_font then
     local ok, font = pcall(function()
       local f = Font()
@@ -1782,44 +1801,28 @@ function gt:show_diag_overlay(text, frames)
       return f
     end)
     if not ok or not font then
-      return
+      return nil
     end
     diag_font = font
   end
-  local lines = {}
-  for line in tostring(text):gmatch("[^\n]+") do
-    lines[#lines + 1] = line
-  end
-  diag_overlay_lines = lines
-  diag_overlay_until = Game():GetFrameCount() + (frames or 900)
-end
-
-function gt:render_diag_overlay()
-  if not diag_overlay_lines or not diag_font then
-    return
-  end
-  if Game():GetFrameCount() > diag_overlay_until then
-    diag_overlay_lines = nil
-    return
-  end
-  local y = 34
-  for i = 1, #diag_overlay_lines do
-    diag_font:DrawString(diag_overlay_lines[i], 16, y, KColor(1, 1, 0.35, 1), 0, false)
-    y = y + 11
-  end
+  return diag_font
 end
 
 -- 逐行把诊断文本写进控制台输出缓冲（Isaac.ConsoleOutput 不认多行字符串，
 -- 整段丢进去容易只看到一行，所以自己按 \n 拆）
 local function gt_console_out(text)
   for line in tostring(text):gmatch("[^\n]+") do
-    Isaac.ConsoleOutput(line .. "\n")
+    console_output(line .. "\n")
   end
 end
 
--- 免控制台诊断入口：按住地图键 + F4（tab_action 里调用），把光标所在格的完整判定
--- 打到控制台与 log.txt。控制台看不见输出时的另一条路。
--- （定义在 gt_console_out 之后，tab_action 里是运行时按名字取，不受定义顺序影响。）
+-- 统一诊断出口：控制台命令、TAB+F4、DebugMod 自动 dump 都走这里。
+-- ⚠️ 返回值一律 nil：MC_EXECUTE_CMD 的返回值会被引擎逐行打印到控制台，
+-- 而本机（REPENTOGON 的 ImGui 控制台）**返回多行字符串会当场闪退**
+-- （2026-10-03 实测：日志里我们的输出打印完立刻 "Lua stack trace:"（空栈）+
+-- "Caught exception, writing minidump..."；同一环境里 MinimapAPI 的 mapitel
+-- 返回 nil 就能正常工作）。所以只走 ConsoleOutput（逐行直写，安全）+ DebugString，
+-- 不碰返回值。**不再画屏幕浮层**（黄色那条 2026-10-06 已删）。
 function gt:console_dump_diag(gid, tag)
   local ok, result = pcall(gt.dump_tele_diag, gt, gid)
   if not ok then
@@ -1830,41 +1833,12 @@ function gt:console_dump_diag(gid, tag)
     "\n===== " .. name .. " END ====="
   gt_console_out(result)
   Isaac.DebugString(result)
-  -- 屏幕浮层：控制台不可见时的保底输出，用户当场就能看到
-  gt:show_diag_overlay(result)
-  return result
-end
-
--- 统一诊断出口：控制台命令、TAB+F4、DebugMod 自动 dump 都走这里。
--- ⚠️ 返回值一律 nil：MC_EXECUTE_CMD 的返回值会被引擎逐行打印到控制台，
--- 而本机（REPENTOGON 的 ImGui 控制台）**返回多行字符串会当场闪退**
--- （2026-10-03 实测：日志里我们的输出打印完立刻 "Lua stack trace:"（空栈）+
--- "Caught exception, writing minidump..."；同一环境里 MinimapAPI 的 mapitel
--- 返回 nil 就能正常工作）。所以只走 ConsoleOutput（逐行直写，安全）+ DebugString，
--- 不碰返回值。defer_overlay：控制台回调里不立刻建 Font（免得在命令处理阶段
--- 碰资源），改成下一帧走渲染阶段再弹浮层。
-function gt:console_dump_diag(gid, tag, defer_overlay)
-  local ok, result = pcall(gt.dump_tele_diag, gt, gid)
-  if not ok then
-    result = "teleDiag ERROR: " .. tostring(result)
-  end
-  local name = "GoodTripPlus " .. (tag or "gtpdiag")
-  result = "===== " .. name .. " BEGIN =====\n" .. tostring(result) ..
-    "\n===== " .. name .. " END ====="
-  gt_console_out(result)
-  Isaac.DebugString(result)
-  if defer_overlay then
-    gt.diag_pending_overlay = result
-  else
-    gt:show_diag_overlay(result)
-  end
 end
 
 -- 控制台诊断命令：gtpdiag [格子编号]（缺省 = 光标所在格子）、gtmapdiag；gtpd 是简写。
 -- 输出通道（**不要返回字符串**，见上）：
 --   ConsoleOutput  —— 逐行直写控制台输出（MinimapAPI 的 mapitel 也是这么做的，安全）
 --   DebugString    —— 落 log.txt（最可靠的一条）
---   （浮层延到下一帧渲染阶段弹，见 defer_overlay）
 -- 两个坑：①回调签名是 (Mod, command, args)，command 只有命令词，格子编号在 args 里；
 -- ②原版控制台要**再按一次回车 / 输入别的**才会把这批行刷出来，看到「没输出」先别急。
 gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command, args)
@@ -1890,7 +1864,7 @@ gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command, args)
     return
   end
   local gid = rest ~= "" and tonumber(rest) or nil
-  gt:console_dump_diag(gid, "gtpdiag v" .. tostring(gt.VERSION), true)
+  gt:console_dump_diag(gid, "gtpdiag v" .. tostring(gt.VERSION))
 end)
 --
 -- Draw the cursor on whichever render callback MinimapAPI itself draws its

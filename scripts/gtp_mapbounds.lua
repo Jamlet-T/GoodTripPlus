@@ -79,7 +79,7 @@ local function draw_line(cx, cy, w, h)
 end
 
 -- 单个格子：贴哪条边就画哪条（角房两条）
-local function draw_cell(gid)
+local function draw_cell(gid, project)
   local col = gid % COLS
   local row = math.floor(gid / COLS)
   if row < 0 or row >= ROWS then
@@ -90,7 +90,7 @@ local function draw_cell(gid)
   if not (left or right or top or bottom) then
     return -- 内部格：不算投影（gid_to_rtmap_pos 的锚点虽按帧缓存，能不调就不调）
   end
-  local pos = gt:gid_to_rtmap_pos(gid)
+  local pos = project(gid)
   if left then
     draw_line(pos.X - CELL_W / 2, pos.Y, LINE_T, LINE_H)
   elseif right then
@@ -144,6 +144,7 @@ function M.render()
     return
   end
   local zero = Vector(0, 0)
+  local project = gt:make_rtmap_projector()
   for _, mr in ipairs(map) do
     if mr.Shape and mr.Position and mr:IsVisible() then
       local base = mr.DisplayPosition or mr.Position
@@ -151,38 +152,16 @@ function M.render()
         local col = base.X + off.X
         local row = base.Y + off.Y
         if col >= 0 and col < COLS and row >= 0 and row < ROWS then
-          draw_cell(math.floor(row * COLS + col + 0.5))
+          draw_cell(math.floor(row * COLS + col + 0.5), project)
         end
       end
     end
   end
 end
 
--- MCM 开关（默认开；显示类功能，与隐藏房标记一样给开关）
---
--- ⚠️ 必须只注册一次：MCM 的 `AddSetting` 是**无脑 append**、不按键去重
--- （`ModConfigMenu.MenuData` 整局只在 MCM 加载时建一次、中途不清空），
--- 而 `MC_POST_GAME_STARTED` **每次 rewind 都会再触发一次**
--- （rewind 触发 LoadSaveTable 重建地图，gtp_rewindfix 就是靠这个钩子做的）。
--- 所以不加上面这个 once 标记的话，用几次 rewind 配置菜单里就多几份重复项。
--- 与 gtrep.lua 注册核心传送选项时用的 `mcm_registered` 是同一个套路。
-local mcm_registered = false
-gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
-  if mcm_registered or not ModConfigMenu then
-    return -- 还没注册过、且 MCM 已在则继续；MCM 若加载晚了下局再试
-  end
-  mcm_registered = true
-  local zh = type(Options.Language) == "string"
-    and Options.Language:lower():sub(1, 2) == "zh"
-  ModConfigMenu.AddBooleanSetting(
-    "GoodTripPlus", nil,
-    "ShowMapBounds",
-    true,
-    zh and "显示地图边界" or "Show Map Bounds",
-    zh and "按住地图键时，把贴着地图边界（13×13 最外圈）的房间、靠边的那条边高亮出来，方便判断哪一侧外面已经没有房间了。只画已经探索到的房间。默认开启。"
-       or "While holding the map key, highlight the outer edge of rooms that sit on the 13x13 map border, so you can tell which side has no more rooms left. Only explored rooms are drawn. Default: enabled"
-  )
-end)
+-- MCM 开关：不在本模块注册——2026-10-04 起全部 MCM 项集中在 gtrep.lua 的
+-- 统一注册块里按用户指定顺序注册（本功能配置键 = ShowMapBounds，默认开；
+-- 文案在 gtrep.lua 的 GT_STRINGS.map_bounds_*）。
 
 -- 绘制层：与隐藏房标记同一个回调，但优先级再早 1，让标记与光标压在线之上
 do

@@ -5,8 +5,7 @@ GoodTripPlus —— 授权范围说明
 逐项来源与处理方式见同目录的 THIRD_PARTY.md。
 
 【1】自有代码 —— MIT（下方正文）
-    本项目新写的部分：rewind 掉落物图标修复、隐藏房候选标记的对接与渲染、
-    GoodTripPlus 的构建与部署脚本。版权归本项目的作者。
+    本项目新写的部分：传送修复、图标/隐藏房功能、地图记忆持久化、控制台输出及开发工具。
 
 【2】移植的第三方代码 —— MIT，版权归原作者 dokee
     scripts/delver/ 下的 const / geometry / log / state / map / room，
@@ -15,16 +14,12 @@ GoodTripPlus —— 授权范围说明
     这些文件受原作者的 MIT 许可证保护，原文见 scripts/delver/LICENSE-lazy-delver.txt。
     分发时必须一并携带该文件；本 LICENSE 不能把它们重新声明为自有版权。
 
-【3】上游基底 —— **没有许可证，默认保留所有权利，不包含在本 MIT 授权内**
-    scripts/gtrep.lua 是 Goodtrip MLX's Tweak（Steam 创意工坊 3749565569）的二次修改，
-    而 MLX's Tweak 本身又是 tarako 的 GoodTrip 的二次开发。
-    这两个上游作品都没有附带任何许可证文件，因此在法律上默认「保留所有权利」：
-    本项目作者并未从上游取得复制、修改、再分发的许可。
+【3】上游基底 —— Goodtrip MLX's Tweak / GoodTrip
+    scripts/gtrep.lua 基于 Goodtrip MLX's Tweak（Steam 创意工坊 3749565569），其上游为 tarako 的 GoodTrip。
+    项目维护者确认已取得 MLX 作者的公开发布许可。该许可独立于下方 MIT 正文；
+    下方 MIT 不重新声明或扩大上游代码的授权范围。GoodTrip 原作者可通过 README 中的 GitHub Issues 联系维护者。
 
-    ⇒ **在取得上游作者许可之前，包含 scripts/gtrep.lua 的完整包请勿公开发布**
-      （包括上传 Steam 创意工坊）。详细的处置建议见 THIRD_PARTY.md。
-
-下方 MIT 正文只覆盖【1】与【2】中属于本项目的部分，不覆盖【3】。
+下方 MIT 正文只覆盖【1】与【2】中属于本项目的部分；上游代码依照其单独许可提供。
 
 ----------------------------------------------------------------------------
 MIT License
