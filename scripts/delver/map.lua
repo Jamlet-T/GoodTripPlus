@@ -296,6 +296,7 @@ end
 
 
 function M.reload()
+  if gt and gt.delver_memory_before_reload then gt:delver_memory_before_reload() end
   local level = Game():GetLevel()
   state.update(level)
 
@@ -357,11 +358,16 @@ function M.reload()
 
   find_fakes()
   find_ultra_fakes()
+  M.fake_baseline={}
+  for cid,candidate in pairs(M.candidates) do
+    if candidate.lid==nil then M.fake_baseline[cid]=true end
+  end
 
   log.info("Map loading complete!\n")
   -- log.info 当前为 no-op；不再构建随后被丢弃的整层文本/ASCII 地图。
 
   state.done()
+  if gt and gt.delver_memory_after_reload then gt:delver_memory_after_reload() end
   -- 自动取证：每次重建一次；诊断异常不得阻断候选渲染。
   pcall(function()
     if gt and gt.is_debug and gt:is_debug() then

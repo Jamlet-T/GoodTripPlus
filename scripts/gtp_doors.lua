@@ -90,15 +90,22 @@ end
 function gt:level_identity()
   local lvl = Game():GetLevel()
   if not lvl then return nil end
-  local rooms = lvl:GetRooms()
-  return table.concat({
+  local seeds = Game():GetSeeds()
+  return 'F3:' .. table.concat({
     lvl:GetStage(),
     lvl:GetStageType(),
     lvl:GetAbsoluteStage(),
     Game():GetSeeds():GetStartSeed(),
-    rooms and rooms.Size or -1,
+    seeds.GetStageSeed and seeds:GetStageSeed(lvl:GetStage()) or 0,
+    lvl.GetDungeonPlacementSeed and lvl:GetDungeonPlacementSeed() or 0,
     lvl:IsAscent() and 1 or 0,
   }, ":")
+end
+-- 仅用于迁移旧 GTPDG2，仍要求旧房间数完全相同，不放宽旧图的楼层校验。
+function gt:legacy_level_identity()
+  local lvl=Game():GetLevel()
+  return table.concat({lvl:GetStage(),lvl:GetStageType(),lvl:GetAbsoluteStage(),
+    Game():GetSeeds():GetStartSeed(),lvl:GetRooms().Size,lvl:IsAscent() and 1 or 0},':')
 end
 
 function gt:save_door_state()
@@ -113,7 +120,8 @@ function gt:save_door_state()
       bare_out = aux.bare_out, bare_in = aux.bare_in,
       pre = aux.pre,
     }
-    gt:SaveData(gt.persist_serialize(state))
+    if gt.persist_write_record then gt:persist_write_record(state)
+    else gt:SaveData(gt.persist_serialize(state)) end
   end)
   if ok then
     door_state.dirty = false
@@ -125,6 +133,7 @@ end
 function gt:load_door_state()
   if not gt.persist_parse then return false end
   local ok, state = pcall(function()
+    if gt.persist_read_record then return gt:persist_read_record() end
     if not gt:HasData() then return nil end
     return gt.persist_parse(gt:LoadData())
   end)

@@ -226,6 +226,9 @@ gt:AddCallback(ModCallbacks.MC_POST_NEW_ROOM, function()
 end)
 
 gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function(_, is_continued)
+  -- 继续存档由磁盘地图记忆恢复，不能用上一次会话的内存图标覆盖合法拾取。
+  -- 新开局同样清空；同一局中途 rewind 保留旧快照用于批量清空修复。
+  if is_continued or Game():GetFrameCount()<2 then prev_state=nil end
   push_event("frame=" .. Game():GetFrameCount() ..
     " POST_GAME_STARTED continued=" .. tostring(is_continued))
   if gt:is_debug() then

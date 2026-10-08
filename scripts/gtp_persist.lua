@@ -34,6 +34,12 @@ gt.PERSIST_MAGIC = MAGIC
 function gt.persist_serialize(state)
   if type(state) ~= "table" then return nil end
   local body = {}
+  for key, value in pairs(state.sections or {}) do
+    if type(key)=='string' and key:match('^%w+$') and type(value)=='string' then
+      local hex=value:gsub('.',function(c) return string.format('%02x',string.byte(c)) end)
+      body[#body+1]='E '..key..' '..hex
+    end
+  end
   for dim, row in pairs(state.link or {}) do
     for a, cols in pairs(row) do
       for b, v in pairs(cols) do
@@ -66,7 +72,7 @@ end
 -- 解析文本 -> state；任何不认识/不完整/版本不符的情况都返回 nil（**绝不报错**）。
 function gt.persist_parse(text)
   if type(text) ~= "string" or text == "" then return nil end
-  local state = { link = {}, swept = {}, bare_out = {}, bare_in = {}, pre = {} }
+  local state = { link = {}, swept = {}, bare_out = {}, bare_in = {}, pre = {}, sections = {} }
   local first = true
   for line in text:gmatch("[^\n]+") do
     if first then
@@ -76,6 +82,11 @@ function gt.persist_parse(text)
       local tag = line:sub(1, 1)
       if tag == "I" then
         state.identity = line:sub(3)
+      elseif tag == 'E' then
+        local key, hex=line:match('^E (%w+) (%x*)$')
+        if key and #hex%2==0 then
+          state.sections[key]=hex:gsub('%x%x',function(pair) return string.char(tonumber(pair,16)) end)
+        end
       elseif tag == "D" then
         local dim, a, b, slot = line:match("^D (%d+) (%d+) (%d+) (%d+)$")
         if dim then
