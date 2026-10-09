@@ -358,6 +358,7 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
   或 `door.TargetRoomIndex == GridRooms.ROOM_BOSSRUSH_IDX`(-5) / `ROOM_BLUE_WOOM_IDX`(-8，死寂/Hush)。
   **注意 `DoorVariant` 里没有这些门型**（只有 0~8 九个普通值），所以必须看门的目标房间。
 - **回溯线（The Ascent）不参与** —— 那里进门的就是 boss 房、只是路过，没有奖励门。
+- **红钥匙生成的恶魔／天使房不触发此禁令**（2.5.9）：它们是常驻房间，房内及相邻房间照常传送；其它准入规则仍生效，普通临时奖励门继续保护。
 - 实现是独立模块 `scripts/gtp_bosswindow.lua`，**登记为 ① departure 段的规则 `departure.reward_door`**
   （2026-10-06 起不再包装 `gt.check_teleble()`），
   所以表现与其它准入拒绝完全一致：光标不高亮、按 TAB 不启用、松手也不会传。
