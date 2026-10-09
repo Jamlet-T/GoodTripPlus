@@ -301,6 +301,7 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 | `TravelMode`（MCM 显示「可以传送到」） | 相邻房间 | v1.8.2 由 Fixed 的 `AllowNeighborRoom` + `AllowAnyRoom` **合并**而成的三选一：**任意房间**＝所有已显示房间全部放行（＝原 `AllowAnyRoom` 开）；**相邻房间**＝已清且可达房间旁「已显示但未清/未探索」的房间放行（＝原默认组合；普通房/boss/小 boss/献祭房除外；红钥匙房、一层与水层镜像的商店/宝箱房豁免；虚空 Delirium boss 房角落特判）；**已探索房间**＝只认自己已清怪的房（＝原 `AllowNeighborRoom` 关） |
 | `BlockCurseRoom`（MCM 显示「禁止传送进诅咒房」，v2.2.1 恢复） | **开** | 移植基底（MLX's Tweak）的同名选项（现行 Fixed 2.2.58 已无此项）：开启时**任何传送范围档位都不能把目标落在诅咒房上**（`RoomType.ROOM_CURSE`(10)，进出会按门咬血的那种；「任意房间」档也拦）；关掉则**完全按普通房间处理**。**只拦「传进去」，从诅咒房传出去不拦**（出去该扣的血照旧扣）。目标侧实现是 `scripts/gtp_curseblock.lua`，**登记为 ② target_entry 段的规则 `target.curse_blocked`**（2026-10-06 起不再包装函数） |
 | `FairTripPath` | 开 | 目标必须沿「已探索+已清怪」的房间逐真门抵达（门图 BFS） |
+| `AutoUnlockAdjacent` | **关** | 菜单「自动解锁相邻房门」：确认传送时支付并打开当前房间直接相邻的普通单／双钥匙门或街机厅金币门，资源不足不传送；预览不扣费，已开门不重复收费。已探索档仍不进入未探索房间。特殊锁门、隐藏墙和「付费游戏」转换门暂不支持 |
 | `ArriveAtDoor` | **开**（偏离 Fixed 的默认关） | 落地在走路会走进来的门口（跨屏大房间远途会先经过前一格） |
 | `FairTripTime` | 关 | 按可步行路线与移速补时间；无路线不补时，不限制准入 |
 | `TeleportTransition`（MCM 显示「传送过场」） | 淡入淡出（2） | 2026-10-05 由 Fixed 的 `TeleportAnimation` + `FastTransition` **合并**而成的三选一：**立即出现**＝`ChangeRoom` 无过场（＝原 `FastTransition` 开）；**淡入淡出**＝`StartRoomTransition(…, FADE = 1)`（＝Fixed 原默认组合）；**传送动画**＝`TELEPORT = 3` 白闪，等同使用传送道具。顺带决定传送冷却 `tele_cd`（1 / 10 / 45 帧）。调试模式不影响过场（2026-10-06 起） |
