@@ -15,7 +15,8 @@
       ALT_ROCK_MARKED = 1008, MARKED_SKULL = 1008,
     所以「这个房间会生成这个骷髅」= 生成表里存在 Type == 1008 的条目。
   * 层判定用 `Level:GetStage() == LevelStage.STAGE3_2`（= 6），即深牢 II
-    （同章第二层的其它变体 Necropolis II / Dank Depths II 一并覆盖）。
+    或 STAGE3_1（= 5）且带 CURSE_OF_LABYRINTH 的深牢 XL；
+    同章的 Necropolis / Dank Depths 变体一并覆盖。
 
   为什么用「生成表」而不是「扫实体」
   ----------------------------------
@@ -66,6 +67,7 @@ local FALLBACK_ICON_ID = "Card"
 
 -- LevelStage.STAGE3_2 —— 深牢 II
 local TARGET_STAGE = 6
+local XL_STAGE = 5 -- XL 合并两层，但 GetStage 仍是同章第一层
 
 -- 图标注册状态：nil = 还没成功过（下次再试）；true = 已注册；false = 本环境没戏
 local marker_icon_state = nil
@@ -241,8 +243,12 @@ local function update()
   local level = Game():GetLevel()
   if not level then return end
 
-  -- 只在深牢 II 干活；其它楼层连生成表都不扫
-  if level:GetStage() ~= TARGET_STAGE or level:IsAscent() then
+  -- 深牢 XL 覆盖本章第二层内容，不能只按 STAGE3_2 筛选。
+  -- GetCurses 返回位掩码，兼容迷宫诅咒与其它诅咒同时存在。
+  local stage = level:GetStage()
+  local is_target = stage == TARGET_STAGE or
+    (stage == XL_STAGE and level:GetCurses() & LevelCurse.CURSE_OF_LABYRINTH ~= 0)
+  if not is_target or level:IsAscent() then
     return
   end
 

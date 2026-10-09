@@ -2,7 +2,7 @@ gt = RegisterMod("GoodTripPlus", 1)
 local console_output = require("scripts.gtp_console").write
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.5.12"
+gt.VERSION = "2.6.0"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
