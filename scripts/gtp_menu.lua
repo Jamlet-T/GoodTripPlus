@@ -64,6 +64,13 @@ return function(gt)
     )
     ModConfigMenu.AddBooleanSetting(
       "GoodTripPlus", nil,
+      "AutoUnlockAdjacent",
+      false,
+      L.auto_unlock_name,
+      L.auto_unlock_desc
+    )
+    ModConfigMenu.AddBooleanSetting(
+      "GoodTripPlus", nil,
       "ArriveAtDoor",
       true,
       L.arrivedoor_name,

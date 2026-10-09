@@ -2,7 +2,7 @@ gt = RegisterMod("GoodTripPlus", 1)
 local console_output = require("scripts.gtp_console").write
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.5.11"
+gt.VERSION = "2.5.12"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -1333,6 +1333,7 @@ end
 -- 键盘松开地图键与鼠标点击共用准入、冷却、诊断和隐藏/诅咒房前室准备。
 -- 来源：原 step() 松键传送分支。
 function gt:try_cursor_travel(gid, source)
+    if gt.adjacent_unlock_pending and gt:adjacent_unlock_pending() then return false end
     if gt:door_penalty_pending() then return false end
     if source == 'mouse' and not gt:get_config_bool('MouseTeleport', true) then return false end
     gt:auto_log_secret_diag(gid)
@@ -1347,6 +1348,11 @@ function gt:try_cursor_travel(gid, source)
     end
     if gt.auto_log_travel then gt:auto_log_travel(gid, res) end
     if not res.ok or tele_cd >= 1 then return false end
+    if gt.prepare_adjacent_unlock then
+      local prepared=gt:prepare_adjacent_unlock(gid,source)
+      if prepared=='failed' then return false end
+      if prepared=='pending' then return true end
+    end
     if crd.Data.Type == 7 or (crd.Data.Type == 8 and Game():IsGreedMode()) then
       gt:pre_secret_room()
     elseif crd.Data.Type == 10 then
@@ -1563,6 +1569,7 @@ end
 -- 生命周期编排保留在适配层；菜单内容与语言表独立维护。
 require("scripts.gtp_menu")(gt)
 require("scripts.gtp_doorpenalty_runtime")(gt)
+require("scripts.gtp_unlock_runtime")(gt)
 gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
   gt:prep()
   gt:new_room()
