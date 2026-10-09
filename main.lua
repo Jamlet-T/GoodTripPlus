@@ -35,6 +35,7 @@ require("scripts.gtp_travel")
 require("scripts.gtp_persist")
 require("scripts.gtp_store")(gt)
 require("scripts.gtp_rewindfix")
+require("scripts.gtp_triprewindprobe")(gt)
 require("scripts.gtp_delver")
 require("scripts.gtp_skullroom")
 -- 传送判定的两个外挂规则模块：都在 gtp_travel 之后 —— 它们要调 gt:add_travel_rule 登记规则
