@@ -61,11 +61,11 @@ end
 
 -- 纯引擎：逐段逐条跑，命中即返回。不碰任何游戏 API，所以能 headless 测
 -- （见 tests/travel.lua）。
--- 任意档只保留目标有效性检查；其他档继续执行完整规则。
+-- 任意档保留目标有效性检查和显式开启的相邻门资源检查；其他档执行完整规则。
 function gt:travel_rule_enabled(rule, ctx)
   if ctx.mode ~= 1 then return true end
   return rule.id == "target.no_target" or rule.id == "target.unknown_cell"
-    or rule.id == "target.same_room"
+    or rule.id == "target.same_room" or rule.id == "target.unlock_resources"
 end
 
 function gt:run_travel_stages(stage_names, ctx)
@@ -320,6 +320,16 @@ gt:add_travel_rule({
   end,
 })
 
+gt:add_travel_rule({
+  id="target.unlock_resources",stage="target_entry",order=70,
+  text="自动解锁相邻房门需要的钥匙或金币不足",
+  test=function(ctx)
+    local unlock=gt.adjacent_unlock_state and gt:adjacent_unlock_state(ctx.gid)
+    if not unlock or unlock.affordable then return nil end
+    return {unlock=unlock.cost.kind,need=unlock.cost.amount}
+  end,
+})
+
 -- ===== ③ range：按「可以传送到」的档位 =====
 
 gt:add_travel_rule({
@@ -328,6 +338,12 @@ gt:add_travel_rule({
   test = function(ctx)
     -- 任意房间档：gid 来自光标投影，必然已显示，直接放行
     if ctx.mode == 1 then return nil end
+    -- 仅当前房间真实锁门可付费成为最后一跳；不扩展远处门图/可达岛。
+    -- 已探索档仍拒绝未探索目标，所有前置 departure/target 规则已执行。
+    if ctx.mode==2 or (ctx.target.VisitedCount>0 and ctx.target.Clear) then
+      local unlock=gt.adjacent_unlock_state and gt:adjacent_unlock_state(ctx.gid)
+      if unlock and unlock.affordable then return nil end
+    end
     local reach = ctx.reachable()
     local t = ctx.target
     -- 通道 B：目标自己已探索已清怪，且在自己这块可达岛上

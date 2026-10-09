@@ -62,6 +62,9 @@ gt.BlockCurseRoom = true
 -- 只能传送到经已清房间逐门连通的房间（Fixed: FairTripPath）
 gt.FairTripPath = true
 
+-- 确认传送时自动支付并打开当前房间直接相邻的普通钥匙门/街机厅金币门。
+gt.AutoUnlockAdjacent = false
+
 -- 传送后站在走路会进来的门口（Fixed: ArriveAtDoor）
 -- 默认改为开：偏离 Fixed 的默认关（2026-10-04 用户决定）
 gt.ArriveAtDoor = true
