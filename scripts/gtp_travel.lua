@@ -342,8 +342,8 @@ gt:add_travel_rule({
     local near = gt:check_neigh_connected(t, function(rd)
       if (rd.DisplayFlags & 1) == 0 then return false end
       if not (rd.VisitedCount > 0 and rd.Clear) then return false end
-      if reach == nil then return true end
-      if reach[rd.SafeGridIndex] ~= true then return false end
+      -- FairTripPath 只控制邻居是否在可达岛上，不能跳过目标入口的门状态。
+      if reach ~= nil and reach[rd.SafeGridIndex] ~= true then return false end
       -- 最后一跳要区分两个**看起来一样、其实不同**的情形（2026-10-06 实测两次）：
       --   ① 隔墙相邻（网格挨着但**根本没有门**）：兜底会当成连通 → 上锁的宝藏房 /
       --      街机厅因此能被传进去 ✗。必须**拒**。
