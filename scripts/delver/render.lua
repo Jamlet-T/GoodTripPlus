@@ -224,7 +224,16 @@ function M.refresh()
   need_refresh = true
 end
 
+-- 2.5.11：候选维护与 TAB/地图绘制分离。换房的排除证据必须在当前房
+-- 消费，不能等下一次打开地图时才拿另一个房间的现场处理。
+function M.update()
+  if state.is_ignored() then return end
+  if need_refresh then refresh() end
+end
+
 function M.render()
+  -- PEFFECT/道具回调可能晚于 POST_UPDATE；在任何显示闸门前消费这一帧的新证据。
+  M.update()
   if state.is_ignored() then return end
 
   if state.is_lost_cursed() or state.is_off_grid() then return end
@@ -237,8 +246,6 @@ function M.render()
 
   -- MinimapAPI 战斗隐藏生效中：地图整块没画，标记必须跟着藏
   if minimapapi_hides_map() then return end
-
-  if need_refresh then refresh() end
 
   local show_red = state.can_see_red()
   local project

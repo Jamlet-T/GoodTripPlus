@@ -99,6 +99,7 @@ end)
 -- 注意：这个计数**与开关无关** —— 地图边界高亮（gtp_mapbounds.lua）也读它来同步
 -- 淡入与显示条件，所以关掉隐藏房标记时不能让它停摆（2026-10-03）。
 gt:AddCallback(ModCallbacks.MC_POST_UPDATE, function()
+  render.update()
   render.tab_hold_check()
 end)
 
