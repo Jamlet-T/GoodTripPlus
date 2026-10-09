@@ -370,6 +370,8 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 ## 五、深牢 II 的愚者骷髅房标记（默认开启）
 
 **背景**：深牢 II（Depths II）里有一个特殊的骷髅障碍物，炸掉后**固定掉落愚者卡牌**（The Fool）。
+
+同样支持迷宫诅咒下的深牢 XL，以及尸宫、阴湿深牢的对应 II / XL 变体。
 开启后，小地图会在它所在的房间上画一个卡牌图标，方便回头再找。
 
 开关：**MCM → GoodTripPlus → 「标记深牢 II 的愚者骷髅房」**，或 `gtconfig.lua` 里 `gt.FoolsSkullRoom = false`。
@@ -380,7 +382,7 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 | --- | --- |
 | 游戏自带 `resources/scripts/enums.lua` 第 497 行 | `GRID_ROCK_ALT2 = 26, -- special skull in Depths 2` —— 注释直接写明「深牢 II 的特殊骷髅」 |
 | REPENTOGON 的 `enums_ex.lua` 第 1625 行 | `StbGridType` 里 `ALT_ROCK_MARKED = 1008, MARKED_SKULL = 1008` —— 房间布局（`.stb`）里这个骷髅的类型 ID |
-| 层判定 | `Level:GetStage() == LevelStage.STAGE3_2`（= 6），即深牢 II（含 Necropolis II / Dank Depths II 同类层） |
+| 层判定 | `GetStage() == STAGE3_2`（= 6），或 `STAGE3_1`（= 5）且 `GetCurses()` 含 `CURSE_OF_LABYRINTH` 位；覆盖深牢 II / XL 及同章变体，排除上行 |
 
 识别方式是读房间的**生成表**（`RoomDescriptor.Data.Spawns`）里有没有 Type == 1008 的条目，
 而不是进房扫实体。理由：
