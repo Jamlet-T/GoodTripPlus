@@ -207,7 +207,14 @@ MinimapAPI 的房间表（几十个房间，远小于 MinimapAPI 自己每帧的
 2026-10-03 项目定位收缩为「MinimapAPI 的外置传送插件」时，`scripts/gtp_mapoutline.lua`
 已随包移除——地图显示问题应回到 MinimapAPI 侧解决。
 
-黑边本身是 MinimapAPI 的房间轮廓（`RoomOutline`）在大地图渐显到不透明度 1 时突然开画所致。
+这里指的是大地图渐显完成时出现的房间轮廓（`RoomOutline`），不是 bounded map 框外绘制的问题。
+2.5.8 起，GoodTripPlus 的光标房间高亮沿用 MiniMapAPI 的 bounded 裁剪参数，框外房间不再重画；
+半探索房间使用 MiniMapAPI 的 custom sprite，避免对基础 sprite 设置不存在的动画。
+按住地图键的大地图及镜像翻转时的无框小地图仍遵循上游的无框绘制方式。
+MiniMapAPI 2.61 的 bounded 地图本体与轮廓裁剪原点不一致，曾导致黑底向上越框并随房间居中滚动。
+此问题已提交 MiniMapAPI PR #171；2.5.8 由 GoodTripPlus 代理 bounded 轮廓层并按框内矩形裁剪，
+无框地图沿用上游绘制。无需直接修改 MiniMapAPI 文件。
+隐藏房闪白修复已通过 PR #170 进入 MiniMapAPI 正式版本，旧本地补丁工具也已移除。
 如果还遇到它，两个现成的绕法：
 
 - 关掉 MinimapAPI 菜单里的 **"Show Room Outlines"**（MCM → Minimap API → Map(1)）；
