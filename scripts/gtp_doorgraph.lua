@@ -5,12 +5,12 @@ local Graph = {}
 Graph.__index = Graph
 
 function Graph.new()
-  return setmetatable({ link = {}, swept = {}, dirty = false }, Graph)
+  return setmetatable({ link = {}, swept = {}, evidence = {}, dirty = false }, Graph)
 end
 
 function Graph:reset(identity)
   self.identity = identity
-  self.link, self.swept, self.dirty = {}, {}, false
+  self.link, self.swept, self.evidence, self.dirty = {}, {}, {}, false
 end
 
 function Graph:dimension(dim)

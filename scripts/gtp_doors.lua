@@ -3,6 +3,7 @@
 -- context 显式传入共享状态和辅助状态访问器，不捕获 gtrep 的可重赋值 local。
 return function(gt, context)
 local door_state = context.state
+local Penalty = require('scripts.gtp_doorpenalty')
 local function door_graph()
     local d = Game():GetRoom():IsMirrorWorld() and 1 or 0
     local link, swept = door_state:dimension(d)
@@ -10,6 +11,11 @@ local function door_graph()
 end
 function gt:get_door_graph()
   return door_graph()
+end
+
+function gt:door_evidence_from(here)
+  local _,_,dim=door_graph()
+  return (door_state.evidence[dim] or {})[here] or {}
 end
 
 function gt:reset_door_floor()
@@ -62,6 +68,9 @@ function gt:sweep_doors()
     local here = lvl:GetCurrentRoomDesc().SafeGridIndex
     local _, _, dim = door_graph()
     door_state:mark_swept(dim, here)
+    door_state.evidence[dim]=door_state.evidence[dim] or {}
+    local previous=door_state.evidence[dim][here] or {}
+    local observed={}
     for i = 0, 7 do
       local door = live:GetDoor(i)
       --DOOR_HIDDEN is an unbombed wall, so no passage; a door that is closed right now
@@ -72,19 +81,36 @@ function gt:sweep_doors()
         local tdes = lvl:GetRoomByIdx(door.TargetRoomIndex, -1)
         if tdes then
           local there = tdes.SafeGridIndex
+          local evidence=Penalty.describe(door,live:GetType(),tdes.Data and tdes.Data.Type,i)
+          evidence.from,evidence.to=here,there
+          observed[i]=evidence
+          local old=previous[i]
+          if not old or old.to~=there or old.variant~=evidence.variant
+              or old.var_data~=evidence.var_data or old.spikes~=evidence.spikes
+              or old.current_type~=evidence.current_type or old.target_type~=evidence.target_type
+              or old.open~=evidence.open or old.locked~=evidence.locked then
+            door_state.dirty=true
+            pcall(function()
+              Isaac.DebugString(string.format('[GTPdoor] dim=%s from=%s to=%s slot=%s variant=%s varData=%s spikes=%s types=%s/%s sprite=%s',
+                dim,here,there,i,evidence.variant,evidence.var_data,tostring(evidence.spikes),
+                evidence.current_type,evidence.target_type,evidence.sprite))
+            end)
+          end
           --curse-room spikes are read off the door itself: Flat File strips them
           --once and for good, so the trinket in hand says nothing about this door
           if door.TargetRoomType == RoomType.ROOM_CURSE then
-            aux.bare_out[there] = door.VarData ~= 0
-            door_state.dirty = true
+            local value=door.VarData ~= 0
+            if aux.bare_out[there]~=value then aux.bare_out[there]=value; door_state.dirty=true end
           elseif live:GetType() == RoomType.ROOM_CURSE then
-            aux.bare_in[here] = door.VarData ~= 0
-            door_state.dirty = true
+            local value=door.VarData ~= 0
+            if aux.bare_in[here]~=value then aux.bare_in[here]=value; door_state.dirty=true end
           end
           door_state:observe(dim, here, there, i, gt:door_is_passage(door))
         end
       end
     end
+    for slot in pairs(previous) do if not observed[slot] then door_state.dirty=true end end
+    door_state.evidence[dim][here]=observed
 end
 
 function gt:level_identity()
@@ -117,6 +143,7 @@ function gt:save_door_state()
     local state = {
       identity = door_state.identity,
       link = door_state.link, swept = door_state.swept,
+      evidence = door_state.evidence,
       bare_out = aux.bare_out, bare_in = aux.bare_in,
       pre = aux.pre,
     }
@@ -144,6 +171,7 @@ function gt:load_door_state()
   if not state or state.identity ~= gt:level_identity() then return false end
   door_state.link = state.link
   door_state.swept = state.swept
+  door_state.evidence = state.evidence or {}
   context.set_aux(state)
   door_state.dirty = false
   return true

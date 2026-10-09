@@ -2,7 +2,7 @@ gt = RegisterMod("GoodTripPlus", 1)
 local console_output = require("scripts.gtp_console").write
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.5.6"
+gt.VERSION = "2.5.7"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -478,22 +478,6 @@ function gt:fair_trip(roomIndex, target)
     return 999
 end
 
---is this curse-room door free? Isaac's Heart / Tooth and Nail take the hit.
---Flat File acts on the door as the room is laid down, so the trinket in hand
---only answers for a door about to be laid down again, not the one stood beside
-function gt:curse_toll_free(gid, by_inner_door, room_reloads)
-    local p = player
-    if p:HasCollectible(276) or p:HasCollectible(663) then
-      return true
-    end
-    if room_reloads and p:HasTrinket(151) then
-      return true
-    end
-    local bare = curse_bare_outside[gid]
-    if by_inner_door then bare = curse_bare_inside[gid] end
-    return bare == true
-end
-
 -- 牌意解读 / 天堂阶梯 生成的「入口」实体（2026-10-03 按用户建议改成直接看实体）：
 --   · 牌意解读（Card Reading，660）的彩色传送门：
 --       ENTITY_EFFECT + EffectVariant.PORTAL_TELEPORT(161)
@@ -555,31 +539,15 @@ end
 -- 不再有跨文件的函数包装链（规则顺序也不再由 main.lua 的 require 顺序决定）。
 -- 判定顺序与理由见 docs/superpowers/specs/2026-10-06-travel-judgment-refactor-design.md
 --
-function gt:hurt(n)
-  player:TakeDamage(n, DamageFlag.DAMAGE_CURSED_DOOR | DamageFlag.DAMAGE_NO_PENALTIES, EntityRef(player), 0)
-end
 --
 function gt:tele_failed()
   sfx:Play(187, 0.5, 0, false, 1)
 end
 --
 function gt:check_curse_room(gid)
-    -- 诅咒房进/出的过路费：调试模式**不豁免**（2026-10-06 起 debug 只出诊断、不改行为）
-    --a bombed secret-room wall has no spikes, so secret<->guard room is free
-    --both ways, even when the guard is the curse room
-    if secret_pre_room_id[crid] == gid or secret_pre_room_id[gid] == crid then
-      return
-    end
-    local trd = grid_room[gid]
-    if crd.Data.Type == 10 then
-      if not gt:curse_toll_free(crd.SafeGridIndex, true, false) then
-        gt:hurt(1)
-      end
-    elseif trd.Data.Type == 10 and not player:IsFlying() then
-      if not gt:curse_toll_free(trd.SafeGridIndex, false, true) then
-        gt:hurt(1)
-      end
-    end
+    -- 来源：原 gtrep.lua:566-583。按门路线统一结算，不能仅检查起点/终点类型。
+    gt:sweep_doors()
+    gt:apply_travel_door_penalties(crd.SafeGridIndex,gid)
 end
 --
 --everyone a landing carries: players, familiars by type, and anything owned by
@@ -645,10 +613,7 @@ function gt:teleport_to_grid_index(gid)
       if from_prd.ListIndex == grid_room[gid].ListIndex then
         gid = from_pre
       elseif not (grid_room[gid].Data.Type == 10 and secret_pre_room_id[gid] and secret_pre_room_id[gid] == crid) then
-        --the toll is for the curse room's own door on the far side, not the bombed hole
-        if from_prd.Data.Type == 10 and not gt:curse_toll_free(from_prd.SafeGridIndex, true, true) then
-          gt:hurt(1)
-        end
+        -- 中转仅控制落点，门惩罚已经按原始完整路线结算。
         Game():ChangeRoom(from_pre,-1)
       end
     end
@@ -661,10 +626,6 @@ function gt:teleport_to_grid_index(gid)
             Game():ChangeRoom(to_pre,-1)
           end
         elseif not (crd.Data.Type == 10 and secret_pre_room_id[crid] and secret_pre_room_id[crid] == gid) then
-          if to_prd.Data.Type == 10 and not player:IsFlying()
-              and not gt:curse_toll_free(to_prd.SafeGridIndex, false, true) then
-            gt:hurt(1)
-          end
           Game():ChangeRoom(to_pre,-1)
         end
       end
@@ -1063,6 +1024,11 @@ function gt:grid_room_desc(gid)
   return grid_room[gid]
 end
 
+function gt:travel_room_neighbors(gid)
+  local node=room_neighbours[gid]
+  return node and node.Neighbors or {}
+end
+
 -- Level:GetRoomByIdx 的薄包装（诅咒房判定沿用 gtp_curseblock 移植时的原口径）
 function gt:room_desc_at(gid)
   local lvl = Game():GetLevel()
@@ -1387,6 +1353,7 @@ end
 -- 键盘松开地图键与鼠标点击共用准入、冷却、诊断和隐藏/诅咒房前室准备。
 -- 来源：原 step() 松键传送分支。
 function gt:try_cursor_travel(gid, source)
+    if gt:door_penalty_pending() then return false end
     if source == 'mouse' and not gt:get_config_bool('MouseTeleport', true) then return false end
     gt:auto_log_secret_diag(gid)
     local res = gt:can_travel_to(gid)
@@ -1615,6 +1582,7 @@ end
 -------------------------------
 -- 生命周期编排保留在适配层；菜单内容与语言表独立维护。
 require("scripts.gtp_menu")(gt)
+require("scripts.gtp_doorpenalty_runtime")(gt)
 gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
   gt:prep()
   gt:new_room()
