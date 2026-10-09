@@ -21,13 +21,17 @@
   与 thicco-catto/library-of-isaac 的 Doors 模块交叉核对过）
   ---------------------------------------------------------
   遍历当前房间 8 个门槽（`DoorSlot.NUM_DOOR_SLOTS`），任一门满足以下之一即命中：
-    · `door.TargetRoomType == RoomType.ROOM_DEVIL`(14)  —— 恶魔房的门
-    · `door.TargetRoomType == RoomType.ROOM_ANGEL`(15)  —— 天使房的门
+    · `door.TargetRoomType == RoomType.ROOM_DEVIL`(14)  —— 临时恶魔房的门
+    · `door.TargetRoomType == RoomType.ROOM_ANGEL`(15)  —— 临时天使房的门
     · `door.TargetRoomType == RoomType.ROOM_BOSSRUSH`(17)
       或 `door.TargetRoomIndex == GridRooms.ROOM_BOSSRUSH_IDX`(-5)  —— Boss Rush
     · `door.TargetRoomIndex == GridRooms.ROOM_BLUE_WOOM_IDX`(-8)   —— 死寂（Hush）
   注意 **DoorVariant 里没有这些门型**（只有 0~8 九个普通值，见原版 enums.lua），
   所以必须看门的目标房间，不能看门的 variant。
+
+  2.5.9：红钥匙生成的恶魔/天使房是常驻房间，不属于这个保护窗口。
+  用描述符 FLAG_RED_ROOM 核对当前房和门目标（当前维度），豁免房内出口与相邻入口；
+  无明确红房证据时继续保护。Boss Rush / Hush 固定索引保护优先，不受此豁免影响。
 
   回溯线（The Ascent）排除：那里的 boss 房只是路过房、没有奖励门，直接跳过，
   免得任何边界情况误伤。
@@ -62,6 +66,23 @@ local REWARD_DOOR_INDICES = {
 local last_hit_slot = nil
 local last_hit_desc = nil
 
+local function is_red_reward_room(rd)
+    local t = rd and rd.Data and rd.Data.Type
+    return (t == RoomType.ROOM_DEVIL or t == RoomType.ROOM_ANGEL)
+      and ((rd.Flags or 0) & RoomDescriptor.FLAG_RED_ROOM) ~= 0
+end
+
+local function is_temporary_reward_door(door, current_is_red_reward)
+    if REWARD_DOOR_INDICES[door.TargetRoomIndex] then return true end
+    if not REWARD_DOOR_TYPES[door.TargetRoomType] then return false end
+    if door.TargetRoomType == RoomType.ROOM_BOSSRUSH then return true end
+    -- 红房内出口的门类型也可能保留恶魔/天使类型，不能只查门外目标。
+    if current_is_red_reward then return false end
+    local idx = door.TargetRoomIndex
+    local target = type(idx) == "number" and idx >= 0 and gt:room_desc_at(idx) or nil
+    return not is_red_reward_room(target)
+end
+
 -- 当前房间里是否有「通往奖励房间的门」
 function gt:has_reward_door()
     last_hit_slot, last_hit_desc = nil, nil
@@ -69,10 +90,10 @@ function gt:has_reward_door()
     if not r then
       return false
     end
+    local current_is_red_reward = is_red_reward_room(gt:travel_cur_state().cur)
     for i = 0, DoorSlot.NUM_DOOR_SLOTS - 1 do
       local door = r:GetDoor(i)
-      if door and (REWARD_DOOR_TYPES[door.TargetRoomType]
-          or REWARD_DOOR_INDICES[door.TargetRoomIndex]) then
+      if door and is_temporary_reward_door(door, current_is_red_reward) then
         last_hit_slot = i
         last_hit_desc = string.format("slot=%d var=%s targetType=%s targetIdx=%s",
           i, tostring(door.Desc and door.Desc.Variant),
