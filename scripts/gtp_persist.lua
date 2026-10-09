@@ -53,6 +53,16 @@ function gt.persist_serialize(state)
       body[#body + 1] = string.format("S %d %d", dim, a)
     end
   end
+  -- T: 逐门侧的现场快照；旧 GTPDG2 无 T 行仍可读取，房间级 O/N 不迁移成门证据。
+  for dim, rooms in pairs(state.evidence or {}) do
+    for a, slots in pairs(rooms) do
+      for slot,e in pairs(slots) do
+        body[#body+1]=string.format('T %d %d %d %d %d %d %d %d %d',dim,a,e.to,slot,
+          e.variant,e.var_data,e.current_type,e.target_type,
+          e.spikes==nil and -1 or (e.spikes and 1 or 0))
+      end
+    end
+  end
   for sgi, v in pairs(state.bare_out or {}) do
     body[#body + 1] = string.format("O %d %d", sgi, v and 1 or 0)
   end
@@ -72,7 +82,7 @@ end
 -- 解析文本 -> state；任何不认识/不完整/版本不符的情况都返回 nil（**绝不报错**）。
 function gt.persist_parse(text)
   if type(text) ~= "string" or text == "" then return nil end
-  local state = { link = {}, swept = {}, bare_out = {}, bare_in = {}, pre = {}, sections = {} }
+  local state = { link = {}, swept = {}, evidence = {}, bare_out = {}, bare_in = {}, pre = {}, sections = {} }
   local first = true
   for line in text:gmatch("[^\n]+") do
     if first then
@@ -94,6 +104,18 @@ function gt.persist_parse(text)
           state.link[dim] = state.link[dim] or {}
           state.link[dim][a] = state.link[dim][a] or {}
           state.link[dim][a][b] = (slot == 0) and true or slot
+        end
+      elseif tag == 'T' then
+        local d,a,b,s,v,x,ct,tt,sp=line:match('^T (%d+) (%d+) (%d+) (%d+) (%-?%d+) (%-?%d+) (%-?%d+) (%-?%d+) (%-?%d+)$')
+        if d then
+          d,a,b,s,v,x,ct,tt,sp=tonumber(d),tonumber(a),tonumber(b),tonumber(s),tonumber(v),tonumber(x),tonumber(ct),tonumber(tt),tonumber(sp)
+          if s<=7 and (sp==-1 or sp==0 or sp==1) then
+            state.evidence[d]=state.evidence[d] or {}
+            state.evidence[d][a]=state.evidence[d][a] or {}
+            local e={from=a,to=b,slot=s,variant=v,var_data=x,current_type=ct,target_type=tt}
+            if sp~=-1 then e.spikes=sp==1 end
+            state.evidence[d][a][s]=e
+          end
         end
       elseif tag == "S" then
         local dim, a = line:match("^S (%d+) (%d+)$")
