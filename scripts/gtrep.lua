@@ -2,7 +2,7 @@ gt = RegisterMod("GoodTripPlus", 1)
 local console_output = require("scripts.gtp_console").write
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.5.7"
+gt.VERSION = "2.5.8"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -67,6 +67,7 @@ end, function()
     tostring(MinimapAPI and MinimapAPI:GetConfig('MouseTeleport') or false))
 end)
 local mouse_hit = require("scripts.gtp_mousehit")
+local draw_room_highlight = require("scripts.gtp_roomhighlight")
 -- 光标淡入（2026-10-05 用户要求：与隐藏房候选标记 / 地图边界高亮同一节奏）：
 -- 按住地图键后先等几帧、再渐显，免得光标在 MinimapAPI 的大地图还没就位时就先冒出来
 -- （2.1.2 修好「重开时光标贴回当前房间」之后尤其明显 —— 那时地图刚重建，光标已经画了）。
@@ -1279,28 +1280,7 @@ function gt:update_cursor_room_highlight()
 end
 --
 function gt:draw_minapi_room_highlight(mapRoom, color)
-    if not mapRoom or not mapRoom.RenderOffset or not mapRoom:IsVisible() then
-      return
-    end
-    local sprite = MinimapAPI:IsLarge() and MinimapAPI.SpriteMinimapLarge or MinimapAPI.SpriteMinimapSmall
-    local frame = MinimapAPI:GetRoomShapeFrame(mapRoom.Shape)
-    if type(frame) ~= "number" then
-      return
-    end
-    local animation
-    if mapRoom == MinimapAPI:GetCurrentRoom() then
-      animation = "RoomCurrent"
-    elseif mapRoom:IsClear() then
-      animation = "RoomVisited"
-    elseif MinimapAPI:GetConfig("DisplayExploredRooms") and mapRoom:IsVisited() then
-      animation = "RoomSemivisited"
-    else
-      animation = "RoomUnvisited"
-    end
-    sprite:SetFrame(animation, frame)
-    sprite.Scale = Vector(MinimapAPI.GlobalScaleX or 1, 1)
-    sprite.Color = color
-    sprite:Render(mapRoom.RenderOffset, Vector(0, 0), Vector(0, 0))
+    draw_room_highlight(MinimapAPI, mapRoom, color, Vector)
 end
 --
 -- 初始房间的绿色高亮已移除（2026-10-03）：MinimapAPI 自带

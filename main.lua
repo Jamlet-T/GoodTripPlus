@@ -28,6 +28,7 @@
 require("scripts.gtrep")
 require("scripts.gtp_combatmap")(gt, MinimapAPI)
 require("scripts.gtp_distancefix")(MinimapAPI)
+require("scripts.gtp_boundedshadow")(MinimapAPI)
 -- 传送判定策略层（2026-10-06 起）：四段规则表 + check 入口 + 调试浮层。
 -- 必须在 gtrep 之后 —— 它要拿 gtrep 定义的 gt 表与访问器。
 require("scripts.gtp_travel")
