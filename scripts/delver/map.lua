@@ -88,10 +88,10 @@ local function parse_room(room_desc)
   }
 end
 
--- Ultra generation is based on the non-red floor layout. Keep red occupancy
+-- All secret generation is based on the non-red floor layout. Keep red occupancy
 -- in M.cells for the live map, but treat opened red intermediaries as empty
 -- when reconstructing generation paths; they cannot extend the source layout.
-local function ultra_layout_cell(cid)
+local function generation_layout_cell(cid)
   local cell = M.cells[cid]
   if cell and not M.rooms[cell.lid].is_red then return cell end
 end
@@ -106,7 +106,7 @@ local function build_entries(cid)
      M.rooms[cell.lid].type == C.SECRET_TYPE.ULTRA then
     for _, mid_cid in pairs(geo.get_neighbors(cid)) do
       for dir, src_cid in pairs(geo.get_neighbors(mid_cid)) do
-        local src = ultra_layout_cell(src_cid)
+        local src = generation_layout_cell(src_cid)
         if src and src.category ~= C.CELL.CATEGORY.SECRET then
           local room = M.rooms[src.lid]
           local door_dir = (dir + 2) % 4
@@ -127,7 +127,7 @@ local function build_entries(cid)
   end
 
   for dir, n_cid in pairs(neighbors) do
-    local n_cell = M.cells[n_cid]
+    local n_cell = generation_layout_cell(n_cid)
     if n_cell and n_cell.category ~= C.CELL.CATEGORY.SECRET then
       local room = M.rooms[n_cell.lid]
       local door_dir = (dir + 2) % 4
@@ -154,7 +154,7 @@ local function fake_type(cid)
 
   local neighbors = geo.get_neighbors(cid)
   for dir, n_cid in pairs(neighbors) do
-    local n_cell = M.cells[n_cid]
+    local n_cell = generation_layout_cell(n_cid)
     if n_cell then
       if n_cell.category == C.CELL.CATEGORY.BOSS then
         return nil
@@ -229,7 +229,7 @@ local function find_ultra_fakes()
   end
 
   for cid = 0, C.MAP.SIZE - 1 do
-    local cell = ultra_layout_cell(cid)
+    local cell = generation_layout_cell(cid)
     if cell then
       blocked[cid] = true
       goto continue
@@ -239,7 +239,7 @@ local function find_ultra_fakes()
     local non_empties = {}
     local block_empties = false
     for dir, n_cid in pairs(geo.get_neighbors(cid)) do
-      local n_cell = ultra_layout_cell(n_cid)
+      local n_cell = generation_layout_cell(n_cid)
       if not n_cell or n_cell.category == C.CELL.CATEGORY.SECRET then
         empty_n_cids[#empty_n_cids + 1] = n_cid
       elseif n_cell.category == C.CELL.CATEGORY.BOSS or
@@ -266,8 +266,7 @@ local function find_ultra_fakes()
       if block_empties then break end
 
       if not blocked[e_cid] and not M.cells[e_cid] then
-        -- A red neighbor may have produced an ordinary fake in find_fakes.
-        -- At this distance from the white layout, the ultra rule takes precedence.
+        -- At this distance from the original layout, the ultra rule takes precedence.
         if not M.candidates[e_cid] or (M.candidates[e_cid].lid == nil and
           M.candidates[e_cid].secret_type ~= C.SECRET_TYPE.ULTRA) then
           M.candidates[e_cid] = {
