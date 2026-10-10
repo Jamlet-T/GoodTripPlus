@@ -29,6 +29,12 @@ GoodTripPlus 是《以撒的结合：忏悔+》的 MiniMAPI 外置传送插件�
 
 传送过场保留淡入淡出和传送动画两档；改用原生快照保存入口，修复传送回滚的快照时机。
 
+## 独立模组集成
+
+**Secret Candidate Outlines** 是独立模组，以 GoodTripPlus 为运行时依赖，读取 `scripts/delver/` 的隐藏房候选数据，并调用现有的门位撞击判定；它不随包分发 GoodTripPlus 的代码或素材。
+
+GoodTripPlus 自有代码与所移植的 Lazy Delver 组件分别按 [LICENSE](LICENSE) 与 [THIRD_PARTY.md](THIRD_PARTY.md) 中列出的 MIT 条款提供。独立模组可以在遵守对应许可的前提下使用这些部分；`scripts/gtrep.lua` 所基于的上游 GoodTrip 代码有单独的授权范围，本节不扩大该范围。这里记录的是上述模组的集成方式，不承诺内部 Lua 模块将保持稳定接口。
+
 ## 打包
 
 开发者可在模组目录运行 `./pack.sh`，生成 `dist/goodtripplus-<版本>.zip`。分发时请保留包内许可证文件。
