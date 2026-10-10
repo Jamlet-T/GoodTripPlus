@@ -20,10 +20,12 @@ return function(gt)
   local shockwave_variants = {
     EffectVariant.SHOCKWAVE,
     EffectVariant.SHOCKWAVE_DIRECTIONAL,
+    EffectVariant.CRACKWAVE,
     EffectVariant.SHOCKWAVE_RANDOM,
+    EffectVariant.BIG_CRACKWAVE,
     EffectVariant.MOTHER_SHOCKWAVE,
   }
-  local shockwave_door_radius = 48
+  local shockwave_door_radius = 64
 
   local red_key_color = Color(1, 1, 1, 0.9)
   red_key_color:SetColorize(3.2, 0.1, 0.1, 1)
@@ -334,8 +336,10 @@ return function(gt)
     if not gt:get_config_bool("ShowSecretMarkers", true) or state.is_ignored() then
       return
     end
-    -- A wave excludes only false entrances at the doorway it reaches.
-    if room_check.wall_hit_check(effect.Position, shockwave_door_radius) then
+    -- Keep the impact inside the room for Delver's grid check when a wave
+    -- reaches the boundary before its final update.
+    local hit_position = game:GetRoom():GetClampedPosition(effect.Position, 0)
+    if room_check.wall_hit_check(hit_position, shockwave_door_radius) then
       render.refresh()
     end
   end
