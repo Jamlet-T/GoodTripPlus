@@ -132,6 +132,27 @@ return function(gt)
     )
     ModConfigMenu.AddBooleanSetting(
       "GoodTripPlus", nil,
+      "ShowSecretDoorOutlines",
+      true,
+      L.secret_outlines_name,
+      L.secret_outlines_desc
+    )
+    ModConfigMenu.AddBooleanSetting(
+      "GoodTripPlus", nil,
+      "DoorOutlinesDuringCurse",
+      true,
+      L.outlines_curse_name,
+      L.outlines_curse_desc
+    )
+    ModConfigMenu.AddBooleanSetting(
+      "GoodTripPlus", nil,
+      "RecolorRedKeyOutlines",
+      true,
+      L.red_key_outlines_name,
+      L.red_key_outlines_desc
+    )
+    ModConfigMenu.AddBooleanSetting(
+      "GoodTripPlus", nil,
       "ShowMapBounds",
       true,
       L.map_bounds_name,

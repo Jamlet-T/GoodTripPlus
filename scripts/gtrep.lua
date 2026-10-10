@@ -149,6 +149,9 @@ gt.HighlightCursorRoom = true
 gt.CursorGridStep = false
 gt.MouseTeleport = true
 gt.ShowSecretMarkers = true
+gt.ShowSecretDoorOutlines = true
+gt.DoorOutlinesDuringCurse = true
+gt.RecolorRedKeyOutlines = true
 local _, err = pcall(require, "gtconfig")
 ----
 -- 调试模式不再是一次性快照：改成 gt:is_debug() 每帧实时读（MCM 开关改了立刻生效，不用重启）。
