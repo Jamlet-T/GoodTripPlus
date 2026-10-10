@@ -24,6 +24,8 @@
 --  10. 禁止传送进诅咒房（scripts/gtp_curseblock.lua，默认开启；恢复移植基底 MLX's Tweak
 --      的 BlockCurseRoom 选项 —— 早期移植时漏掉，导致已探索的诅咒房能被直接传送进去）。
 --      关掉该选项后诅咒房完全按普通房间处理（gtrep 的 check_neigh_connected 白名单同步放行）
+--  11. 隐藏房候选门框（scripts/gtp_secretoutlines.lua）：白／金／红门框、狗牙与踩踏线索、
+--      迷失诅咒下继续显示，以及与红钥匙门框重叠时交替显示。
 
 require("scripts.gtrep")
 require("scripts.gtp_combatmap")(gt, MinimapAPI)
@@ -38,6 +40,7 @@ require("scripts.gtp_store")(gt)
 require("scripts.gtp_rewindfix")
 require("scripts.gtp_triprewindprobe")(gt)
 require("scripts.gtp_delver")
+require("scripts.gtp_secretoutlines")(gt)
 require("scripts.gtp_skullroom")
 -- 传送判定的两个外挂规则模块：都在 gtp_travel 之后 —— 它们要调 gt:add_travel_rule 登记规则
 -- （2026-10-06 起不再包装 gt.check_teleble）。规则在段内的位置由各自的 order 决定，
