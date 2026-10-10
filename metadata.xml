@@ -54,7 +54,7 @@
 [*][b]Lazy Delver[/b] — 隐藏房候选位置标记
 [/list]
 </description>
-    <version>2.6.0</version>
+    <version>2.6.1</version>
     <visibility>Public</visibility>
     <tag id="Lua"/>
     <tag id="Tweaks"/>
