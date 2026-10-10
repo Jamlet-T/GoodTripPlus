@@ -2,7 +2,7 @@ gt = RegisterMod("GoodTripPlus", 1)
 local console_output = require("scripts.gtp_console").write
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.6.0"
+gt.VERSION = "2.6.1"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -38,6 +38,7 @@ local rbroom = Vector(6, 6)
 ---
 local tele_maze = false
 local tele_door_slot = -1 --the door a trip means to arrive by
+local tele_pending = nil -- 原生异步传送落地前禁止覆盖 pending transition
 local secret_pre_room_id = {}
 local prep_alarm = false
 local testnum = 0
@@ -128,7 +129,7 @@ local room_neighbours = {}
 
 gt.DebugMod = false
 gt.FastRestartEnable = false
--- 传送过场：1 = 立即出现 / 2 = 淡入淡出 / 3 = 传送白闪（见 gt:get_teleport_transition()）。
+-- 传送过场：2 = 淡入淡出 / 3 = 传送白闪；旧值 1 兼容为 2（见 gt:get_teleport_transition()）。
 -- 取代了原来的两个布尔项 FastTransition + TeleportAnimation（2026-10-05 用户要求做成三选一，
 -- 默认 2 = 淡入淡出；上游 GoodTrip [Fixed] 也把这两个效果放在 MCM 里）。
 gt.TeleportTransition = 2
@@ -597,6 +598,33 @@ end
 -- 调用方进来之前已经保证 gt:can_travel_to(gid).ok，所以这里只负责「做什么」：
 -- 收代价（过路费）、摘迷宫诅咒、算落点、走过场。
 function gt:teleport_to_grid_index(gid)
+    if tele_pending then return false end
+    local dist = gt:travel_time_distance(crd.SafeGridIndex, gid)
+    local trd = grid_room[gid]
+    local here = Game():GetLevel():GetCurrentRoomDesc().SafeGridIndex
+    local there = trd and trd.SafeGridIndex or gid
+    tele_door_slot = -1
+    local arrive = gid
+    if gt:get_config_bool("ArriveAtDoor", true) then
+      local cell, _, slot = gt:landing_route(here, there)
+      arrive = cell or gid
+      tele_door_slot = slot
+    end
+    local tele_mode = gt:get_teleport_transition()
+    -- 原生快照入口：3 / 16 在 StartRoomTransition 内同步保存完整沙漏状态。
+    -- FADE=1 与 ChangeRoom 不保存；不能先去前室/大房间邻格再保存。
+    -- nil player 避免 TELEPORT 的原生出门扣血/窄房退回分支，费用由逐门队列负责。
+    -- 旧立即出现档兼容为短淡出；不叠加/取消过场来伪造无动画保存。
+    local anime = tele_mode == 3 and 3 or 16 -- TELEPORT / PORTAL_TELEPORT
+    local game = Game()
+    tele_pending = {target=trd.ListIndex, frame=game:GetFrameCount()}
+    tele_cd = tele_mode == 3 and 45 or 10
+    pcall(function()
+      Isaac.DebugString(string.format('[GTPrewind] native-dispatch from=%s target=%s cell=%s anim=%s slot=%s frame=%s time=%s',
+        here,gid,arrive,anime,tele_door_slot,game:GetFrameCount(),game.TimeCounter))
+    end)
+    game:StartRoomTransition(arrive, Direction.NO_DIRECTION, anime, nil, -1)
+    -- 所有执行代价必须发生在快照之后，rewind 才能撤销这一趟。
     gt:check_curse_room(gid)
     level.EnterDoor = -1
     level.LeaveDoor = -1
@@ -604,71 +632,11 @@ function gt:teleport_to_grid_index(gid)
       level:RemoveCurses(LevelCurse.CURSE_OF_MAZE)
       tele_maze = true
     end
-
-    local dist = gt:travel_time_distance(crd.SafeGridIndex, gid)
-
-    --an L room's anchor cell is not in grid_room, so the antechamber may be missing
-    local from_pre = crd.Data.Type == 7 and secret_pre_room_id[crid] or nil
-    local from_prd = from_pre and grid_room[from_pre] or nil
-    if from_prd then --from secret room
-      if from_prd.ListIndex == grid_room[gid].ListIndex then
-        gid = from_pre
-      elseif not (grid_room[gid].Data.Type == 10 and secret_pre_room_id[gid] and secret_pre_room_id[gid] == crid) then
-        -- 中转仅控制落点，门惩罚已经按原始完整路线结算。
-        Game():ChangeRoom(from_pre,-1)
-      end
-    end
-    if grid_room[gid].Data.Type == 7 then --to secret room
-      local to_pre = secret_pre_room_id[gid]
-      local to_prd = to_pre and grid_room[to_pre] or nil
-      if to_prd then
-        if to_prd.ListIndex == crd.ListIndex then --crd, since grid_room[crid] is nil in an L room
-          if crd.Data.Shape > 3 then
-            Game():ChangeRoom(to_pre,-1)
-          end
-        elseif not (crd.Data.Type == 10 and secret_pre_room_id[crid] and secret_pre_room_id[crid] == gid) then
-          Game():ChangeRoom(to_pre,-1)
-        end
-      end
-    end
-    --read here, not up top: an antechamber hop may have moved the player
-    local trd = grid_room[gid]
-    local here = Game():GetLevel():GetCurrentRoomDesc().SafeGridIndex
-    local there = trd and trd.SafeGridIndex or gid
-    tele_door_slot = -1
-    local arrive = gid --the cell handed over; see rules.landing_route
-    if gt:get_config_bool("ArriveAtDoor", true) then
-      local cell, walked, slot = gt:landing_route(here, there)
-      arrive = cell or gid
-      tele_door_slot = slot
-      --a room bigger than the screen, reached from further than next door, needs
-      --the wall chosen too, and the wall comes from the room the trip starts in.
-      --The room hopped into is on screen until the fade, which is why this is
-      --off by default: the game shows it for a moment before the transition
-      if walked and trd and trd.Data.Shape >= RoomShape.ROOMSHAPE_1x2 then
-        Game():ChangeRoom(walked, -1)
-      end
-    end
-    local tele_mode = gt:get_teleport_transition()  -- 1 立即出现 / 2 淡入淡出 / 3 传送白闪
-    -- 调试模式不再强制「立即出现」也不跳过计时补偿（2026-10-06 用户要求：debug 只出诊断、不改行为）
     if dist ~= 0 then
       local speed = player.MoveSpeed
       local addTime = math.floor((60.0*dist/speed)+0.5)
       Game().TimeCounter = Game().TimeCounter + addTime --boss rush reads TimeCounter; Hush does not
     end
-    -- 过场越短，冷却越短（沿用 Fixed 的三档：无过场 1 帧 / 淡入淡出 10 帧 / 传送白闪 45 帧）
-    if tele_mode == 1 then tele_cd = 1
-    elseif tele_mode == 3 then tele_cd = 45
-    else tele_cd = 10 end
-    if tele_mode == 1 then
-      Game():ChangeRoom(arrive,-1)
-      Game():GetRoom():PlayMusic()
-      return
-    end
-    -- RoomTransitionAnim（enums.lua）：1 = FADE（淡入淡出）/ 3 = TELEPORT（白闪）
-    local tele_anime = (tele_mode == 3) and 3 or 1
-    Game():StartRoomTransition(arrive, Direction.NO_DIRECTION, tele_anime, player, -1) --direction is ignored, measured twice
-    tele_cd = (tele_mode == 3) and 45 or 10
 end
 --
 function gt:is_mirror_world()
@@ -794,15 +762,14 @@ function gt:block_curse_room()
     return gt:get_config_bool("BlockCurseRoom", true) == true
 end
 --
--- 传送过场（落地时的表现）。默认 2，值一律夹到 1..3：
---   1 = 立即出现：直接 Game():ChangeRoom()，没有任何过场（原来的 FastTransition = true）
---   2 = 淡入淡出：StartRoomTransition(..., RoomTransitionAnim.FADE = 1)，短暂淡出淡入（像换房）
+-- 传送过场（落地时的表现）。默认 2，值一律夹到 2..3；旧值 1 读取为 2：
+--   2 = 淡入淡出：StartRoomTransition(..., PORTAL_TELEPORT = 16)，保存快照
 --   3 = 传送白闪：StartRoomTransition(..., RoomTransitionAnim.TELEPORT = 3)，等同使用传送道具
--- 顺带决定传送冷却 tele_cd（1 / 10 / 45 帧，沿用 Fixed 的档位）：过场越短，冷却越短。
+-- 冷却为 10 / 45 帧；另有 pending 锁保证落地前不会覆盖原生过场。
 function gt:get_teleport_transition()
     local v = tonumber(gt:get_config_bool("TeleportTransition", 2)) or 2
     v = math.floor(v + 0.5)
-    if v < 1 then return 1 end
+    if v < 2 then return 2 end
     if v > 3 then return 3 end
     return v
 end
@@ -1333,6 +1300,7 @@ end
 -- 键盘松开地图键与鼠标点击共用准入、冷却、诊断和隐藏/诅咒房前室准备。
 -- 来源：原 step() 松键传送分支。
 function gt:try_cursor_travel(gid, source)
+    if tele_pending then return false end
     if gt.adjacent_unlock_pending and gt:adjacent_unlock_pending() then return false end
     if gt:door_penalty_pending() then return false end
     if source == 'mouse' and not gt:get_config_bool('MouseTeleport', true) then return false end
@@ -1499,6 +1467,12 @@ function gt:new_room()
     crd = level:GetCurrentRoomDesc()
     crid = crd.SafeGridIndex
     stage = level:GetStage()
+    if tele_pending and (Game():GetFrameCount() < tele_pending.frame
+        or crd.ListIndex ~= tele_pending.target) then
+      -- rewind / 非预期换房不能消费传送的落点或给回滚房补诅咒。
+      tele_door_slot, tele_maze = -1, false
+    end
+    tele_pending = nil
     gt:land_at_door()
     if tele_maze then
       level:AddCurse(LevelCurse.CURSE_OF_MAZE,false)
@@ -1530,6 +1504,7 @@ function gt:new_room()
 end
 --
 function gt:new_level()
+    tele_pending, tele_door_slot, tele_maze, tele_cd = nil, -1, false, 0
     level = Game():GetLevel()
     gt:get_grid_room()
     gt:get_room_neighbours()

@@ -6,6 +6,10 @@ return function(gt)
   if not mcm_registered and ModConfigMenu then
     mcm_registered = true
     local L = get_strings(Options.Language)
+    -- 保留旧存档的 2/3 编号；已删除的立即出现值 1 迁移为淡入淡出。
+    if gt.TeleportTransition == 1 then gt.TeleportTransition = 2 end
+    local saved = ModConfigMenu.Config and ModConfigMenu.Config.GoodTripPlus
+    if saved and saved.TeleportTransition == 1 then saved.TeleportTransition = 2 end
     ModConfigMenu.AddTitle("GoodTripPlus", nil, L.title)
     -- ⚠️ 菜单顺序 = 下面这些注册调用的书写顺序（MCM 无脑 append）。
     -- 2026-10-04 起全部 MCM 项集中在这里按序注册（用户指定的顺序），
@@ -86,7 +90,7 @@ return function(gt)
     ModConfigMenu.AddNumberSetting(
       "GoodTripPlus", nil,
       "TeleportTransition",
-      1, 3, 1, 2,
+      2, 3, 1, 2,
       L.transition_name,
       L.transition_values,
       L.transition_desc
