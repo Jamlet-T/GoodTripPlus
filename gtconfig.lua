@@ -4,7 +4,7 @@
 -- 传送准入逻辑为 GoodTrip [Fixed] 的忠实移植，选项与 Fixed 同名同默认值
 -- （例外：① 传送范围把 Fixed 的 AllowNeighborRoom + AllowAnyRoom 两项合并成一个三选一的
 --   TravelMode，默认值等价于 Fixed 的原默认组合；② 传送过场把 Fixed 的 TeleportAnimation +
---   FastTransition 两个布尔项合并成一个三选一 TeleportTransition，默认「淡入淡出」，
+--   FastTransition 两个布尔项合并成 TeleportTransition，当前保留淡入淡出与传送动画两档，默认「淡入淡出」，
 --   而 Fixed 默认是「淡入淡出关 + 快速过场关」= 淡入淡出，两边效果一致）。
 gt.FastRestartEnable = true
 
@@ -13,9 +13,9 @@ gt.CursorGridStep = false
 -- 鼠标跟随光标与左键点击传送；关闭后仍可用键盘/手柄。
 gt.MouseTeleport = true
 
--- 传送过场（落地时的表现）：1 = 立即出现 / 2 = 淡入淡出 / 3 = 传送动画（白闪）。
+-- 传送过场（落地时的表现）：2 = 淡入淡出 / 3 = 传送动画（白闪）；旧值 1 兼容为 2。
 -- MCM 里对应「传送过场」项（装了 MCM 时以它为准）；这里只是没装 MCM 时的文件级默认。
--- 顺带决定传送冷却 tele_cd（1 / 10 / 45 帧）：过场越短，冷却越短。
+-- 顺带决定传送冷却 tele_cd（10 / 45 帧）：过场越短，冷却越短。
 gt.TeleportTransition = 2
 
 -- 调试模式（**纯诊断开关**，默认关）。**所有调试输出的总闸**：关着时屏幕不画理由浮层、
@@ -72,7 +72,7 @@ gt.ArriveAtDoor = true
 -- 按距离公平增加游戏时间（Fixed: FairTripTime）
 gt.FairTripTime = false
 
--- 注：传送过场已合并为一个三选一项（见文件开头 gt.TeleportTransition），
+-- 注：传送过场已合并为一个两选一项（见文件开头 gt.TeleportTransition），
 -- 原来的两个布尔项 gt.TeleportAnimation / gt.FastTransition 自 2026-10-05 起不再读取。
 
 -- 隐藏房候选标记（合并自 Lazy Delver）

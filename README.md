@@ -286,7 +286,7 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 （其 `rules.lua` 全部 + `floor.lua` 门图/邻接基础设施 + `trip.lua` 传送与诅咒过路费），
 选项与 Fixed 同名同默认值（**例外**：`AllowNeighborRoom` + `AllowAnyRoom` 已在 v1.8.2
 合并为一个三选一设置 `TravelMode`，MCM 里显示为「可以传送到」，默认「相邻房间」＝原默认组合；
-`TeleportAnimation` + `FastTransition` 已在 v2.1.3 合并为一个三选一 `TeleportTransition`
+`TeleportAnimation` + `FastTransition` 已在 v2.1.3 合并为 `TeleportTransition`，当前保留两档
 （MCM 显示「传送过场」，默认「淡入淡出」，与 Fixed 的原默认组合效果一致）；
 `ArriveAtDoor` 默认改为开（对 Fixed 默认值的偏离））。
 **2026-10-06 起判定收敛成 `scripts/gtp_travel.lua` 里的四段流水线 + 规则表**
@@ -304,7 +304,7 @@ local pos = gt:gid_to_rtmap_pos(cid)   -- 与光标共用一套投影
 | `AutoUnlockAdjacent` | **关** | 菜单「自动解锁相邻房门」：确认传送时支付并打开当前房间直接相邻的普通单／双钥匙门或街机厅金币门，资源不足不传送；预览不扣费，已开门不重复收费。已探索档仍不进入未探索房间。特殊锁门、隐藏墙和「付费游戏」转换门暂不支持 |
 | `ArriveAtDoor` | **开**（偏离 Fixed 的默认关） | 落地在走路会走进来的门口（跨屏大房间远途会先经过前一格） |
 | `FairTripTime` | 关 | 按可步行路线与移速补时间；无路线不补时，不限制准入 |
-| `TeleportTransition`（MCM 显示「传送过场」） | 淡入淡出（2） | 2026-10-05 由 Fixed 的 `TeleportAnimation` + `FastTransition` **合并**而成的三选一：**立即出现**＝`ChangeRoom` 无过场（＝原 `FastTransition` 开）；**淡入淡出**＝`StartRoomTransition(…, FADE = 1)`（＝Fixed 原默认组合）；**传送动画**＝`TELEPORT = 3` 白闪，等同使用传送道具。顺带决定传送冷却 `tele_cd`（1 / 10 / 45 帧）。调试模式不影响过场（2026-10-06 起） |
+| `TeleportTransition`（MCM 显示「传送过场」） | 淡入淡出（2） | **淡入淡出（2）**使用原生牌意解读传送过场，**传送动画（3）**使用原生白闪，两者都从出发房保存回滚快照。已删除旧立即出现菜单档，旧设置值 1 自动兼容为淡入淡出。冷却为 10 / 45 帧，落地前不能再传送。调试模式不影响过场。 |
 | `HideInCombat`（MCM 显示「战斗时隐藏地图」） | 从不（1） | 同样是**代理 MinimapAPI 的同名设置**（三档：1 从不 / 2 仅 Boss 房 / 3 总是）。与 MCM → MinimapAPI → Map(2) 里那一项同一个值、双向同步；实现用自定义设置表（数字型要写 `Minimum` / `Maximum` / `ModifyBy`，首字母大写）。本 mod 自己的自绘元素不跟着藏（见「显示行为」一节） |
 | `HighlightCursorRoom` | 开 | 高亮光标下可传送的房间（不进 MCM 菜单，仅 gtconfig.lua 可覆盖） |
 | `HighlightStartRoom`（MCM 显示「高亮初始房间」） | 关 | **代理 MinimapAPI 的同名设置**：值只存在 `MinimapAPI.Config.HighlightStartRoom`，不是本 mod 自己的配置项。所以 MCM → MinimapAPI → Map(2) 里那一项与本项**改的是同一个值、天然同步**（哪边改都立刻生效），存档也照旧由 MinimapAPI 自己负责（退出游戏时随它的 Config 一起写盘）。菜单项用 MCM 的自定义设置表（`CurrentSetting` / `OnChange`）实现，不走 `AddBooleanSetting`——后者会在 `ModConfigMenu.Config` 里另存一份，两边就会各说各话 |

@@ -2,6 +2,7 @@
 -- Lua API 没有暴露 Game::SaveState；不能用 Mod:SaveData 冒充沙漏状态。
 return function(gt)
   local enabled, started, trip, serial = true, false, nil, 0
+  local last_pocket = nil -- 仅记录 API 事件，不能将它当作引擎内部保存标记
   local function probe(fn)
     if not enabled then return end
     local ok = pcall(fn)
@@ -15,13 +16,35 @@ return function(gt)
     local level = game:GetLevel()
     local desc = level:GetCurrentRoomDesc()
     return level:GetCurrentRoomIndex(), string.format(
-      'room=%s safe=%s lid=%s dim=%s frame=%s time=%s',
+      'room=%s safe=%s lid=%s dim=%s frame=%s time=%s enter=%s leave=%s',
       tostring(level:GetCurrentRoomIndex()), tostring(desc.SafeGridIndex),
       tostring(desc.ListIndex), tostring(gt:get_current_dimension()),
-      tostring(game:GetFrameCount()), tostring(game.TimeCounter)), game:GetFrameCount()
+      tostring(game:GetFrameCount()), tostring(game.TimeCounter),
+      tostring(level.EnterDoor), tostring(level.LeaveDoor)), game:GetFrameCount()
   end
   local function write(event, detail)
     Isaac.DebugString('[GTPrewind] ' .. event .. ' ' .. detail)
+  end
+  local function pocket_detail()
+    if not last_pocket then return ' pocket=none' end
+    return string.format(' pocket=%s pocketId=%s pocketRoom=%s pocketFrame=%s',
+      last_pocket.kind,last_pocket.id,last_pocket.room,last_pocket.frame)
+  end
+  local function pocket_callback(kind)
+    return function(_, id, player, flags)
+      probe(function()
+        local origin, detail, frame = context()
+        last_pocket = {kind=kind,id=id,room=origin,frame=frame}
+        write('pocket-use', string.format('kind=%s id=%s flags=%s controller=%s %s',
+          kind,tostring(id),tostring(flags),tostring(player and player.ControllerIndex),detail))
+      end)
+    end
+  end
+  if ModCallbacks.MC_USE_CARD then
+    gt:AddCallback(ModCallbacks.MC_USE_CARD, pocket_callback('card'))
+  end
+  if ModCallbacks.MC_USE_PILL then
+    gt:AddCallback(ModCallbacks.MC_USE_PILL, pocket_callback('pill'))
   end
   local original = gt.teleport_to_grid_index
   function gt:teleport_to_grid_index(gid)
@@ -30,7 +53,7 @@ return function(gt)
       serial = serial + 1
       trip = {id=serial, from=origin, target=gid, last=origin, frame=frame, dispatching=true}
       write('begin', string.format('id=%s target=%s mode=%s %s',
-        serial, tostring(gid), tostring(gt:get_teleport_transition()), detail))
+        serial, tostring(gid), tostring(gt:get_teleport_transition()), detail) .. pocket_detail())
     end)
     -- 不用 pcall 包住游戏操作，保留原始异常与所有返回值。
     local result = table.pack(original(self, gid))
@@ -45,11 +68,15 @@ return function(gt)
   end
   gt:AddCallback(ModCallbacks.MC_POST_NEW_ROOM, function()
     probe(function()
-      if not trip then return end
       local current, detail, frame = context()
+      if not trip then
+        -- 开局后的用卡也需保留；过门信息只作为现场证据，不假定保存必然成功。
+        if last_pocket then write('room-after-pocket',detail .. pocket_detail()) end
+        return
+      end
       local reloading = frame < trip.frame
       local phase = reloading and 'reload' or (trip.dispatching and 'dispatch' or 'arrival')
-      write('new-room', 'id=' .. trip.id .. ' phase=' .. phase .. ' ' .. detail)
+      write('new-room', 'id=' .. trip.id .. ' phase=' .. phase .. ' ' .. detail .. pocket_detail())
       if not reloading then trip.last, trip.frame = current, frame end
     end)
   end)
@@ -62,12 +89,12 @@ return function(gt)
           trip.id, tostring(continued), tostring(trip.from), tostring(trip.target),
           tostring(trip.last), detail))
       end
-      started, trip = true, nil
+      started, trip, last_pocket = true, nil, nil
     end)
   end)
   if ModCallbacks.MC_PRE_GAME_EXIT then
     gt:AddCallback(ModCallbacks.MC_PRE_GAME_EXIT, function()
-      started, trip = false, nil
+      started, trip, last_pocket = false, nil, nil
     end)
   end
 end
