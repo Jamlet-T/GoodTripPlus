@@ -17,6 +17,13 @@ return function(gt)
     [EffectVariant.MONSTROS_TOOTH] = true,
     [EffectVariant.MOM_FOOT_STOMP] = true,
   }
+  local shockwave_variants = {
+    EffectVariant.SHOCKWAVE,
+    EffectVariant.SHOCKWAVE_DIRECTIONAL,
+    EffectVariant.SHOCKWAVE_RANDOM,
+    EffectVariant.MOTHER_SHOCKWAVE,
+  }
+  local shockwave_door_radius = 48
 
   local red_key_color = Color(1, 1, 1, 0.9)
   red_key_color:SetColorize(3.2, 0.1, 0.1, 1)
@@ -323,6 +330,16 @@ return function(gt)
     render.refresh()
   end
 
+  local function check_shockwave(_, effect)
+    if not gt:get_config_bool("ShowSecretMarkers", true) or state.is_ignored() then
+      return
+    end
+    -- A wave excludes only false entrances at the doorway it reaches.
+    if room_check.wall_hit_check(effect.Position, shockwave_door_radius) then
+      render.refresh()
+    end
+  end
+
   gt:AddCallback(ModCallbacks.MC_POST_NEW_ROOM, function()
     pending_stomps = {}
     last_observed_room = nil
@@ -334,6 +351,9 @@ return function(gt)
   for variant in pairs(stomp_variants) do
     gt:AddCallback(ModCallbacks.MC_POST_EFFECT_INIT, remember_stomp, variant)
     gt:AddCallback(ModCallbacks.MC_POST_EFFECT_UPDATE, follow_stomp, variant)
+  end
+  for _, variant in ipairs(shockwave_variants) do
+    gt:AddCallback(ModCallbacks.MC_POST_EFFECT_UPDATE, check_shockwave, variant)
   end
   gt:AddCallback(ModCallbacks.MC_POST_ENTITY_REMOVE,
     finish_stomp, EntityType.ENTITY_EFFECT)
