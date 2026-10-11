@@ -188,7 +188,13 @@ function M.tab_hold_check()
   if state.is_ignored() then return end
 
   local controller_id = Isaac.GetPlayer(0).ControllerIndex
-  if Input.IsActionPressed(ButtonAction.ACTION_MAP, controller_id) then
+  local pressed
+  if gt and gt.is_map_key_pressed then
+    pressed = gt:is_map_key_pressed()
+  else
+    pressed = Input.IsActionPressed(ButtonAction.ACTION_MAP, controller_id)
+  end
+  if pressed then
     -- 淡入保留：按住时逐帧 +1，直到 TAB_HOLD_MAX
     tab_hold_cnt = math.min(tab_hold_cnt + 1, TAB_HOLD_MAX)
   else
