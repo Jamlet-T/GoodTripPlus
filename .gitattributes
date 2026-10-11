@@ -1,0 +1,2 @@
+# 全部保持 LF：Windows 上 Git 默认会把文本检出成 CRLF，Lua / XML 会被一起改写
+* text=auto eol=lf

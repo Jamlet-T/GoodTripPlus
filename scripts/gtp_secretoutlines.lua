@@ -23,17 +23,9 @@ return function(gt)
   local wave_sources = {}
   local pending_suplex = {}
 
-  local red_key_color = Color(1, 1, 1, 0.9)
-  red_key_color:SetColorize(3.2, 0.1, 0.1, 1)
-  local hidden_red_key_color = Color(1, 1, 1, 0)
-
   local function enabled()
     return gt:get_config_bool("ShowSecretMarkers", true)
       and gt:get_config_bool("ShowSecretDoorOutlines", true)
-  end
-
-  local function recolor_enabled()
-    return enabled() and gt:get_config_bool("RecolorRedKeyOutlines", true)
   end
 
   local function remove_markers()
@@ -74,7 +66,9 @@ return function(gt)
 
   local function has_collectible(collectible)
     for index = 0, game:GetNumPlayers() - 1 do
-      if Isaac.GetPlayer(index):HasCollectible(collectible) then return true end
+      local p = Isaac.GetPlayer(index)
+      -- 玩家实体可能尚未就绪（无实体时 HasCollectible 会原生崩溃），必须 Exists 兜底。
+      if p and p:Exists() and p:HasCollectible(collectible) then return true end
     end
     return false
   end
@@ -224,47 +218,16 @@ return function(gt)
     return room:GetDoorSlotPosition(slot) + shift, side * 90 - 90
   end
 
-  local function red_key_flash_phase()
-    -- At 30 updates per second each color occupies half of a one-second cycle.
-    return math.floor(game:GetFrameCount() / 15) % 2 == 0
-  end
-
-  local function marker_color(rgb, verified, hidden)
+  local function marker_color(rgb, verified)
     local opacity = 1
     if not verified then
       local phase = game:GetFrameCount() * (2 * math.pi / 30)
       opacity = 0.66 + 0.16 * math.sin(phase)
     end
-    if hidden then opacity = 0 end
     local value = Color(1, 1, 1, opacity)
     -- The stock doorway sprite is reddish; Colorize replaces its hue.
     value:SetColorize(rgb[1] * 3, rgb[2] * 3, rgb[3] * 3, 1)
     return value
-  end
-
-  local function recolor_red_key_outline(_, effect)
-    local data = effect:GetData()
-    if data.gtp_secret_outline_owned then return end
-    if not recolor_enabled() then
-      if data.gtp_original_outline_color then
-        effect:GetSprite().Color = data.gtp_original_outline_color
-        data.gtp_original_outline_color = nil
-      end
-      return
-    end
-    if not data.gtp_original_outline_color then
-      data.gtp_original_outline_color = effect:GetSprite().Color
-    end
-    local overlap = false
-    for _, marker in pairs(markers) do
-      if marker and marker:Exists()
-        and (marker.Position - effect.Position):Length() < 40 then
-        overlap = true
-        break
-      end
-    end
-    effect:GetSprite().Color = overlap and not red_key_flash_phase()
-      and hidden_red_key_color or red_key_color
   end
 
   local function update_markers()
@@ -301,16 +264,6 @@ return function(gt)
     render.update()
     local room = game:GetRoom()
     local selected = collect_entrances(level, room)
-    local red_key_outlines = {}
-    if recolor_enabled() then
-      for _, effect in ipairs(Isaac.GetRoomEntities()) do
-        if effect.Type == EntityType.ENTITY_EFFECT
-          and effect.Variant == EffectVariant.DOOR_OUTLINE
-          and not effect:GetData().gtp_secret_outline_owned then
-          red_key_outlines[#red_key_outlines + 1] = effect
-        end
-      end
-    end
 
     for slot, entity in pairs(markers) do
       if not selected[slot] or not entity:Exists() then
@@ -328,22 +281,21 @@ return function(gt)
         entity.SpriteRotation = angle
         markers[slot] = entity
       end
-      local overlap = false
-      for _, outline in ipairs(red_key_outlines) do
-        if (entity.Position - outline.Position):Length() < 40 then
-          overlap = true
-          break
-        end
-      end
-      entity:GetSprite().Color = marker_color(data.rgb, data.verified,
-        overlap and red_key_flash_phase())
+      entity:GetSprite().Color = marker_color(data.rgb, data.verified)
     end
+  end
+
+  -- 同一实体的三个回调（INIT / UPDATE / REMOVE）按对象身份配对。InitSeed 不保证唯一，
+  -- 仓库其它处一律用 GetPtrHash 认实体身份（delver/map.lua、gtp_delvervisibility.lua）。
+  local function ent_key(entity)
+    if GetPtrHash then return GetPtrHash(entity) end
+    return entity.InitSeed
   end
 
   local function remember_stomp(_, effect)
     local descriptor = game:GetLevel():GetCurrentRoomDesc()
     if not descriptor then return end
-    pending_stomps[effect.InitSeed] = {
+    pending_stomps[ent_key(effect)] = {
       room_index = descriptor.ListIndex,
       position = effect.Position,
       updates = 0,
@@ -351,7 +303,7 @@ return function(gt)
   end
 
   local function follow_stomp(_, effect)
-    local pending = pending_stomps[effect.InitSeed]
+    local pending = pending_stomps[ent_key(effect)]
     if not pending then return end
     pending.position = effect.Position
     pending.updates = pending.updates + 1
@@ -360,8 +312,9 @@ return function(gt)
   local function finish_stomp(_, entity)
     if entity.Type ~= EntityType.ENTITY_EFFECT
       or not stomp_variants[entity.Variant] then return end
-    local pending = pending_stomps[entity.InitSeed]
-    pending_stomps[entity.InitSeed] = nil
+    local key = ent_key(entity)
+    local pending = pending_stomps[key]
+    pending_stomps[key] = nil
     if not pending or pending.updates == 0 then return end
     if not gt:get_config_bool("ShowSecretMarkers", true) then return end
     local descriptor = game:GetLevel():GetCurrentRoomDesc()
@@ -643,8 +596,6 @@ return function(gt)
     remove_markers()
   end)
   gt:AddCallback(ModCallbacks.MC_POST_UPDATE, update_markers)
-  gt:AddCallback(ModCallbacks.MC_POST_EFFECT_UPDATE,
-    recolor_red_key_outline, EffectVariant.DOOR_OUTLINE)
   for variant in pairs(stomp_variants) do
     gt:AddCallback(ModCallbacks.MC_POST_EFFECT_INIT, remember_stomp, variant)
     gt:AddCallback(ModCallbacks.MC_POST_EFFECT_UPDATE, follow_stomp, variant)
