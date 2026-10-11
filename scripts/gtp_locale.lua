@@ -4,6 +4,7 @@
 -- English.
 local GT_STRINGS = {
   en = {
+    tabs = {mapping = "Mapping", cursor = "Cursor", travel = "Teleport", display = "Map Display", markers = "Room Markers", debug = "Debug"},
     title = "GoodTripPlus",
     cursor_speed_name = "Cursor Speed",
     map_keyboard_key_name = "Map Keyboard Key",
@@ -61,6 +62,7 @@ local GT_STRINGS = {
     debug_desc = "Diagnostics only; never changes teleporting. Keep it off for normal play. Default: disabled",
   },
   zh_hans = {
+    tabs = {mapping = "映射", cursor = "光标", travel = "传送设置", display = "地图显示", markers = "房间标记", debug = "调试"},
     title = "GoodTripPlus",
     cursor_speed_name = "光标速度",
     map_keyboard_key_name = "键盘地图键",
