@@ -26,6 +26,7 @@
 --      关掉该选项后诅咒房完全按普通房间处理（gtrep 的 check_neigh_connected 白名单同步放行）
 
 require("scripts.gtrep")
+require("scripts.gtp_mapinput")(gt, MinimapAPI)
 require("scripts.gtp_combatmap")(gt, MinimapAPI)
 require("scripts.gtp_distancefix")(MinimapAPI)
 require("scripts.gtp_boundedshadow")(MinimapAPI)

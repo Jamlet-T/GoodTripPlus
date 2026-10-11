@@ -2,7 +2,7 @@ gt = RegisterMod("GoodTripPlus", 1)
 local console_output = require("scripts.gtp_console").write
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.6.1"
+gt.VERSION = "2.6.2"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -722,6 +722,83 @@ function gt:get_config_bool(key, default)
     end
     return default
 end
+-- 地图键可以来自原生游戏动作、键盘映射或手柄直接映射。
+-- MCM 的 -1 / 旧 false 表示未绑定，交给玩家原生 ACTION_MAP 映射。
+function gt:get_map_key_binding(key)
+    local saved = ModConfigMenu and ModConfigMenu.Config
+        and ModConfigMenu.Config["GoodTripPlus"]
+    if saved and saved[key] ~= nil then
+      local value = saved[key]
+      return value ~= false and value ~= -1 and value or nil
+    end
+    local value = gt[key]
+    if value ~= nil then return value ~= false and value ~= -1 and value or nil end
+end
+function gt:is_map_key_pressed()
+    local controller = player.ControllerIndex
+    local keyboard_key = gt:get_map_key_binding("MapKeyboardKey")
+    local controller_key = gt:get_map_key_binding("MapControllerKey")
+    local keyboard_pressed,controller_pressed=false,false
+    if keyboard_key~=nil then keyboard_pressed=Input.IsButtonPressed(keyboard_key,0)
+    else keyboard_pressed=Input.IsActionPressed(ButtonAction.ACTION_MAP,0) end
+    if controller~=0 then
+      if controller_key~=nil then controller_pressed=Input.IsButtonPressed(controller_key,controller)
+      else controller_pressed=Input.IsActionPressed(ButtonAction.ACTION_MAP,controller) end
+    end
+    return keyboard_pressed or controller_pressed
+end
+function gt:get_map_input_sample()
+    local game=Game()
+    local paused=game:IsPaused()
+    return not paused and gt:is_map_key_pressed(), game:GetFrameCount(), paused
+end
+function gt:get_map_base_opacity(api)
+    return Options and Options.MapOpacity or api:GetConfig('TransparencyLargeMap')
+end
+function gt:is_map_key_triggered()
+    local controller = player.ControllerIndex
+    local keyboard_key = gt:get_map_key_binding("MapKeyboardKey")
+    local controller_key = gt:get_map_key_binding("MapControllerKey")
+    local keyboard_triggered,controller_triggered=false,false
+    if keyboard_key~=nil then keyboard_triggered=Input.IsButtonTriggered(keyboard_key,0)
+    else keyboard_triggered=Input.IsActionTriggered(ButtonAction.ACTION_MAP,0) end
+    if controller~=0 then
+      if controller_key~=nil then controller_triggered=Input.IsButtonTriggered(controller_key,controller)
+      else controller_triggered=Input.IsActionTriggered(ButtonAction.ACTION_MAP,controller) end
+    end
+    return keyboard_triggered or controller_triggered
+end
+-- GetCallbacks 的 Mod/Function/Param 为公开字段。只代理 MiniMAPI 的地图输入处理，
+-- 保持回调优先级、顺序和其它输入原样；避免原生 Tab 松开时再次切换显示模式。
+function gt:replace_minimap_map_input(api)
+    if not Isaac.GetCallbacks or not ModCallbacks.MC_INPUT_ACTION or not InputHook then return end
+    if not gt._map_engine_input_installed then
+      gt._map_engine_input_installed=true
+      gt:AddCallback(ModCallbacks.MC_INPUT_ACTION, function(_,entity,hook,action)
+        return gt:map_input_override(entity,hook,action)
+      end)
+    end
+    for _,entry in ipairs(Isaac.GetCallbacks(ModCallbacks.MC_INPUT_ACTION)) do
+      if entry.Mod==api and not entry._gtpMapBindingWrapped then
+        local original=entry.Function
+        entry.Function=function(mod,entity,hook,action,...)
+          if hook==InputHook.IS_ACTION_PRESSED and action==ButtonAction.ACTION_MAP then return nil end
+          return original(mod,entity,hook,action,...)
+        end
+        entry._gtpMapBindingWrapped=true
+      end
+    end
+end
+-- MC_INPUT_ACTION 只改引擎输入，不影响模组自己的 Input 查询；因此与上面的
+-- MiniMAPI 回调代理配合使用。暂停菜单和其它玩家继续交给引擎处理。
+function gt:map_input_override(entity,hook,action)
+    if action~=ButtonAction.ACTION_MAP or not entity then return nil end
+    local owner=entity:ToPlayer()
+    if not owner or owner.ControllerIndex~=player.ControllerIndex or Game():IsPaused() then return nil end
+    if hook==InputHook.IS_ACTION_PRESSED then return gt:is_map_key_pressed() end
+    if hook==InputHook.IS_ACTION_TRIGGERED then return gt:is_map_key_triggered() end
+    if hook==InputHook.GET_ACTION_VALUE then return gt:is_map_key_pressed() and 1 or 0 end
+end
 --
 -- 调试模式（**纯诊断开关**），默认关，两个开关任一为真即开：
 --   · MCM 的「调试模式」项（键 DebugMod）—— 玩家侧开关，改了立刻生效（每帧实时读）；
@@ -1411,6 +1488,7 @@ function gt:tab_action()
 end
 --
 function gt:step()
+    if gt.update_map_input then gt:update_map_input() end
     --a wall can open under the player's feet (bomb, red key), so sweep every
     --tick; but not mid-transition, when the live room and the cached descriptor disagree
     if level:GetCurrentRoomDesc().SafeGridIndex == crid then
@@ -1425,13 +1503,13 @@ function gt:step()
         down=Input.IsMouseBtnPressed(0), active=false})
       return
     end
-    if Input.IsActionTriggered(ButtonAction.ACTION_MAP,player.ControllerIndex)
+    if gt:is_map_key_triggered()
     or Input.IsActionTriggered(ButtonAction.ACTION_ITEM,player.ControllerIndex)
     or Input.IsActionTriggered(ButtonAction.ACTION_PILLCARD,player.ControllerIndex) then
       gt:get_grid_room()
       gt:prep()
     end
-    if Input.IsActionPressed(ButtonAction.ACTION_MAP,player.ControllerIndex) then
+    if gt:is_map_key_pressed() then
       gt:tab_action()
     else
       if mmp_ctrl and gt:can_open_cursor().ok then

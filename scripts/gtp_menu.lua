@@ -16,6 +16,77 @@ return function(gt)
     -- 各功能模块（gtp_mapbounds / gtp_minebuttons / gtp_delirium 等）
     -- 不再各自注册 MCM 项，只留配置键说明。
     -- 顺序：光标 → 传送行为（Fixed 系）→ 显示类 → 房间标记类。
+    local function add_map_key_setting(key, kind, name, info, labels)
+      local controller_setting=kind==ModConfigMenu.OptionType.KEYBIND_CONTROLLER
+      local function capture_shoulder()
+        if not Input or not Input.IsButtonTriggered then return nil end
+        -- 显式取消优先；绑定弹窗沿用 MCM 扫描手柄的范围，排除键盘索引 0。
+        for _,name in ipairs({'KEY_ESCAPE','KEY_BACKSPACE'}) do
+          local button=Keyboard and Keyboard[name]
+          if button and Input.IsButtonTriggered(button,0) then return nil end
+        end
+        for index=1,4 do
+          if Input.IsButtonTriggered(5,index) then return nil end -- BUTTON_B
+        end
+        for index=1,4 do
+          for _,button in ipairs({8,11}) do -- BUMPER_LEFT / BUMPER_RIGHT
+            if Input.IsButtonTriggered(button,index) then return button,index end
+          end
+        end
+      end
+      local function current_binding()
+        local config = ModConfigMenu.Config and ModConfigMenu.Config.GoodTripPlus
+        local value = config and config[key]
+        if value == nil then return -1 end
+        if value == false then return -1 end
+        return value
+      end
+      ModConfigMenu.AddSetting("GoodTripPlus", nil, {
+        Type = kind,
+        Default = -1,
+        CurrentSetting = current_binding,
+        Display = function()
+          local value = current_binding()
+          local label = (value == nil or value == false or value == -1)
+            and L.map_key_fallback
+            or (labels[value] or tostring(value))
+          return name .. ": " .. label
+        end,
+        OnChange = function(value)
+          local source = value == nil and 'clear' or 'assigned'
+          local capture_index
+          if value==nil and controller_setting then
+            value,capture_index=capture_shoulder()
+            if value~=nil then source='shoulder-capture' end
+          end
+          local config = ModConfigMenu.Config and ModConfigMenu.Config.GoodTripPlus
+          if config then
+            if value == nil then config[key] = -1 else config[key] = value end
+            if Isaac and Isaac.DebugString then
+              pcall(Isaac.DebugString, string.format('[GTPinput] binding key=%s value=%s source=%s controller=%s',
+                key, tostring(config[key]), source, tostring(capture_index or '-')))
+            end
+          end
+        end,
+        PopupGfx = ModConfigMenu.PopupGfx and ModConfigMenu.PopupGfx.WIDE_SMALL,
+        -- MCM 仅在有 OnSelect 时允许菜单确认动作进入按键捕获分支。
+        -- KEYBIND_CONTROLLER 会先处理原始按钮，因此此函数无需执行操作。
+        OnSelect = controller_setting and function() end or nil,
+        PopupWidth = 280,
+        Popup = function()
+          return kind == ModConfigMenu.OptionType.KEYBIND_KEYBOARD
+            and L.map_keyboard_key_popup or L.map_controller_key_popup
+        end,
+        Info = info,
+      })
+    end
+    -- 保留 MCM 原生清空行为；未绑定时跟随对应设备的游戏地图动作。
+    add_map_key_setting("MapKeyboardKey", ModConfigMenu.OptionType.KEYBIND_KEYBOARD,
+      L.map_keyboard_key_name, L.map_keyboard_key_desc,
+      InputHelper and InputHelper.KeyboardToString or {})
+    add_map_key_setting("MapControllerKey", ModConfigMenu.OptionType.KEYBIND_CONTROLLER,
+      L.map_controller_key_name, L.map_controller_key_desc,
+      InputHelper and InputHelper.ControllerToString or {})
     ModConfigMenu.AddNumberSetting(
       "GoodTripPlus", nil,
       "CursorSpeed",
