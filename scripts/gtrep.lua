@@ -2,7 +2,7 @@ gt = RegisterMod("GoodTripPlus", 1)
 local console_output = require("scripts.gtp_console").write
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.6.4"
+gt.VERSION = "2.6.6"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -149,6 +149,8 @@ gt.HighlightCursorRoom = true
 gt.CursorGridStep = false
 gt.MouseTeleport = true
 gt.ShowSecretMarkers = true
+gt.ShowSecretDoorOutlines = true
+gt.DoorOutlinesDuringCurse = true
 local _, err = pcall(require, "gtconfig")
 ----
 -- 调试模式不再是一次性快照：改成 gt:is_debug() 每帧实时读（MCM 开关改了立刻生效，不用重启）。

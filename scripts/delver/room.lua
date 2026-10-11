@@ -159,6 +159,13 @@ function M.wall_hit_check(position, radius)
         goto next_entry
       end
 
+      -- build_entries 在几何求解失败时会存下 doorslot = nil 的条目（见 map.lua 的
+      -- build_entries），这里必须跳过：GetDoorSlotPosition(nil) 会在回调里抛错。
+      -- 2026-10-11：岩波 / 踩踏等新调用点把这条热路径的暴露面放大了。
+      if entry.doorslot == nil then
+        goto next_entry
+      end
+
       local door_pos = room_obj:GetDoorSlotPosition(entry.doorslot)
       local dist = (position - door_pos):Length()
       if dist < radius then
