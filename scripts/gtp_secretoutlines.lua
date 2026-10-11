@@ -13,19 +13,15 @@ return function(gt)
   local pending_stomps = {}
   local dog_tooth_observations = {}
   local observed_candidates, last_observed_room
+  local room_blast_pending, mama_mega_checked_map, mama_mega_checked_room
   local stomp_variants = {
     [EffectVariant.MONSTROS_TOOTH] = true,
     [EffectVariant.MOM_FOOT_STOMP] = true,
   }
-  local shockwave_variants = {
-    EffectVariant.SHOCKWAVE,
-    EffectVariant.SHOCKWAVE_DIRECTIONAL,
-    EffectVariant.CRACKWAVE,
-    EffectVariant.SHOCKWAVE_RANDOM,
-    EffectVariant.BIG_CRACKWAVE,
-    EffectVariant.MOTHER_SHOCKWAVE,
-  }
-  local shockwave_door_radius = 64
+  local rock_wave_door_radius = 40
+  local host_crackwaves = {}
+  local wave_sources = {}
+  local pending_suplex = {}
 
   local red_key_color = Color(1, 1, 1, 0.9)
   red_key_color:SetColorize(3.2, 0.1, 0.1, 1)
@@ -113,6 +109,35 @@ return function(gt)
     if has_collectible(CollectibleType.COLLECTIBLE_DOG_TOOTH) then
       dog_tooth_observations[current.lid] = actual_secret_next_to(current.lid)
     end
+  end
+
+  local function clear_room_blast_candidates(level)
+    local descriptor = level:GetCurrentRoomDesc()
+    local current = descriptor and map.rooms[descriptor.ListIndex]
+    if not current then return nil end
+    local changed = false
+    for cid, candidate in pairs(map.candidates) do
+      if candidate.lid == nil
+        and (candidate.secret_type == C.SECRET_TYPE.REGULAR
+          or candidate.secret_type == C.SECRET_TYPE.SUPER) then
+        for _, entry in ipairs(candidate.entries) do
+          if entry.source_lid == current.lid then
+            map.candidates[cid] = nil
+            changed = true
+            break
+          end
+        end
+      end
+    end
+    if changed then render.refresh() end
+    return changed
+  end
+
+  local function remember_room_blast(_, item)
+    if item ~= CollectibleType.COLLECTIBLE_MAMA_MEGA
+      and item ~= CollectibleType.COLLECTIBLE_MEGA_BEAN then return end
+    local descriptor = game:GetLevel():GetCurrentRoomDesc()
+    room_blast_pending = descriptor and descriptor.ListIndex
   end
 
   local function disproved_by_dog_tooth(candidate)
@@ -248,6 +273,22 @@ return function(gt)
       remove_markers()
       return
     end
+    local descriptor = level:GetCurrentRoomDesc()
+    local room_index = descriptor and descriptor.ListIndex
+    local mama_mega_active = level:GetStateFlag(
+      LevelStateFlag.STATE_MAMA_MEGA_USED)
+    local needs_mama_check = mama_mega_active and
+      (mama_mega_checked_map ~= map.candidates
+        or mama_mega_checked_room ~= room_index)
+    if room_index and (room_blast_pending == room_index or needs_mama_check) then
+      if clear_room_blast_candidates(level) ~= nil then
+        room_blast_pending = nil
+        if mama_mega_active then
+          mama_mega_checked_map = map.candidates
+          mama_mega_checked_room = room_index
+        end
+      end
+    end
     -- Maintain entry evidence even if the doorway setting is temporarily off.
     observe_dog_tooth(level)
     local map_cursed = (level:GetCurses() & LevelCurse.CURSE_OF_THE_LOST) ~= 0
@@ -332,20 +373,272 @@ return function(gt)
     render.refresh()
   end
 
-  local function check_shockwave(_, effect)
-    if not gt:get_config_bool("ShowSecretMarkers", true) or state.is_ignored() then
+  local function remember_wait_what(_, item, _, player)
+    if item ~= CollectibleType.COLLECTIBLE_WAIT_WHAT then return end
+    local frame = game:GetFrameCount()
+    local position = player and player.Position or Isaac.GetPlayer(0).Position
+    wave_sources["wait_what_" .. frame] = {
+      started = frame,
+      points = { { position = Vector(position.X, position.Y),
+        frame = frame, origin = true } },
+    }
+  end
+
+  local function remember_stompy_damage(_, entity)
+    local player = entity:ToPlayer()
+    if not player or not player:HasPlayerForm(PlayerForm.PLAYERFORM_STOMPY) then
       return
     end
-    -- Keep the impact inside the room for Delver's grid check when a wave
-    -- reaches the boundary before its final update.
+    local frame = game:GetFrameCount()
+    local position = player.Position
+    wave_sources["stompy_" .. player.InitSeed .. "_" .. frame] = {
+      started = frame,
+      points = { { position = Vector(position.X, position.Y),
+        frame = frame, origin = true } },
+    }
+  end
+
+  local function remember_suplex(_, item, _, player)
+    if item ~= CollectibleType.COLLECTIBLE_SUPLEX then return end
+    player = player or Isaac.GetPlayer(0)
+    pending_suplex[player.InitSeed] = {
+      player = player, started = game:GetFrameCount(),
+    }
+  end
+
+  local function is_wait_what_wisp(entity)
+    return entity and entity.Type == EntityType.ENTITY_FAMILIAR
+      and (entity.Variant == FamiliarVariant.WISP
+        or entity.Variant == FamiliarVariant.ITEM_WISP)
+      and entity.SubType == CollectibleType.COLLECTIBLE_WAIT_WHAT
+  end
+
+  local function remember_wait_what_wisp_death(_, entity)
+    if not is_wait_what_wisp(entity) then return end
+    local data = entity:GetData()
+    if data.gtp_wait_what_wisp_remembered then return end
+    data.gtp_wait_what_wisp_remembered = true
+    local frame = game:GetFrameCount()
+    wave_sources["wait_what_wisp_" .. entity.InitSeed] = {
+      started = frame,
+      points = { { position = Vector(entity.Position.X, entity.Position.Y),
+        frame = frame, origin = true } },
+    }
+  end
+
+  local function watch_wait_what_wisp(_, familiar)
+    if is_wait_what_wisp(familiar) and familiar:HasMortalDamage() then
+      remember_wait_what_wisp_death(nil, familiar)
+    end
+  end
+
+  local function is_roundy(entity)
+    return entity and entity.Type == EntityType.ENTITY_ROUNDY
+      and entity.Variant == 0 and entity.SubType == 0
+  end
+
+  local function is_adversary(entity)
+    return entity and entity.Type == EntityType.ENTITY_ADVERSARY
+      and entity.Variant == 0 and entity.SubType == 0
+  end
+
+  local function is_bumbino(entity)
+    return entity and entity.Type == EntityType.ENTITY_BUMBINO
+      and entity.Variant == 0 and entity.SubType == 0
+  end
+
+  local function is_moms_dead_hand(entity)
+    return entity and entity.Type == EntityType.ENTITY_MOMS_DEAD_HAND
+      and entity.Variant == 0 and entity.SubType == 0
+  end
+
+  local extra_rock_sources = {
+    [EntityType.ENTITY_FAMILIAR] = {
+      [FamiliarVariant.BIRD_CAGE] = "bird_cage",
+    },
+    [EntityType.ENTITY_CAGE] = {
+      [0] = { [0] = "cage", [1] = "cage_variant" },
+    },
+    [EntityType.ENTITY_CHIMERA] = { [0] = { [0] = "chimera" } },
+    [EntityType.ENTITY_MEGA_FATTY] = {
+      [0] = { [2] = "brown_mega_fatty" },
+    },
+    [EntityType.ENTITY_POLYCEPHALUS] = { [1] = { [0] = "pile" } },
+  }
+
+  local function extra_rock_source_kind(entity)
+    if not entity then return nil end
+    local variants = extra_rock_sources[entity.Type]
+    local variant = variants and variants[entity.Variant]
+    if entity.Type == EntityType.ENTITY_FAMILIAR then return variant end
+    return variant and variant[entity.SubType]
+  end
+
+  local function remember_verified_shockwave(_, effect)
+    local kind
+    local extra_kind = extra_rock_source_kind(effect.SpawnerEntity)
+      or extra_rock_source_kind(effect.Parent)
+    if not extra_kind and effect.SpawnerType == EntityType.ENTITY_FAMILIAR
+      and effect.SpawnerVariant == FamiliarVariant.BIRD_CAGE then
+      extra_kind = "bird_cage"
+    end
+    if is_roundy(effect.SpawnerEntity) or is_roundy(effect.Parent)
+      or (effect.SpawnerType == EntityType.ENTITY_ROUNDY
+        and effect.SpawnerVariant == 0) then
+      kind = "roundy"
+    elseif is_adversary(effect.SpawnerEntity)
+      or is_adversary(effect.Parent)
+      or (effect.SpawnerType == EntityType.ENTITY_ADVERSARY
+        and effect.SpawnerVariant == 0) then
+      kind = "adversary"
+    elseif is_bumbino(effect.SpawnerEntity)
+      or is_bumbino(effect.Parent)
+      or (effect.SpawnerType == EntityType.ENTITY_BUMBINO
+        and effect.SpawnerVariant == 0) then
+      kind = "bumbino"
+    elseif is_moms_dead_hand(effect.SpawnerEntity)
+      or is_moms_dead_hand(effect.Parent)
+      or (effect.SpawnerType == EntityType.ENTITY_MOMS_DEAD_HAND
+        and effect.SpawnerVariant == 0) then
+      kind = "moms_dead_hand"
+    elseif extra_kind then
+      kind = extra_kind
+    elseif is_wait_what_wisp(effect.SpawnerEntity)
+      or is_wait_what_wisp(effect.Parent) then
+      kind = "wait_what_wisp"
+    end
+    if not kind then
+      -- Effects without spawner data need a matching nearby source.
+      for _, entity in ipairs(Isaac.GetRoomEntities()) do
+        local distance = (entity.Position - effect.Position):Length()
+        local nearby_kind = extra_rock_source_kind(entity)
+        if is_roundy(entity) and distance <= 32
+          and entity:GetSprite():IsPlaying("DigOut") then
+          kind = "roundy"
+          break
+        elseif is_adversary(entity) and distance <= 40 then
+          kind = "adversary"
+          break
+        elseif is_bumbino(entity) and distance <= 64 then
+          kind = "bumbino"
+          break
+        elseif is_moms_dead_hand(entity) and distance <= 48 then
+          kind = "moms_dead_hand"
+          break
+        elseif nearby_kind
+          and distance <= (nearby_kind == "bird_cage" and 48 or 72) then
+          kind = nearby_kind
+          break
+        end
+      end
+    end
+    local frame = game:GetFrameCount()
+    if not kind then
+      for seed, pending in pairs(pending_suplex) do
+        if frame - pending.started > 180 then
+          pending_suplex[seed] = nil
+        elseif pending.player and pending.player:Exists()
+          and (pending.player == effect.SpawnerEntity
+            or pending.player == effect.Parent
+            or (pending.player.Position - effect.Position):Length() <= 64) then
+          kind = "suplex"
+          pending_suplex[seed] = nil
+          break
+        end
+      end
+    end
+    if not kind then return end
+    wave_sources[kind .. "_" .. effect.InitSeed] = {
+      started = frame,
+      points = { { position = Vector(effect.Position.X, effect.Position.Y),
+        frame = frame, origin = true } },
+    }
+  end
+
+  local function check_rock_wave_front(_, effect)
+    local data = effect:GetData()
+    if data.gtp_rock_front_checked or data.gtp_host_rock_checked then return end
+    local frame = game:GetFrameCount()
+    local best_source, best_step
+    for key, source in pairs(wave_sources) do
+      if frame - source.started > 50 then
+        wave_sources[key] = nil
+      else
+        for index = #source.points, 1, -1 do
+          local point = source.points[index]
+          if frame - point.frame > (point.origin and 12 or 5) then
+            table.remove(source.points, index)
+          else
+            local step = (effect.Position - point.position):Length()
+            if step >= 8 and step <= 64
+              and (not best_step or step < best_step) then
+              best_source, best_step = source, step
+            end
+          end
+        end
+      end
+    end
+    if not best_source then return end
+    data.gtp_rock_front_checked = true
+    best_source.points[#best_source.points + 1] = {
+      position = Vector(effect.Position.X, effect.Position.Y), frame = frame,
+    }
+    if not gt:get_config_bool("ShowSecretMarkers", true)
+      or state.is_ignored() then return end
     local hit_position = game:GetRoom():GetClampedPosition(effect.Position, 0)
-    if room_check.wall_hit_check(hit_position, shockwave_door_radius) then
+    if room_check.wall_hit_check(hit_position, rock_wave_door_radius) then
+      render.refresh()
+    end
+  end
+
+  local function remember_host_crackwave(_, effect)
+    if effect.SubType ~= 2 or host_crackwaves[effect.InitSeed] then return end
+    local spawner = effect.SpawnerEntity
+    if not spawner or spawner.Type ~= EntityType.ENTITY_HOST
+      or spawner.Variant ~= 3 then return end
+    local frame = game:GetFrameCount()
+    host_crackwaves[effect.InitSeed] = {
+      position = effect.Position,
+      started = frame,
+      last_frame = frame,
+    }
+  end
+
+  local function check_host_rock_wave(_, effect)
+    local data = effect:GetData()
+    if data.gtp_host_rock_checked then return end
+    local frame = game:GetFrameCount()
+    local nearest_wave, nearest_step
+    for seed, wave in pairs(host_crackwaves) do
+      if frame - wave.started > 40 or frame - wave.last_frame > 4 then
+        host_crackwaves[seed] = nil
+      else
+        local step = (effect.Position - wave.position):Length()
+        if step >= 12 and step <= 48
+          and (not nearest_step or step < nearest_step) then
+          nearest_wave, nearest_step = wave, step
+        end
+      end
+    end
+    if not nearest_wave then return end
+    data.gtp_host_rock_checked = true
+    nearest_wave.position = effect.Position
+    nearest_wave.last_frame = frame
+
+    if not gt:get_config_bool("ShowSecretMarkers", true)
+      or state.is_ignored() then return end
+    local hit_position = game:GetRoom():GetClampedPosition(effect.Position, 0)
+    if room_check.wall_hit_check(hit_position, rock_wave_door_radius) then
       render.refresh()
     end
   end
 
   gt:AddCallback(ModCallbacks.MC_POST_NEW_ROOM, function()
+    pending_suplex = {}
+    room_blast_pending = nil
     pending_stomps = {}
+    host_crackwaves = {}
+    wave_sources = {}
     last_observed_room = nil
     remove_markers()
   end)
@@ -356,13 +649,46 @@ return function(gt)
     gt:AddCallback(ModCallbacks.MC_POST_EFFECT_INIT, remember_stomp, variant)
     gt:AddCallback(ModCallbacks.MC_POST_EFFECT_UPDATE, follow_stomp, variant)
   end
-  for _, variant in ipairs(shockwave_variants) do
-    gt:AddCallback(ModCallbacks.MC_POST_EFFECT_UPDATE, check_shockwave, variant)
+  gt:AddCallback(ModCallbacks.MC_POST_EFFECT_UPDATE,
+    remember_host_crackwave, EffectVariant.CRACKWAVE)
+  gt:AddCallback(ModCallbacks.MC_POST_EFFECT_UPDATE,
+    check_host_rock_wave, EffectVariant.ROCK_EXPLOSION)
+  gt:AddCallback(ModCallbacks.MC_POST_EFFECT_UPDATE,
+    check_rock_wave_front, EffectVariant.ROCK_EXPLOSION)
+  for _, variant in ipairs({ EffectVariant.SHOCKWAVE,
+    EffectVariant.SHOCKWAVE_DIRECTIONAL, EffectVariant.CRACKWAVE,
+    EffectVariant.SHOCKWAVE_RANDOM, EffectVariant.BIG_CRACKWAVE }) do
+    gt:AddCallback(ModCallbacks.MC_POST_EFFECT_INIT,
+      remember_verified_shockwave, variant)
   end
+  gt:AddCallback(ModCallbacks.MC_POST_EFFECT_UPDATE,
+    check_rock_wave_front, EffectVariant.BIG_ROCK_EXPLOSION)
+  gt:AddCallback(ModCallbacks.MC_USE_ITEM,
+    remember_wait_what, CollectibleType.COLLECTIBLE_WAIT_WHAT)
+  gt:AddCallback(ModCallbacks.MC_USE_ITEM,
+    remember_suplex, CollectibleType.COLLECTIBLE_SUPLEX)
+  gt:AddCallback(ModCallbacks.MC_USE_ITEM,
+    remember_room_blast, CollectibleType.COLLECTIBLE_MAMA_MEGA)
+  gt:AddCallback(ModCallbacks.MC_USE_ITEM,
+    remember_room_blast, CollectibleType.COLLECTIBLE_MEGA_BEAN)
+  gt:AddCallback(ModCallbacks.MC_ENTITY_TAKE_DMG, remember_stompy_damage,
+    EntityType.ENTITY_PLAYER)
   gt:AddCallback(ModCallbacks.MC_POST_ENTITY_REMOVE,
     finish_stomp, EntityType.ENTITY_EFFECT)
+  gt:AddCallback(ModCallbacks.MC_POST_ENTITY_KILL,
+    remember_wait_what_wisp_death, EntityType.ENTITY_FAMILIAR)
+  gt:AddCallback(ModCallbacks.MC_FAMILIAR_UPDATE,
+    watch_wait_what_wisp, FamiliarVariant.WISP)
+  gt:AddCallback(ModCallbacks.MC_FAMILIAR_UPDATE,
+    watch_wait_what_wisp, FamiliarVariant.ITEM_WISP)
   gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
+    room_blast_pending = nil
+    mama_mega_checked_map = nil
+    mama_mega_checked_room = nil
     pending_stomps = {}
+    host_crackwaves = {}
+    wave_sources = {}
+    pending_suplex = {}
     dog_tooth_observations = {}
     observed_candidates = nil
     last_observed_room = nil
