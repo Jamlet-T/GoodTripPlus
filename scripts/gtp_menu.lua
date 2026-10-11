@@ -10,12 +10,17 @@ return function(gt)
     if gt.TeleportTransition == 1 then gt.TeleportTransition = 2 end
     local saved = ModConfigMenu.Config and ModConfigMenu.Config.GoodTripPlus
     if saved and saved.TeleportTransition == 1 then saved.TeleportTransition = 2 end
-    ModConfigMenu.AddTitle("GoodTripPlus", nil, L.title)
+    local tab = L.tabs.mapping
+    local function begin_tab(name)
+      tab = name
+      ModConfigMenu.AddTitle("GoodTripPlus", tab, L.title)
+    end
+    begin_tab(L.tabs.mapping)
     -- ⚠️ 菜单顺序 = 下面这些注册调用的书写顺序（MCM 无脑 append）。
-    -- 2026-10-04 起全部 MCM 项集中在这里按序注册（用户指定的顺序），
+    -- 全部 MCM 项集中在这里按功能子页注册，子页内保留原有相对顺序。
     -- 各功能模块（gtp_mapbounds / gtp_minebuttons / gtp_delirium 等）
     -- 不再各自注册 MCM 项，只留配置键说明。
-    -- 顺序：光标 → 传送行为（Fixed 系）→ 显示类 → 房间标记类。
+    -- 顺序：映射 → 光标 → 传送设置 → 地图显示 → 房间标记 → 调试。
     local function add_map_key_setting(key, kind, name, info, labels)
       local controller_setting=kind==ModConfigMenu.OptionType.KEYBIND_CONTROLLER
       local function capture_shoulder()
@@ -41,7 +46,7 @@ return function(gt)
         if value == false then return -1 end
         return value
       end
-      ModConfigMenu.AddSetting("GoodTripPlus", nil, {
+      ModConfigMenu.AddSetting("GoodTripPlus", tab, {
         Type = kind,
         Default = -1,
         CurrentSetting = current_binding,
@@ -87,29 +92,31 @@ return function(gt)
     add_map_key_setting("MapControllerKey", ModConfigMenu.OptionType.KEYBIND_CONTROLLER,
       L.map_controller_key_name, L.map_controller_key_desc,
       InputHelper and InputHelper.ControllerToString or {})
+    begin_tab(L.tabs.cursor)
     ModConfigMenu.AddNumberSetting(
-      "GoodTripPlus", nil,
+      "GoodTripPlus", tab,
       "CursorSpeed",
       1, 5, 0.25, 2,
       L.cursor_speed_name,
       L.cursor_speed_desc
     )
     ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
+      "GoodTripPlus", tab,
       "CursorGridStep",
       false,
       L.cursor_grid_step_name,
       L.cursor_grid_step_desc
     )
     ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
+      "GoodTripPlus", tab,
       "MouseTeleport",
       true,
       L.mouse_teleport_name,
       L.mouse_teleport_desc
     )
+    begin_tab(L.tabs.travel)
     ModConfigMenu.AddNumberSetting(
-      "GoodTripPlus", nil,
+      "GoodTripPlus", tab,
       "TravelMode",
       1, 3, 1, 2,
       L.travel_mode_name,
@@ -124,48 +131,49 @@ return function(gt)
     -- （2026-10-05 用户报的 bug）。消费点：scripts/gtp_curseblock.lua（拦住目标）+
     -- 本文件 check_neigh_connected 的白名单（放行类型 10）。
     ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
+      "GoodTripPlus", tab,
       "BlockCurseRoom",
       true,
       L.block_curse_name,
       L.block_curse_desc
     )
     ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
+      "GoodTripPlus", tab,
       "FairTripPath",
       true,
       L.fairpath_name,
       L.fairpath_desc
     )
     ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
+      "GoodTripPlus", tab,
       "AutoUnlockAdjacent",
       false,
       L.auto_unlock_name,
       L.auto_unlock_desc
     )
     ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
+      "GoodTripPlus", tab,
       "ArriveAtDoor",
       true,
       L.arrivedoor_name,
       L.arrivedoor_desc
     )
     ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
+      "GoodTripPlus", tab,
       "FairTripTime",
       false,
       L.fairtime_name,
       L.fairtime_desc
     )
     ModConfigMenu.AddNumberSetting(
-      "GoodTripPlus", nil,
+      "GoodTripPlus", tab,
       "TeleportTransition",
       2, 3, 1, 2,
       L.transition_name,
       L.transition_values,
       L.transition_desc
     )
+    begin_tab(L.tabs.display)
     -- 「迷失诅咒下显示地图」= 代理 MinimapAPI 的 OverrideLost（它的菜单里叫 "Display During Curse"，
     -- 默认关）。这一项同时决定迷失诅咒期间能否传送（见 gt:curse_map_visible() 与
     -- gtp_travel 的 departure.lost_curse 规则）：
@@ -174,7 +182,7 @@ return function(gt)
     -- 的动作，这里也不加，行为与它完全一致。
     if MinimapAPI and MinimapAPI.Config then
       ModConfigMenu.AddSetting(
-        "GoodTripPlus", nil,
+        "GoodTripPlus", tab,
         {
           Type = ModConfigMenu.OptionType.BOOLEAN,
           Default = false,
@@ -195,14 +203,7 @@ return function(gt)
     -- HighlightCursorRoom 不注册 MCM 菜单项（2026-10-04 用户决定）：默认常开，仅可在 gtconfig.lua 覆盖。
     -- （FastTransition 原先是同一批，2026-10-05 起已并入上面的「传送过场」三选一项。）
     ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
-      "ShowSecretMarkers",
-      true,
-      L.secret_markers_name,
-      L.secret_markers_desc
-    )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
+      "GoodTripPlus", tab,
       "ShowMapBounds",
       true,
       L.map_bounds_name,
@@ -218,7 +219,7 @@ return function(gt)
     if MinimapAPI and MinimapAPI.Config then
       -- ①「高亮初始房间」→ MinimapAPI 的 HighlightStartRoom
       ModConfigMenu.AddSetting(
-        "GoodTripPlus", nil,
+        "GoodTripPlus", tab,
         {
           Type = ModConfigMenu.OptionType.BOOLEAN,
           Default = false,
@@ -241,7 +242,7 @@ return function(gt)
       )
       -- ②「战斗时隐藏地图」→ MinimapAPI 的 HideInCombat（1 从不 / 2 仅 Boss 房 / 3 总是，出厂默认 1）
       ModConfigMenu.AddSetting(
-        "GoodTripPlus", nil,
+        "GoodTripPlus", tab,
         {
           Type = ModConfigMenu.OptionType.NUMBER,
           Minimum = 1,
@@ -266,36 +267,45 @@ return function(gt)
       )
     end
     ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
+      "GoodTripPlus", tab,
       "CombatKeepLargeMap",
       false,
       L.combat_keep_large_name,
       L.combat_keep_large_desc
     )
+    begin_tab(L.tabs.markers)
     ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
+      "GoodTripPlus", tab,
+      "ShowSecretMarkers",
+      true,
+      L.secret_markers_name,
+      L.secret_markers_desc
+    )
+    ModConfigMenu.AddBooleanSetting(
+      "GoodTripPlus", tab,
       "FoolsSkullRoom",
       true,
       L.fools_skull_name,
       L.fools_skull_desc
     )
     ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
+      "GoodTripPlus", tab,
       "MineButtonRoom",
       true,
       L.minebutton_name,
       L.minebutton_desc
     )
     ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
+      "GoodTripPlus", tab,
       "DeliriumRoom",
       false,
       L.delirium_name,
       L.delirium_desc
     )
+    begin_tab(L.tabs.debug)
     -- 调试模式（诊断用，默认关）：读配置的 gt:is_debug() 每帧实时取，勾掉立刻生效。
     ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", nil,
+      "GoodTripPlus", tab,
       "DebugMod",
       false,
       L.debug_name,
