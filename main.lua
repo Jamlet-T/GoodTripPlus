@@ -25,7 +25,7 @@
 --      的 BlockCurseRoom 选项 —— 早期移植时漏掉，导致已探索的诅咒房能被直接传送进去）。
 --      关掉该选项后诅咒房完全按普通房间处理（gtrep 的 check_neigh_connected 白名单同步放行）
 --  11. 隐藏房候选门框（scripts/gtp_secretoutlines.lua）：白／金／红门框、狗牙与踩踏线索、
---      迷失诅咒下继续显示，以及与红钥匙门框重叠时交替显示。
+--      迷失诅咒下继续显示。
 
 require("scripts.gtrep")
 require("scripts.gtp_mapinput")(gt, MinimapAPI)

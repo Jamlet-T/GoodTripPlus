@@ -82,8 +82,6 @@ gt.ShowSecretMarkers = true
 gt.ShowSecretDoorOutlines = true
 -- 即使迷失诅咒隐藏地图，也继续在房间内显示候选门框。
 gt.DoorOutlinesDuringCurse = true
--- 将原版红钥匙门框设为鲜红色；与候选门框重叠时交替显示。
-gt.RecolorRedKeyOutlines = true
 
 -- 深牢 II 的「标记骷髅」房间标记（炸掉固定掉愚者卡牌的那个骷髅）
 gt.FoolsSkullRoom = true

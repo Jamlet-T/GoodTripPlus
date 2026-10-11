@@ -283,6 +283,20 @@ return function(gt)
     )
     ModConfigMenu.AddBooleanSetting(
       "GoodTripPlus", tab,
+      "ShowSecretDoorOutlines",
+      true,
+      L.secret_outlines_name,
+      L.secret_outlines_desc
+    )
+    ModConfigMenu.AddBooleanSetting(
+      "GoodTripPlus", tab,
+      "DoorOutlinesDuringCurse",
+      true,
+      L.outlines_curse_name,
+      L.outlines_curse_desc
+    )
+    ModConfigMenu.AddBooleanSetting(
+      "GoodTripPlus", tab,
       "FoolsSkullRoom",
       true,
       L.fools_skull_name,
