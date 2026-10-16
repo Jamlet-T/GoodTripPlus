@@ -12,8 +12,9 @@
 --      其余自绘元素（光标/光标房高亮/标记）均有按键与清房门控，战斗中本就不绘制
 --   5. （已移除）大地图黑边修复 gtp_mapoutline.lua——2026-10-03 定位收缩时删去，
 --      遇黑边请关 MinimapAPI 菜单里的 "Show Room Outlines"
---   6. 当前房间里出现「通往奖励房间的门」（恶魔房 / 天使房 / Boss Rush / 死寂）时禁用传送
---      （scripts/gtp_bosswindow.lua，常开；登记 ① departure 段的规则实现）
+--   6. 当前房间有未放行的奖励房门（恶魔房 / 天使房 / Boss Rush / 蓝子宫）时禁用传送
+--      （scripts/gtp_bosswindow.lua；两类分别可放行，Boss Rush／蓝子宫可限时豁免，
+--       持有山羊头／圣餐时整体豁免）
 --   7. 地图边界房间高亮：按住地图键时，把贴着 13×13 边界的房间外沿画出来
 --      （scripts/gtp_mapbounds.lua，默认开启；素材 resources/gfx/goodtripplus/bounds.*）
 --   8. 虚空层标记精神错乱的 boss 房（scripts/gtp_delirium.lua，默认关闭；
@@ -34,6 +35,7 @@ require("scripts.gtp_distancefix")(MinimapAPI)
 require("scripts.gtp_boundedshadow")(MinimapAPI)
 -- 传送判定策略层（2026-10-06 起）：四段规则表 + check 入口 + 调试浮层。
 -- 必须在 gtrep 之后 —— 它要拿 gtrep 定义的 gt 表与访问器。
+require("scripts.gtp_roomclear")(gt, MinimapAPI)
 require("scripts.gtp_travel")
 -- 门图状态的序列化（纯函数；存档读写与时机在 gtrep 里）
 require("scripts.gtp_persist")

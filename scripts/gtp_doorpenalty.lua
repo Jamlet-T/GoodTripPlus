@@ -44,7 +44,7 @@ end
 -- neighbors 返回有向门边（含具体门槽），descriptor 只控制中间房探索/清怪。
 -- Dijkstra 按（惩罚次数、房间跳数）排序；无惩罚的长路优先于有惩罚的短路。
 -- 只有目标作为最优节点出队才结束，不能首次发现目标就停止。
-function M.route(from,to,neighbors,descriptor,cost)
+function M.route(from,to,neighbors,descriptor,cost,is_clear)
   if from==to then return {} end
   local dist,fees,parent={[from]=0},{[from]=0},{}
   local settled={}
@@ -66,7 +66,7 @@ function M.route(from,to,neighbors,descriptor,cost)
     for _,edge in ipairs(neighbors(a)) do
       local b=edge.to
       local rd=descriptor(b)
-      if not settled[b] and rd and (b==to or (rd.VisitedCount>0 and rd.Clear)) then
+      if not settled[b] and rd and (b==to or (rd.VisitedCount>0 and (is_clear and is_clear(rd) or rd.Clear))) then
         local nd,nf=dist[a]+1,fees[a]+cost(edge)
         if dist[b]==nil or nf<fees[b] or (nf==fees[b] and nd<dist[b]) then
           dist[b],fees[b],parent[b]=nd,nf,{from=a,edge=edge}

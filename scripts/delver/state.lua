@@ -48,6 +48,7 @@ M.items = {
     { mc = ModCallbacks.MC_USE_PILL, type = PillEffect.PILLEFFECT_SEE_FOREVER, clear = false },
   },
   passive = {
+    [CollectibleType.COLLECTIBLE_TREASURE_MAP]  = { reveal = true,  possess = false },
     [CollectibleType.COLLECTIBLE_BLUE_MAP]      = { reveal = true,  possess = false },
     [CollectibleType.COLLECTIBLE_XRAY_VISION]   = { reveal = true,  possess = false },
     [CollectibleType.COLLECTIBLE_MIND]          = { reveal = true,  possess = false },

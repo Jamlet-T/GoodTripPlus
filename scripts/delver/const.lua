@@ -51,6 +51,7 @@ M.CELL.DIR_OFFSETS = {
 
 ---@enum LD_CellCategory
 M.CELL.CATEGORY = {
+  UNKNOWN = 0, -- visible room footprint whose type is not yet known
   NORMAL = 1,
   SPECIAL = 2,
   BOSS = 3,
@@ -133,7 +134,7 @@ M.MARKER.STATUS = {
 ---@type table<LD_MarkerStatus, number>
 M.MARKER.ALPHA = {
   [M.MARKER.STATUS.HIDDEN] = 0.0,
-  [M.MARKER.STATUS.DIM]    = 0.36,
+  [M.MARKER.STATUS.DIM]    = 1.0,
   [M.MARKER.STATUS.BRIGHT] = 1.0,
   [M.MARKER.STATUS.FOUND]  = 0.0,
 }
@@ -143,5 +144,20 @@ M.MARKER.COLORS = {
   [M.SECRET_TYPE.SUPER]   = { 1.0, 0.84, 0.0 },
   [M.SECRET_TYPE.ULTRA]   = { 1.0, 0.0, 0.0 },
 }
+
+-- Ambiguous candidates take 100 frames for a full white/gold/white cycle.
+-- Color and opacity both turn smoothly at the endpoints and midpoint.
+function M.MARKER.ambiguous_pulse(frame, minimum_opacity)
+  local wave = math.cos(frame * math.pi / 50)
+  local gold_amount = (1 - wave) / 2
+  local opacity_floor = minimum_opacity or 0.55
+  local white = M.MARKER.COLORS[M.SECRET_TYPE.REGULAR]
+  local gold = M.MARKER.COLORS[M.SECRET_TYPE.SUPER]
+  return {
+    white[1] + (gold[1] - white[1]) * gold_amount,
+    white[2] + (gold[2] - white[2]) * gold_amount,
+    white[3] + (gold[3] - white[3]) * gold_amount,
+  }, opacity_floor + (1 - opacity_floor) * wave * wave
+end
 
 return M

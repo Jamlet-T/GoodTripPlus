@@ -38,7 +38,7 @@ import os, sys, zipfile
 
 out = sys.argv[1]
 EXCLUDE_FILES = {"deploy.sh", "pack.sh", "disable.it"}
-EXCLUDE_DIRS = {".git", "dist"}
+EXCLUDE_DIRS = {".git", "dist", "任务记录"}
 
 files = []
 for dirpath, dirnames, filenames in os.walk("."):

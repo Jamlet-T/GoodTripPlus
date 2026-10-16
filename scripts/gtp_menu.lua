@@ -8,7 +8,7 @@ return function(gt)
     local L = get_strings(Options.Language)
     -- 保留旧存档的 2/3 编号；已删除的立即出现值 1 迁移为淡入淡出。
     if gt.TeleportTransition == 1 then gt.TeleportTransition = 2 end
-    local saved = ModConfigMenu.Config and ModConfigMenu.Config.GoodTripPlus
+    local saved = ModConfigMenu.Config and ModConfigMenu.Config["GoodTripPlus"]
     if saved and saved.TeleportTransition == 1 then saved.TeleportTransition = 2 end
     local tab = L.tabs.mapping
     local function begin_tab(name)
@@ -40,7 +40,7 @@ return function(gt)
         end
       end
       local function current_binding()
-        local config = ModConfigMenu.Config and ModConfigMenu.Config.GoodTripPlus
+        local config = ModConfigMenu.Config and ModConfigMenu.Config["GoodTripPlus"]
         local value = config and config[key]
         if value == nil then return -1 end
         if value == false then return -1 end
@@ -64,7 +64,7 @@ return function(gt)
             value,capture_index=capture_shoulder()
             if value~=nil then source='shoulder-capture' end
           end
-          local config = ModConfigMenu.Config and ModConfigMenu.Config.GoodTripPlus
+          local config = ModConfigMenu.Config and ModConfigMenu.Config["GoodTripPlus"]
           if config then
             if value == nil then config[key] = -1 else config[key] = value end
             if Isaac and Isaac.DebugString then
@@ -136,6 +136,20 @@ return function(gt)
       true,
       L.block_curse_name,
       L.block_curse_desc
+    )
+    ModConfigMenu.AddBooleanSetting(
+      "GoodTripPlus", tab,
+      "AllowDevilAngelDoorTeleport",
+      false,
+      L.allow_devil_angel_name,
+      L.allow_devil_angel_desc
+    )
+    ModConfigMenu.AddBooleanSetting(
+      "GoodTripPlus", tab,
+      "AllowRushHushDoorTeleport",
+      false,
+      L.allow_rush_hush_name,
+      L.allow_rush_hush_desc
     )
     ModConfigMenu.AddBooleanSetting(
       "GoodTripPlus", tab,
@@ -287,6 +301,13 @@ return function(gt)
       true,
       L.secret_outlines_name,
       L.secret_outlines_desc
+    )
+    ModConfigMenu.AddNumberSetting(
+      "GoodTripPlus", tab,
+      "SecretDoorOutlineOpacity",
+      0, 100, 5, 100,
+      L.secret_outlines_opacity_name,
+      L.secret_outlines_opacity_desc
     )
     ModConfigMenu.AddBooleanSetting(
       "GoodTripPlus", tab,
