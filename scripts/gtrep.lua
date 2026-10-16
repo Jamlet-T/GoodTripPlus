@@ -29,6 +29,7 @@ cursor:SetFrame("Idle", 0)
 ---
 local mouse_pressed = {false, false, false, false, false}
 local key = {ButtonAction.ACTION_SHOOTUP,ButtonAction.ACTION_SHOOTLEFT,ButtonAction.ACTION_SHOOTRIGHT,ButtonAction.ACTION_SHOOTDOWN}
+local tainted_shoot_latched = false
 local cursor_arrow_keys = {'KEY_UP', 'KEY_LEFT', 'KEY_RIGHT', 'KEY_DOWN'}
 local dir = {Vector(0, -1),Vector(-1, 0),Vector(1, 0),Vector(0, 1)}
 local scpos = Vector(0, 0)
@@ -356,7 +357,7 @@ function gt:get_reachable_rooms()
       if node then
         for _, adj in ipairs(node.Neighbors) do
           local rd = grid_room[adj]
-          if rd and not reach[adj] and rd.VisitedCount > 0 and rd.Clear
+          if rd and not reach[adj] and rd.VisitedCount > 0 and gt:room_is_clear(rd)
               and gt:rooms_linked(cur, adj) then
             reach[adj] = true
             queue[#queue + 1] = adj
@@ -386,7 +387,7 @@ function gt:route_parent(from, to)
           local rd = grid_room[adj]
           --the target may be an uncleared neighbour: a landing, not a pass-through
           if rd and not parent[adj] and gt:rooms_linked(cur, adj)
-              and (adj == to or (rd.VisitedCount > 0 and rd.Clear)) then
+              and (adj == to or (rd.VisitedCount > 0 and gt:room_is_clear(rd))) then
             parent[adj] = cur
             queue[#queue + 1] = adj
           end
@@ -458,7 +459,7 @@ function gt:fair_trip(roomIndex, target)
         local cur = queue[head]
         head = head + 1
         local safeIndex = cur.room.SafeGridIndex
-        if safeIndex == safeTarget and cur.room.Clear then
+        if safeIndex == safeTarget and gt:room_is_clear(cur.room) then
             return cur.dist
         end
         if gt:check_neigh_connected(targetRoom, function(rd)
@@ -467,7 +468,7 @@ function gt:fair_trip(roomIndex, target)
         end) then
             return cur.dist + 1
         end
-        if cur.room.Clear then
+        if gt:room_is_clear(cur.room) then
             for _, adj in ipairs(room_neighbours[cur.room.SafeGridIndex].Neighbors) do
                 local adj_dsc = grid_room[adj]
                 local sid = adj_dsc.SafeGridIndex
@@ -773,13 +774,14 @@ end
 -- GetCallbacks 的 Mod/Function/Param 为公开字段。只代理 MiniMAPI 的地图输入处理，
 -- 保持回调优先级、顺序和其它输入原样；避免原生 Tab 松开时再次切换显示模式。
 function gt:replace_minimap_map_input(api)
-    if not Isaac.GetCallbacks or not ModCallbacks.MC_INPUT_ACTION or not InputHook then return end
+    if not ModCallbacks.MC_INPUT_ACTION or not InputHook then return end
     if not gt._map_engine_input_installed then
       gt._map_engine_input_installed=true
       gt:AddCallback(ModCallbacks.MC_INPUT_ACTION, function(_,entity,hook,action)
         return gt:map_input_override(entity,hook,action)
       end)
     end
+    if not Isaac.GetCallbacks then return end
     for _,entry in ipairs(Isaac.GetCallbacks(ModCallbacks.MC_INPUT_ACTION)) do
       if entry.Mod==api and not entry._gtpMapBindingWrapped then
         local original=entry.Function
@@ -794,8 +796,40 @@ end
 -- MC_INPUT_ACTION 只改引擎输入，不影响模组自己的 Input 查询；因此与上面的
 -- MiniMAPI 回调代理配合使用。暂停菜单和其它玩家继续交给引擎处理。
 function gt:map_input_override(entity,hook,action)
-    if action~=ButtonAction.ACTION_MAP or not entity then return nil end
+    if not entity then return nil end
     local owner=entity:ToPlayer()
+    local shoot_action = action==ButtonAction.ACTION_SHOOTUP
+        or action==ButtonAction.ACTION_SHOOTLEFT
+        or action==ButtonAction.ACTION_SHOOTRIGHT
+        or action==ButtonAction.ACTION_SHOOTDOWN
+    if action==ButtonAction.ACTION_DROP or shoot_action then
+      local player_type=owner and owner:GetPlayerType()
+      if owner and player and (player_type==PlayerType.PLAYER_THESOUL_B
+          or player_type==PlayerType.PLAYER_THEFORGOTTEN_B)
+          and owner.ControllerIndex==player.ControllerIndex and not Game():IsPaused() then
+        local map_held=gt:is_map_key_pressed()
+        if shoot_action then
+          if map_held then
+            tainted_shoot_latched=true
+          elseif tainted_shoot_latched then
+            local direction_held=false
+            for _,shoot in ipairs(key) do
+              if Input.IsActionPressed(shoot,owner.ControllerIndex) then
+                direction_held=true
+                break
+              end
+            end
+            if not direction_held then tainted_shoot_latched=false end
+          end
+        end
+        if map_held or (shoot_action and tainted_shoot_latched) then
+          if hook==InputHook.GET_ACTION_VALUE then return 0 end
+          return false
+        end
+      end
+      return nil
+    end
+    if action~=ButtonAction.ACTION_MAP then return nil end
     if not owner or owner.ControllerIndex~=player.ControllerIndex or Game():IsPaused() then return nil end
     if hook==InputHook.IS_ACTION_PRESSED then return gt:is_map_key_pressed() end
     if hook==InputHook.IS_ACTION_TRIGGERED then return gt:is_map_key_triggered() end
@@ -1584,6 +1618,7 @@ function gt:new_room()
 end
 --
 function gt:new_level()
+    tainted_shoot_latched = false
     tele_pending, tele_door_slot, tele_maze, tele_cd = nil, -1, false, 0
     level = Game():GetLevel()
     gt:get_grid_room()
@@ -1623,6 +1658,7 @@ end
 -------------------------------
 -- 生命周期编排保留在适配层；菜单内容与语言表独立维护。
 require("scripts.gtp_menu")(gt)
+gt:register_menu() -- MCM is available at mod load; the game-start callback retries if it loads later.
 require("scripts.gtp_doorpenalty_runtime")(gt)
 require("scripts.gtp_unlock_runtime")(gt)
 gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
@@ -1727,10 +1763,10 @@ function gt:dump_tele_diag(gid)
         " targetType=" .. tostring(door.TargetRoomType))
     end
   end
-  -- 奖励门（恶魔房 / 天使房 / Boss Rush / 死寂）：命中即禁传，见 gtp_bosswindow.lua
+  -- 奖励门（恶魔房 / 天使房 / Boss Rush / 死寂）：按两类开关拦截，见 gtp_bosswindow.lua
   -- （模块在 gtrep 之后加载，这里运行时取，取不到就跳过）
-  if gt.has_reward_door then
-    p("  rewardDoor=" .. tostring(gt:has_reward_door()))
+  if gt.has_blocking_reward_door then
+    p("  rewardDoorBlocked=" .. tostring(gt:has_blocking_reward_door()))
   end
   -- 本层全部隐藏房
   for g, rd in pairs(grid_room) do

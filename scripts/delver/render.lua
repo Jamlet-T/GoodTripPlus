@@ -20,6 +20,8 @@ local visibility = require("scripts.gtp_delvervisibility")
 local M = {}
 
 local need_refresh = false
+local refresh_revision = 0
+local candidate_filter
 
 local TAB_HOLD_THRESHOLD = 3
 local TAB_HOLD_MAX = 9
@@ -79,46 +81,17 @@ M.minimapapi_hides_map = minimapapi_hides_map
 
 local function check_real_and_clear_fake()
   local rooms = Game():GetLevel():GetRooms()
-
-  for _, secret_type in pairs(C.SECRET_TYPE) do
-    local all_found = true
-    local newly_found, removed = 0, 0
-    for _, cand in pairs(map.candidates) do
+  for _, cand in pairs(map.candidates) do
+    if cand.lid ~= nil then
       local lid = cand.lid
-      if lid ~= nil and state.get_dimension() == C.DIMENSION.MIRROR then
+      if state.get_dimension() == C.DIMENSION.MIRROR then
         lid = map.rooms[lid].mirror_lid or lid
       end
-      if lid ~= nil and cand.secret_type == secret_type then
-        local desc = rooms:Get(lid)
-        if not desc or visibility.flags(desc, state.get_dimension()) == 0 then
-          all_found = false
-          cand.marker_status = C.MARKER.STATUS.HIDDEN
-        else
-          -- 多隐藏房楼层：已发现的那个也立即隐藏自身标记，剩余候选仍需保留。
-          if cand.marker_status ~= C.MARKER.STATUS.FOUND then newly_found = newly_found + 1 end
-          cand.marker_status = C.MARKER.STATUS.FOUND
-          if secret_type ~= C.SECRET_TYPE.ULTRA then map.clear_fake_neighbors(lid) end
-        end
+      local desc = rooms:Get(lid)
+      if desc and visibility.flags(desc, state.get_dimension()) ~= 0 then
+        cand.marker_status = C.MARKER.STATUS.FOUND
       end
     end
-
-    if all_found then
-      for cid, cand in pairs(map.candidates) do
-        if cand.secret_type == secret_type then
-          if cand.lid == nil then
-            map.candidates[cid] = nil
-            removed = removed + 1
-          else
-            cand.marker_status = C.MARKER.STATUS.FOUND
-          end
-        end
-      end
-    end
-    if newly_found > 0 or removed > 0 then visibility.trace(function()
-      return '[GTPdelver] reveal type=' .. secret_type .. ' dimension=' .. state.get_dimension()
-        .. ' newly-found=' .. newly_found .. ' all-found=' .. tostring(all_found)
-        .. ' removed-fake=' .. removed
-    end) end
   end
 end
 
@@ -127,11 +100,9 @@ local function clear_ultra_fake()
     if cand.secret_type ~= C.SECRET_TYPE.ULTRA then goto continue end
     if cand.lid then goto continue end
 
-    local level = Game():GetLevel()
     for _, n_cid in pairs(geo.get_neighbors(cid)) do
-      local n_desc = level:GetRoomByIdx(n_cid)
-      if n_desc and n_desc.Data then
-        map.candidates[cid] = nil
+      if map.is_known_room_at(n_cid) then
+        map.exclude_candidate(cid)
         break
       end
     end
@@ -167,7 +138,10 @@ local function update_marker()
       end
 
       local desc = rooms:Get(lid)
-      if desc and visibility.flags(desc, state.get_dimension()) ~= 0 then
+      if desc and ((desc.VisitedCount or 0) > 0
+        or desc.ListIndex == Game():GetLevel():GetCurrentRoomDesc().ListIndex
+        or (map.full_layout_revealed
+          and visibility.flags(desc, state.get_dimension()) ~= 0)) then
         any_visible = true
       end
     end
@@ -215,14 +189,22 @@ function M.get_fade()
 end
 
 local function refresh()
+  map.update_knowledge()
   check_real_and_clear_fake()
-  if state.can_see_entrance() or state.can_see_red() then
-    local lid = Game():GetLevel():GetCurrentRoomDesc().ListIndex
-    map.clear_fake_neighbors(lid)
-  end
   clear_ultra_fake()
   update_marker()
   need_refresh = false
+  refresh_revision = refresh_revision + 1
+end
+
+-- Other displays can reuse the last candidate calculation until this changes.
+function M.revision()
+  return refresh_revision
+end
+
+-- The doorway overlay supplies additional clues that also govern map stars.
+function M.set_candidate_filter(filter)
+  candidate_filter = filter
 end
 
 function M.refresh()
@@ -234,6 +216,12 @@ end
 -- 消费，不能等下一次打开地图时才拿另一个房间的现场处理。
 function M.update()
   if state.is_ignored() then return end
+  local frame = Game():GetFrameCount()
+  if not M.last_knowledge_frame or frame < M.last_knowledge_frame
+    or frame - M.last_knowledge_frame >= 30 then
+    M.last_knowledge_frame = frame
+    if map.update_knowledge() then need_refresh = true end
+  end
   if need_refresh then refresh() end
 end
 
@@ -257,6 +245,11 @@ function M.render()
   local project
 
   for cid, cand in pairs(map.candidates) do
+    local yo_listen = state.items.passive[CollectibleType.COLLECTIBLE_YO_LISTEN]
+    local clue_reveals = yo_listen and yo_listen.possess and map.is_real(cid)
+    if map.has_visible_unexplored_room_at(cid) and not clue_reveals then
+      goto continue
+    end
     if not show_red and cand.secret_type == C.SECRET_TYPE.ULTRA then
       goto continue
     end
@@ -264,13 +257,20 @@ function M.render()
        cand.marker_status == C.MARKER.STATUS.FOUND then
       goto continue
     end
+    if candidate_filter and not candidate_filter(cand) then
+      goto continue
+    end
 
     -- 与传送光标共用同一套投影，保证与 MinimapAPI 的地图逐像素对齐
     project = project or gt:make_rtmap_projector()
     local pos = project(cid)
 
-    local colors = C.MARKER.COLORS[cand.secret_type]
+    local kind = clue_reveals and map.truth_type(cid) or cand.secret_type
+    local colors = C.MARKER.COLORS[kind]
     local alpha = C.MARKER.ALPHA[cand.marker_status]
+    if cand.ambiguous and not clue_reveals then
+      colors, alpha = C.MARKER.ambiguous_pulse(Game():GetFrameCount())
+    end
     marker_sprite.Color = Color(
       colors[1], colors[2], colors[3],
       alpha * (tab_hold_cnt / TAB_HOLD_MAX),

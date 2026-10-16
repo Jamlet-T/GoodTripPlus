@@ -12,7 +12,7 @@ return function(gt)
     local target=gt:grid_room_desc(gid)
     local st=gt:travel_cur_state()
     local p=st.player
-    if not target or not st.cur or not st.cur.Clear or not st.room or
+    if not target or not st.cur or not gt:room_is_clear(st.cur) or not st.room or
       not p or not p:Exists() or p:IsDead() then return nil end
     if target.ListIndex==st.cur.ListIndex then return nil end
     for slot=0,7 do

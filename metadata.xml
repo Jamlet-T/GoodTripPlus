@@ -33,6 +33,8 @@
 [list]
 [*]集成 [b]Lazy Delver[/b] 的隐藏房候选位置标记
 [*]在房间中显示隐藏房候选门框，支持狗牙线索，以及化石寄居骷髅／等等，啥？／肆意践踏／肥圆虫／背摔／敌手／大乞丐宝／287.0.0／鸟肥笼／The Cage／Chimera／棕色 Mega Fatty／The Pile／Wait What? 魂火的岩波判定；妈咪炸弹和超级豆子也可排除假候选
+[*]候选星号和门框随探索、藏宝图／世界牌及公开的房间图标更新；门框可在 Mod Config Menu 中开关并调整不透明度
+[*]奖励房门的传送限制可分别设置，Boss Rush／蓝子宫限时门和山羊头／圣餐提供对应豁免
 [*]在虚空层标记真正的 [b]精神错乱（Delirium）房间[/b]
 [*]显示地图边界，方便判断哪些方向已不可能生成更多房间
 [/list]
@@ -53,6 +55,7 @@
 [*][b]GoodTrip[/b] — 原始地图传送 Mod
 [*][b]GoodTrip MLX's Tweak[/b] — GoodTripPlus 的主要开发基础
 [*][b]Lazy Delver[/b] — 隐藏房候选位置标记
+[*][b]Secret Candidate Outlines / clawsleep[/b] — 隐藏房候选门框
 [/list]
 </description>
     <version>2.6.6</version>

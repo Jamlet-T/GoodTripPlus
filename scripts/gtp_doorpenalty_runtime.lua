@@ -95,7 +95,7 @@ return function(gt)
     local actor={flying=p:IsFlying()}
     local route=Policy.route(from,to,neighbors,descriptor,function(edge)
       return #gt:door_penalties(edge,actor)
-    end)
+    end, function(rd) return gt:room_is_clear(rd) end)
     if not route then
       route={}
       local a,b=descriptor(from),descriptor(to)

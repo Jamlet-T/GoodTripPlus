@@ -100,8 +100,12 @@ function M.door_check()
       end
 
       local valid = false
-      if cand.secret_type == C.SECRET_TYPE.ULTRA then
-        valid = room_obj:IsDoorSlotAllowed(entry.doorslot)
+      -- The doorway overlay already rejects slots disabled by the room's
+      -- STB/XML layout. Apply that same known-room evidence to map stars.
+      if entry.doorslot == nil or not room_obj:IsDoorSlotAllowed(entry.doorslot) then
+        valid = false
+      elseif cand.secret_type == C.SECRET_TYPE.ULTRA then
+        valid = true
       else
         local door = room_obj:GetDoor(entry.doorslot)
         local has_door = door
@@ -122,7 +126,7 @@ function M.door_check()
       if valid then
         entry.checked = true
       elseif cand.lid == nil then
-        map.candidates[cid] = nil
+        map.exclude_candidate(cid)
         break
       else
         log.error("Try to remove a real secret room: ")
@@ -170,8 +174,7 @@ function M.wall_hit_check(position, radius)
       local dist = (position - door_pos):Length()
       if dist < radius then
         if not cand.lid then
-          map.candidates[cid] = nil
-          changed = true
+          changed = map.exclude_candidate(cid) or changed
           break
         end
       end

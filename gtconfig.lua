@@ -59,6 +59,14 @@ gt.TravelMode = 2
 -- 注：2026-10-05 恢复 —— 本 mod 早期移植时漏掉了 Fixed 的这条选项。
 gt.BlockCurseRoom = true
 
+-- 当前房间有临时恶魔房/天使房门时允许传送；红钥匙常驻房间的门本来就不受此限制。
+gt.AllowDevilAngelDoorTeleport = false
+-- 当前房间有 Boss Rush/蓝子宫门时允许传送。Boss Rush 在深牢 II 20 分钟内、
+-- 陵墓 II 25 分钟内可限时豁免；蓝子宫在子宫 II 30 分钟内可限时豁免。
+-- 同时有恶魔/天使房门时，该门仍须由第一项放行或由下述道具豁免。
+-- 任一玩家持有山羊头（215）或圣餐（499）时，本条奖励门限制无视上述两项设置。
+gt.AllowRushHushDoorTeleport = false
+
 -- 只能传送到经已清房间逐门连通的房间（Fixed: FairTripPath）
 gt.FairTripPath = true
 
@@ -101,8 +109,8 @@ gt.DeliriumRoom = false
 -- **不做**「已踩自动撤标」（2026-10-04 拍板，见 gtp_minebuttons.lua 头部说明）。
 gt.MineButtonRoom = true
 
--- 注：以下两条「保护性禁传」自 2026-10-03 起**常开、不提供开关**
+-- 以下保护性禁传中，道具生成入口仍常开；奖励房门可由开关或上述豁免放行。
 --   · 当前房间里有「牌意解读 / 天堂阶梯」生成的入口（传送门 / 台阶）时禁传；
 --   · 当前房间里存在「通往奖励房间的门」时禁传（恶魔房 / 天使房 / Boss Rush / 死寂；
 --     独立模块 scripts/gtp_bosswindow.lua，按门的 TargetRoomType / TargetRoomIndex 判定）。
--- 两者常开且**不可绕过**（调试模式自 2026-10-06 起只出诊断、不参与判定）。
+-- 调试模式只出诊断、不参与判定。

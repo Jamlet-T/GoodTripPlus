@@ -1,7 +1,9 @@
 -- 同房间现场更新：揭露标志变化，以及真正撞网格的破墙泪弹/挥动中的铁镐。
+-- REPENTOGON 使用 MC_TEAR_GRID_COLLISION；原版回退到 CollidesWithGrid。
 -- HasTearFlags/CollidesWithGrid：IsaacDocs EntityTear/Entity；
 -- GetIsSwinging/GetHitboxParentKnife/NOTCHED_AXE：REPENTOGON EntityKnife/KnifeVariant。
 return function(gt, state, map, room, render, enabled)
+  local C = require('scripts.delver.const')
   local visibility = require('scripts.gtp_delvervisibility')
   -- 实体 Variant 9 是铁镐；KnifeVariant 的命名枚举由 REPENTOGON 添加，原版不存在。
   local axe_variant = (KnifeVariant and KnifeVariant.NOTCHED_AXE) or 9
@@ -11,6 +13,15 @@ return function(gt, state, map, room, render, enabled)
   end)
   local previous_map, previous_dimension, flags, real_rooms = nil, nil, {}, {}
   local axe_probes = setmetatable({}, {__mode='k'})
+  local tear_candidate_map, tear_candidate_room, tear_candidate_revision
+  local has_tear_candidate = false
+  local breaking_source_frame, held_breaking_source
+  local data_miner_used_here = false
+  local breaking_tear_sources = {
+    CollectibleType.COLLECTIBLE_SULFURIC_ACID,
+    CollectibleType.COLLECTIBLE_TERRA,
+    CollectibleType.COLLECTIBLE_FRUIT_CAKE,
+  }
   gt:AddCallback(ModCallbacks.MC_POST_UPDATE, function()
     if not enabled() or state.is_ignored() then return end
     local dimension = state.get_dimension()
@@ -59,11 +70,99 @@ return function(gt, state, map, room, render, enabled)
       end)
     end
   end
-  gt:AddCallback(ModCallbacks.MC_POST_TEAR_UPDATE, function(_, tear)
-    if not enabled() or state.is_ignored() then return end
-    if not tear:HasTearFlags(TearFlags.TEAR_ACID) and not tear:HasTearFlags(TearFlags.TEAR_ROCK) then return end
-    if tear:CollidesWithGrid() then hit(tear, 'tear') end
+  local function has_fake_candidate_here()
+    local descriptor = Game():GetLevel():GetCurrentRoomDesc()
+    local current = descriptor and map.rooms[descriptor.ListIndex]
+    local lid = current and current.lid
+    local revision = render.revision()
+    if tear_candidate_map ~= map.candidates or tear_candidate_room ~= lid
+      or tear_candidate_revision ~= revision then
+      tear_candidate_map, tear_candidate_room = map.candidates, lid
+      tear_candidate_revision, has_tear_candidate = revision, false
+      if lid then
+        for _, candidate in pairs(map.candidates) do
+          if candidate.lid == nil
+            and candidate.secret_type ~= C.SECRET_TYPE.ULTRA then
+            for _, entry in ipairs(candidate.entries) do
+              if entry.source_lid == lid and entry.doorslot ~= nil then
+                has_tear_candidate = true
+                break
+              end
+            end
+          end
+          if has_tear_candidate then break end
+        end
+      end
+    end
+    return has_tear_candidate
+  end
+
+  local function has_breaking_tear_source()
+    if data_miner_used_here then return true end
+    local game = Game()
+    local frame = game:GetFrameCount()
+    if breaking_source_frame ~= frame then
+      breaking_source_frame, held_breaking_source = frame, false
+      for index = 0, game:GetNumPlayers() - 1 do
+        local player = Isaac.GetPlayer(index)
+        if player and player:Exists() then
+          for _, item in ipairs(breaking_tear_sources) do
+            if player:HasCollectible(item) then
+              held_breaking_source = true
+              break
+            end
+          end
+        end
+        if held_breaking_source then break end
+      end
+    end
+    return held_breaking_source
+  end
+
+  local function inspect_breaking_tears()
+    return enabled() and not state.is_ignored()
+      and has_breaking_tear_source() and has_fake_candidate_here()
+  end
+
+  gt:AddCallback(ModCallbacks.MC_USE_ITEM, function(_, item)
+    if item == CollectibleType.COLLECTIBLE_DATAMINER then
+      data_miner_used_here = true
+    end
+  end, CollectibleType.COLLECTIBLE_DATAMINER)
+  gt:AddCallback(ModCallbacks.MC_POST_NEW_ROOM, function()
+    data_miner_used_here = false
+    breaking_source_frame = nil
+    tear_candidate_room = nil
   end)
+  gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
+    data_miner_used_here = false
+    breaking_source_frame = nil
+    tear_candidate_room = nil
+  end)
+
+  local function breakable_tear_hit(tear)
+    if not inspect_breaking_tears() then return end
+    if tear:HasTearFlags(TearFlags.TEAR_ACID)
+      or tear:HasTearFlags(TearFlags.TEAR_ROCK) then
+      hit(tear, 'tear')
+    end
+  end
+
+  if REPENTOGON and ModCallbacks.MC_TEAR_GRID_COLLISION then
+    -- REPENTOGON reports the actual grid impact, so no tear update polling.
+    gt:AddCallback(ModCallbacks.MC_TEAR_GRID_COLLISION,
+      function(_, tear) breakable_tear_hit(tear) end)
+  else
+    -- The base API has no tear/grid impact callback. Skip flag checks in rooms
+    -- without a candidate or a source item, then retain the collision fallback.
+    gt:AddCallback(ModCallbacks.MC_POST_TEAR_UPDATE, function(_, tear)
+      if not inspect_breaking_tears() then return end
+      if tear:HasTearFlags(TearFlags.TEAR_ACID)
+        or tear:HasTearFlags(TearFlags.TEAR_ROCK) then
+        if tear:CollidesWithGrid() then hit(tear, 'tear') end
+      end
+    end)
+  end
   gt:AddCallback(ModCallbacks.MC_POST_KNIFE_UPDATE, function(_, knife)
     if not enabled() or state.is_ignored() then return end
     local parent = type(knife.GetHitboxParentKnife) == 'function' and knife:GetHitboxParentKnife() or nil
