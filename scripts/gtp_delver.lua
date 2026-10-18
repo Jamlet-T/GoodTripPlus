@@ -14,7 +14,7 @@
     * 进房间后若门到墙的路径被挡（实心墙、无门）→ 排除该候选
     * 炸弹在门位附近爆炸 → 排除对应的假候选
     * 破墙泪弹撞网格 / 铁镐挥动命中门位 → 排除对应假候选；同房间揭露立即刷新
-    * 真隐藏房在地图上出现后，同类假候选自动清除
+    * 真隐藏房在地图上出现后，同类假候选自动清除；已发现的普通隐藏房旁边不再保留超级隐藏房候选
 
   与原版 Lazy Delver 的唯一实质差别
   ---------------------------------
@@ -91,6 +91,7 @@ gt:AddCallback(ModCallbacks.MC_POST_NEW_ROOM, function()
   if not enabled() then
     return
   end
+  map.update_knowledge()
   room.door_check()
   render.refresh()
 end)
@@ -121,6 +122,7 @@ end, EffectVariant.BOMB_EXPLOSION)
 -- 相关主动道具 / 卡牌 / 药丸使用后刷新候选
 for _, item in ipairs(state.items.active) do
   gt:AddCallback(item.mc, function()
+    if item.type == Card.CARD_WORLD then map.note_world_card() end
     if not enabled() then
       return
     end
@@ -152,19 +154,16 @@ gt:AddCallback(ModCallbacks.MC_POST_PEFFECT_UPDATE, function(_, player)
     end
   end
 
-  local active0, active1 = player:GetActiveItem(0), player:GetActiveItem(1)
-  check(state.items.red[CollectibleType.COLLECTIBLE_RED_KEY],
-    (active0 == CollectibleType.COLLECTIBLE_RED_KEY) or
-    (active1 == CollectibleType.COLLECTIBLE_RED_KEY)
-  )
-
-  local card0, card1 = player:GetCard(0), player:GetCard(1)
-  check(state.items.red[Card.CARD_CRACKED_KEY],
-    (card0 == Card.CARD_CRACKED_KEY) or (card1 == Card.CARD_CRACKED_KEY)
-  )
-  check(state.items.red[Card.CARD_SOUL_CAIN],
-    (card0 == Card.CARD_SOUL_CAIN) or (card1 == Card.CARD_SOUL_CAIN)
-  )
+  local red_key, cracked_key, soul_cain = false, false, false
+  for slot = 0, 3 do
+    red_key = red_key or player:GetActiveItem(slot) == CollectibleType.COLLECTIBLE_RED_KEY
+    local card = player:GetCard(slot)
+    cracked_key = cracked_key or card == Card.CARD_CRACKED_KEY
+    soul_cain = soul_cain or card == Card.CARD_SOUL_CAIN
+  end
+  check(state.items.red[CollectibleType.COLLECTIBLE_RED_KEY], red_key)
+  check(state.items.red[Card.CARD_CRACKED_KEY], cracked_key)
+  check(state.items.red[Card.CARD_SOUL_CAIN], soul_cain)
 
   for type, param in pairs(state.items.passive) do
     check(param, player:HasCollectible(type))

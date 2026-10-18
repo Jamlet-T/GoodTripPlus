@@ -60,9 +60,7 @@ function M.icons_restore(text,levels,current_lid,current_dim)
 end
 function M.delver_capture(map)
   local lines={}
-  for cid in pairs(map.fake_baseline or {}) do
-    if not map.candidates[cid] then lines[#lines+1]='X '..cid end
-  end
+  for cid in pairs(map.excluded_cids or {}) do lines[#lines+1]='X '..cid end
   for cid,candidate in pairs(map.candidates or {}) do
     for _,entry in ipairs(candidate.entries or {}) do
       if entry.checked then lines[#lines+1]=string.format('C %d %d %d',cid,entry.source_lid,entry.doorslot) end
@@ -77,9 +75,7 @@ function M.delver_restore(text,map)
     local cid=line:match('^X (%d+)$')
     if cid then
       cid=tonumber(cid)
-      if map.candidates[cid] and map.candidates[cid].lid==nil then
-        map.candidates[cid]=nil; removed=removed+1
-      end
+      if map.exclude_candidate(cid) then removed=removed+1 end
     else
       local c,l,s=line:match('^C (%d+) (%d+) (%d+)$')
       local candidate=c and map.candidates[tonumber(c)]

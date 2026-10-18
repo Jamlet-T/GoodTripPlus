@@ -9,11 +9,25 @@ return function(gt)
   local visibility = require("scripts.gtp_delvervisibility")
   local game = Game()
 
-  local markers = {}
+  -- Render one fixed frame ourselves. The game's DOOR_OUTLINE effect owns its
+  -- animation/lifetime, so a constant Color on that entity cannot stay steady.
+  local outline_sprite = Sprite()
+  outline_sprite:Load("gfx/1000.154_door outline.anm2", true)
+  outline_sprite:SetFrame(outline_sprite:GetDefaultAnimation(), 1)
+  -- This frame's source pixels are translucent. Repeated draws at the same
+  -- position strengthen the doorway without changing its size or timing.
+  local fixed_outline_passes = 5
+  local ambiguous_outline_passes = 7
   local pending_stomps = {}
   local dog_tooth_observations = {}
-  local observed_candidates, last_observed_room
+  local observed_floor, last_observed_room
   local room_blast_pending, mama_mega_checked_map, mama_mega_checked_room
+  local mama_state_sampled_map, mama_state_sampled_room, mama_mega_active
+  local selected_entrances, selected_map, selected_room, selected_revision
+  local selected_frame, selected_yo_listen, markers_visible
+  local last_red_outline_scan_frame, last_red_outline_scan_room
+  local red_outline_slots = {}
+  local yo_listen_frame, yo_listen_owned
   local stomp_variants = {
     [EffectVariant.MONSTROS_TOOTH] = true,
     [EffectVariant.MOM_FOOT_STOMP] = true,
@@ -22,17 +36,35 @@ return function(gt)
   local host_crackwaves = {}
   local wave_sources = {}
   local pending_suplex = {}
+  local rock_source_entities = {}
 
   local function enabled()
     return gt:get_config_bool("ShowSecretMarkers", true)
       and gt:get_config_bool("ShowSecretDoorOutlines", true)
   end
 
-  local function remove_markers()
-    for slot, entity in pairs(markers) do
-      if entity and entity:Exists() then entity:Remove() end
-      markers[slot] = nil
+  -- Delver intentionally ignores the Ascent/Home floor. Native Red Key
+  -- outlines still exist there, so inspect held sources independently.
+  local function has_red_key_source()
+    for index = 0, game:GetNumPlayers() - 1 do
+      local player = Isaac.GetPlayer(index)
+      if player and player:Exists() then
+        for slot = 0, 3 do
+          if player:GetActiveItem(slot) == CollectibleType.COLLECTIBLE_RED_KEY then
+            return true
+          end
+          local card = player:GetCard(slot)
+          if card == Card.CARD_CRACKED_KEY or card == Card.CARD_SOUL_CAIN then
+            return true
+          end
+        end
+      end
     end
+    return false
+  end
+
+  local function remove_markers()
+    markers_visible = false
   end
 
   local function real_room_revealed(candidate, room_list)
@@ -43,18 +75,6 @@ return function(gt)
       if source and source.mirror_lid then lid = source.mirror_lid end
     end
     return visibility.flags(room_list:Get(lid), state.get_dimension()) ~= 0
-  end
-
-  local function resolved_secret_type(kind, room_list)
-    -- A revealed real room removes speculative locations of that type, but
-    -- its unopened doorway remains useful for bomb placement.
-    for _, candidate in pairs(map.candidates) do
-      if candidate.secret_type == kind and candidate.lid ~= nil
-        and not real_room_revealed(candidate, room_list) then
-        return false
-      end
-    end
-    return true
   end
 
   local function fully_checked(candidate)
@@ -73,23 +93,25 @@ return function(gt)
     return false
   end
 
-  local function actual_secret_next_to(lid)
-    for _, candidate in pairs(map.candidates) do
-      local kind = candidate.secret_type
-      if candidate.lid ~= nil
-        and (kind == C.SECRET_TYPE.REGULAR or kind == C.SECRET_TYPE.SUPER) then
-        for _, entry in ipairs(candidate.entries) do
-          if entry.source_lid == lid then return true end
-        end
-      end
+  local function has_yo_listen()
+    local frame = game:GetFrameCount()
+    if yo_listen_frame ~= frame then
+      yo_listen_frame = frame
+      yo_listen_owned = has_collectible(CollectibleType.COLLECTIBLE_YO_LISTEN)
     end
-    return false
+    return yo_listen_owned
+  end
+
+  local function actual_secret_next_to(lid)
+    -- Dog Tooth is an explicit in-game clue, so the actual floor layout is
+    -- read only when the item has sounded on entering this room.
+    return map.truth_next_to(lid)
   end
 
   local function observe_dog_tooth(level)
     -- A rebuilt floor replaces this table. Never reuse clues across layouts.
-    if observed_candidates ~= map.candidates then
-      observed_candidates = map.candidates
+    if observed_floor ~= map.floor_revision then
+      observed_floor = map.floor_revision
       dog_tooth_observations = {}
       last_observed_room = nil
     end
@@ -116,8 +138,7 @@ return function(gt)
           or candidate.secret_type == C.SECRET_TYPE.SUPER) then
         for _, entry in ipairs(candidate.entries) do
           if entry.source_lid == current.lid then
-            map.candidates[cid] = nil
-            changed = true
+            changed = map.exclude_candidate(cid) or changed
             break
           end
         end
@@ -143,6 +164,18 @@ return function(gt)
     end
     return false
   end
+
+  local function candidate_allowed(candidate, yo_listen)
+    return not disproved_by_dog_tooth(candidate)
+      and (not yo_listen or candidate.secret_type == C.SECRET_TYPE.ULTRA
+        or map.is_real(candidate.cid))
+  end
+
+  render.set_candidate_filter(function(candidate)
+    -- Revealed real rooms intentionally lose their star but keep an unopened
+    -- doorway. Other extra clues must agree with the doorway selection.
+    return not enabled() or candidate_allowed(candidate, has_yo_listen())
+  end)
 
   local function permitted_entrance(room, slot)
     if not room:IsDoorSlotAllowed(slot) then return false end
@@ -170,32 +203,33 @@ return function(gt)
     local current = descriptor and map.rooms[descriptor.ListIndex]
     if not current then return {} end
 
-    local result, resolved = {}, {}
+    local result = {}
     local room_list = level:GetRooms()
-    local yo_listen = has_collectible(CollectibleType.COLLECTIBLE_YO_LISTEN)
+    local yo_listen = has_yo_listen()
     for _, candidate in pairs(map.candidates) do
       local kind = candidate.secret_type
-      if resolved[kind] == nil then
-        resolved[kind] = resolved_secret_type(kind, room_list)
-      end
-      local color = C.MARKER.COLORS[kind]
+      local clue_reveals = yo_listen and map.is_real(candidate.cid)
+      local display_kind = clue_reveals and map.truth_type(candidate.cid) or kind
+      local color = C.MARKER.COLORS[display_kind]
       local ultra_hidden = kind == C.SECRET_TYPE.ULTRA
         and not state.can_see_red()
-      local real = candidate.lid ~= nil
-      if color and (real or not resolved[kind]) and not ultra_hidden
-        and not disproved_by_dog_tooth(candidate)
-        and (not yo_listen or kind == C.SECRET_TYPE.ULTRA or real)
+      local real = candidate.lid ~= nil or clue_reveals
+      if color and not ultra_hidden
+        and candidate_allowed(candidate, yo_listen)
         and (real or candidate.marker_status ~= C.MARKER.STATUS.FOUND) then
-        local verified = fully_checked(candidate)
-          or (real and (real_room_revealed(candidate, room_list)
+        local verified = fully_checked(candidate) or clue_reveals
+          or (candidate.lid ~= nil and (real_room_revealed(candidate, room_list)
             or candidate.marker_status == C.MARKER.STATUS.FOUND))
-        local rank = preference(kind, verified)
+        local rank = preference(display_kind, verified)
         for _, entry in ipairs(candidate.entries) do
           local slot = entry.doorslot
           if entry.source_lid == current.lid and slot ~= nil
             and permitted_entrance(room, slot)
             and (not result[slot] or rank > result[slot].rank) then
-            result[slot] = { rgb = color, verified = verified, rank = rank }
+            result[slot] = {
+              rgb = color, verified = verified, rank = rank,
+              ambiguous = candidate.ambiguous and not clue_reveals,
+            }
           end
         end
       end
@@ -218,28 +252,95 @@ return function(gt)
     return room:GetDoorSlotPosition(slot) + shift, side * 90 - 90
   end
 
-  local function marker_color(rgb, verified)
-    local opacity = 1
-    if not verified then
-      local phase = game:GetFrameCount() * (2 * math.pi / 30)
-      opacity = 0.66 + 0.16 * math.sin(phase)
+  local function observe_red_key_outlines(level, room, room_index, frame)
+    local descriptor = level:GetCurrentRoomDesc()
+    if not has_red_key_source() and not map.is_red_room(descriptor) then
+      red_outline_slots = {}
+      last_red_outline_scan_frame = nil
+      return
     end
-    local value = Color(1, 1, 1, opacity)
+    if last_red_outline_scan_room == room_index
+      and last_red_outline_scan_frame
+      and frame >= last_red_outline_scan_frame
+      and frame - last_red_outline_scan_frame < 10 then return end
+    last_red_outline_scan_room, last_red_outline_scan_frame = room_index, frame
+
+    local slots = {}
+    for _, effect in ipairs(Isaac.FindByType(EntityType.ENTITY_EFFECT,
+      EffectVariant.DOOR_OUTLINE)) do
+      if not effect:GetData().gtp_secret_outline_owned then
+        local closest_slot, closest_distance
+        for slot = 0, DoorSlot.NUM_DOOR_SLOTS - 1 do
+          local slot_pos = room:GetDoorSlotPosition(slot)
+          local marker_pos = doorway_pose(room, slot)
+          local distance = math.min((effect.Position - slot_pos):Length(),
+            (effect.Position - marker_pos):Length())
+          if not closest_distance or distance < closest_distance then
+            closest_slot, closest_distance = slot, distance
+          end
+        end
+        if closest_slot and closest_distance <= 32 then
+          slots[closest_slot] = true
+        end
+      end
+    end
+    red_outline_slots = slots
+    if not next(slots) then return end
+
+    -- Ascent/Home has no Delver candidate map. Keep the native red outlines
+    -- available for drawing without touching stale candidate data.
+    if state.is_ignored() or state.is_off_grid() then return end
+
+    local current = descriptor and map.rooms[descriptor.ListIndex]
+    if not current then return end
+
+    local changed = false
+    for cid, candidate in pairs(map.candidates) do
+      if candidate.lid == nil
+        and candidate.secret_type ~= C.SECRET_TYPE.ULTRA then
+        for _, entry in ipairs(candidate.entries) do
+          if entry.source_lid == current.lid
+            and entry.doorslot ~= nil and slots[entry.doorslot] then
+            changed = map.exclude_candidate(cid) or changed
+          end
+          if not map.candidates[cid] then break end
+        end
+      end
+    end
+    if changed then render.refresh() end
+  end
+
+  local function marker_color(rgb, ambiguous_opacity, ambiguous)
+    -- A known single type stays fully visible; only two-type candidates pulse.
+    local value = Color(1, 1, 1, ambiguous_opacity or 1)
     -- The stock doorway sprite is reddish; Colorize replaces its hue.
-    value:SetColorize(rgb[1] * 3, rgb[2] * 3, rgb[3] * 3, 1)
+    -- Boost the changing color enough to remain visible while retaining its
+    -- white-to-gold transition. Fixed colors keep their established strength.
+    local strength = ambiguous and 1.5 or 3
+    value:SetColorize(rgb[1] * strength, rgb[2] * strength,
+      rgb[3] * strength, 1)
     return value
   end
 
   local function update_markers()
     local level = game:GetLevel()
-    if not level or state.is_ignored() or state.is_off_grid() then
+    if not level then
       remove_markers()
       return
     end
     local descriptor = level:GetCurrentRoomDesc()
     local room_index = descriptor and descriptor.ListIndex
-    local mama_mega_active = level:GetStateFlag(
-      LevelStateFlag.STATE_MAMA_MEGA_USED)
+    if state.is_ignored() or state.is_off_grid() then
+      remove_markers()
+      observe_red_key_outlines(level, game:GetRoom(), room_index,
+        game:GetFrameCount())
+      return
+    end
+    if mama_state_sampled_map ~= map.candidates
+      or mama_state_sampled_room ~= room_index then
+      mama_state_sampled_map, mama_state_sampled_room = map.candidates, room_index
+      mama_mega_active = level:GetStateFlag(LevelStateFlag.STATE_MAMA_MEGA_USED)
+    end
     local needs_mama_check = mama_mega_active and
       (mama_mega_checked_map ~= map.candidates
         or mama_mega_checked_room ~= room_index)
@@ -254,6 +355,8 @@ return function(gt)
     end
     -- Maintain entry evidence even if the doorway setting is temporarily off.
     observe_dog_tooth(level)
+    observe_red_key_outlines(level, game:GetRoom(), room_index,
+      game:GetFrameCount())
     local map_cursed = (level:GetCurses() & LevelCurse.CURSE_OF_THE_LOST) ~= 0
     if not enabled() or (map_cursed
       and not gt:get_config_bool("DoorOutlinesDuringCurse", true)) then
@@ -263,25 +366,92 @@ return function(gt)
 
     render.update()
     local room = game:GetRoom()
-    local selected = collect_entrances(level, room)
-
-    for slot, entity in pairs(markers) do
-      if not selected[slot] or not entity:Exists() then
-        if entity:Exists() then entity:Remove() end
-        markers[slot] = nil
+    local revision = render.revision()
+    local frame = game:GetFrameCount()
+    local yo_listen = has_yo_listen()
+    local rebuild = not markers_visible or selected_map ~= map.candidates
+      or selected_room ~= room_index or selected_revision ~= revision
+      or selected_yo_listen ~= yo_listen
+      or frame - (selected_frame or 0) >= 30
+    if not rebuild then
+      for slot in pairs(selected_entrances) do
+        if not permitted_entrance(room, slot) then
+          rebuild = true
+          break
+        end
       end
     end
-    for slot, data in pairs(selected) do
-      local entity = markers[slot]
-      if not entity then
-        local position, angle = doorway_pose(room, slot)
-        entity = Isaac.Spawn(EntityType.ENTITY_EFFECT,
-          EffectVariant.DOOR_OUTLINE, 0, position, Vector(0, 0), nil)
-        entity:GetData().gtp_secret_outline_owned = true
-        entity.SpriteRotation = angle
-        markers[slot] = entity
+    if rebuild then
+      selected_entrances = collect_entrances(level, room)
+      selected_map, selected_room = map.candidates, room_index
+      selected_revision, selected_frame = revision, frame
+      selected_yo_listen = yo_listen
+    end
+    markers_visible = true
+  end
+
+  local function draw_markers()
+    -- Our MC_POST_RENDER callback can run after Mod Config Menu's overlay.
+    -- Skip only the visual draw while its L-key menu is open; candidate
+    -- evidence continues updating and the outlines return when it closes.
+    if ModConfigMenu and ModConfigMenu.IsVisible then return end
+    local level = game:GetLevel()
+    if not level or not enabled() then return end
+    local map_cursed = (level:GetCurses() & LevelCurse.CURSE_OF_THE_LOST) ~= 0
+    if map_cursed and not gt:get_config_bool("DoorOutlinesDuringCurse", true) then
+      return
+    end
+    local draw_candidates = markers_visible and selected_entrances
+      and not state.is_ignored() and not state.is_off_grid()
+    if not draw_candidates and not next(red_outline_slots) then return end
+    local room = game:GetRoom()
+    local frame = game:GetFrameCount()
+    local outline_opacity = math.max(0, math.min(100,
+      tonumber(gt:get_config_bool("SecretDoorOutlineOpacity", 100)) or 100)) / 100
+    -- MC_POST_RENDER draws on the final image. The mirror-world pass has
+    -- already flipped the room, so our manually rendered sprites must use
+    -- the same screen-space reflection rather than unmirrored world slots.
+    local mirrored = room:IsMirrorWorld()
+    local screen_width = mirrored and Isaac.GetScreenWidth() or nil
+    local function draw_outline(slot, rgb, opacity, ambiguous, passes)
+      local position, angle = doorway_pose(room, slot)
+      outline_sprite.Color = marker_color(rgb, opacity, ambiguous)
+      outline_sprite.Rotation = mirrored and -angle or angle
+      -- The doorway frame is asymmetric. Rotation already swaps the left
+      -- and right facing in the mirror; FlipX reverses it a second time.
+      outline_sprite.FlipX = false
+      local screen_position = Isaac.WorldToScreen(position)
+      if mirrored then
+        screen_position = Vector(screen_width - screen_position.X, screen_position.Y)
       end
-      entity:GetSprite().Color = marker_color(data.rgb, data.verified)
+      for _ = 1, passes do
+        outline_sprite:Render(screen_position)
+      end
+    end
+    if draw_candidates then
+      for slot, data in pairs(selected_entrances) do
+        if not red_outline_slots[slot] and permitted_entrance(room, slot) then
+          local rgb = data.rgb
+          local ambiguous_opacity
+          if data.ambiguous then
+            rgb, ambiguous_opacity = C.MARKER.ambiguous_pulse(frame, 0.85)
+          end
+          local passes = data.ambiguous and ambiguous_outline_passes
+            or fixed_outline_passes
+          draw_outline(slot, rgb, (ambiguous_opacity or 1) * outline_opacity,
+            data.ambiguous, passes)
+        end
+      end
+    end
+    -- Red Key outlines also occur inside rooms created by the Red Key. Those
+    -- rooms are absent from the generated secret-candidate entry list, so
+    -- paint directly over each visible native outline with the same red frame.
+    for slot in pairs(red_outline_slots) do
+      local door = room:GetDoor(slot)
+      if not door or not door:IsOpen() then
+        draw_outline(slot, C.MARKER.COLORS[C.SECRET_TYPE.ULTRA],
+          nil, false, fixed_outline_passes)
+      end
     end
   end
 
@@ -427,6 +597,27 @@ return function(gt)
     return variant and variant[entity.SubType]
   end
 
+  local function rock_source_kind(entity)
+    if is_roundy(entity) then return "roundy" end
+    if is_adversary(entity) then return "adversary" end
+    if is_bumbino(entity) then return "bumbino" end
+    if is_moms_dead_hand(entity) then return "moms_dead_hand" end
+    return extra_rock_source_kind(entity)
+  end
+
+  local function watch_rock_source(_, entity)
+    if rock_source_kind(entity) then
+      rock_source_entities[ent_key(entity)] = entity
+    end
+  end
+
+  local function scan_room_rock_sources()
+    rock_source_entities = {}
+    for _, entity in ipairs(Isaac.GetRoomEntities()) do
+      watch_rock_source(nil, entity)
+    end
+  end
+
   local function remember_verified_shockwave(_, effect)
     local kind
     local extra_kind = extra_rock_source_kind(effect.SpawnerEntity)
@@ -462,26 +653,30 @@ return function(gt)
     end
     if not kind then
       -- Effects without spawner data need a matching nearby source.
-      for _, entity in ipairs(Isaac.GetRoomEntities()) do
-        local distance = (entity.Position - effect.Position):Length()
-        local nearby_kind = extra_rock_source_kind(entity)
-        if is_roundy(entity) and distance <= 32
-          and entity:GetSprite():IsPlaying("DigOut") then
-          kind = "roundy"
-          break
-        elseif is_adversary(entity) and distance <= 40 then
-          kind = "adversary"
-          break
-        elseif is_bumbino(entity) and distance <= 64 then
-          kind = "bumbino"
-          break
-        elseif is_moms_dead_hand(entity) and distance <= 48 then
-          kind = "moms_dead_hand"
-          break
-        elseif nearby_kind
-          and distance <= (nearby_kind == "bird_cage" and 48 or 72) then
-          kind = nearby_kind
-          break
+      for key, entity in pairs(rock_source_entities) do
+        if not entity:Exists() then
+          rock_source_entities[key] = nil
+        else
+          local distance = (entity.Position - effect.Position):Length()
+          local nearby_kind = rock_source_kind(entity)
+          if nearby_kind == "roundy" and distance <= 32
+            and entity:GetSprite():IsPlaying("DigOut") then
+            kind = "roundy"
+            break
+          elseif nearby_kind == "adversary" and distance <= 40 then
+            kind = "adversary"
+            break
+          elseif nearby_kind == "bumbino" and distance <= 64 then
+            kind = "bumbino"
+            break
+          elseif nearby_kind == "moms_dead_hand" and distance <= 48 then
+            kind = "moms_dead_hand"
+            break
+          elseif nearby_kind
+            and distance <= (nearby_kind == "bird_cage" and 48 or 72) then
+            kind = nearby_kind
+            break
+          end
         end
       end
     end
@@ -509,6 +704,7 @@ return function(gt)
   end
 
   local function check_rock_wave_front(_, effect)
+    if not next(wave_sources) then return end
     local data = effect:GetData()
     if data.gtp_rock_front_checked or data.gtp_host_rock_checked then return end
     local frame = game:GetFrameCount()
@@ -558,6 +754,7 @@ return function(gt)
   end
 
   local function check_host_rock_wave(_, effect)
+    if not next(host_crackwaves) then return end
     local data = effect:GetData()
     if data.gtp_host_rock_checked then return end
     local frame = game:GetFrameCount()
@@ -593,9 +790,24 @@ return function(gt)
     host_crackwaves = {}
     wave_sources = {}
     last_observed_room = nil
+    last_red_outline_scan_frame = nil
+    last_red_outline_scan_room = nil
+    red_outline_slots = {}
     remove_markers()
+    scan_room_rock_sources()
   end)
+  for _, entity_type in ipairs({ EntityType.ENTITY_ROUNDY,
+    EntityType.ENTITY_ADVERSARY, EntityType.ENTITY_BUMBINO,
+    EntityType.ENTITY_MOMS_DEAD_HAND, EntityType.ENTITY_CAGE,
+    EntityType.ENTITY_CHIMERA, EntityType.ENTITY_MEGA_FATTY,
+    EntityType.ENTITY_POLYCEPHALUS }) do
+    gt:AddCallback(ModCallbacks.MC_POST_NPC_INIT, watch_rock_source,
+      entity_type)
+  end
+  gt:AddCallback(ModCallbacks.MC_FAMILIAR_INIT, watch_rock_source,
+    FamiliarVariant.BIRD_CAGE)
   gt:AddCallback(ModCallbacks.MC_POST_UPDATE, update_markers)
+  gt:AddCallback(ModCallbacks.MC_POST_RENDER, draw_markers)
   for variant in pairs(stomp_variants) do
     gt:AddCallback(ModCallbacks.MC_POST_EFFECT_INIT, remember_stomp, variant)
     gt:AddCallback(ModCallbacks.MC_POST_EFFECT_UPDATE, follow_stomp, variant)
@@ -636,13 +848,28 @@ return function(gt)
     room_blast_pending = nil
     mama_mega_checked_map = nil
     mama_mega_checked_room = nil
+    mama_state_sampled_map = nil
+    mama_state_sampled_room = nil
+    mama_mega_active = nil
+    selected_entrances = nil
+    selected_map = nil
+    selected_room = nil
+    selected_revision = nil
+    selected_frame = nil
+    selected_yo_listen = nil
+    yo_listen_frame = nil
+    yo_listen_owned = nil
     pending_stomps = {}
     host_crackwaves = {}
     wave_sources = {}
     pending_suplex = {}
+    rock_source_entities = {}
     dog_tooth_observations = {}
-    observed_candidates = nil
+    observed_floor = nil
     last_observed_room = nil
+    last_red_outline_scan_frame = nil
+    last_red_outline_scan_room = nil
+    red_outline_slots = {}
     remove_markers()
   end)
   gt:AddCallback(ModCallbacks.MC_PRE_GAME_EXIT, remove_markers)

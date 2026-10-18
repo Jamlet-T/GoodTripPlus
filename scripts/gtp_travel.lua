@@ -182,7 +182,7 @@ gt:add_travel_rule({
   id = "departure.cur_uncleared", stage = "departure", order = 30,
   text = "当前房间还没清怪",
   test = function(ctx)
-    if gt:grid_room_desc(ctx.cur_gid) ~= nil and ctx.cur.Clear then return nil end
+    if gt:grid_room_desc(ctx.cur_gid) ~= nil and gt:room_is_clear(ctx.cur) then return nil end
     return { cur_gid = ctx.cur_gid, clear = ctx.cur.Clear }
   end,
 })
@@ -340,14 +340,14 @@ gt:add_travel_rule({
     if ctx.mode == 1 then return nil end
     -- 仅当前房间真实锁门可付费成为最后一跳；不扩展远处门图/可达岛。
     -- 已探索档仍拒绝未探索目标，所有前置 departure/target 规则已执行。
-    if ctx.mode==2 or (ctx.target.VisitedCount>0 and ctx.target.Clear) then
+    if ctx.mode==2 or (ctx.target.VisitedCount>0 and gt:room_is_clear(ctx.target)) then
       local unlock=gt.adjacent_unlock_state and gt:adjacent_unlock_state(ctx.gid)
       if unlock and unlock.affordable then return nil end
     end
     local reach = ctx.reachable()
     local t = ctx.target
     -- 通道 B：目标自己已探索已清怪，且在自己这块可达岛上
-    if t.VisitedCount > 0 and t.Clear
+    if t.VisitedCount > 0 and gt:room_is_clear(t)
         and (reach == nil or reach[t.SafeGridIndex] == true) then
       return nil
     end
@@ -357,7 +357,7 @@ gt:add_travel_rule({
     -- 通道 C：目标旁边有「已显示 + 已探索 + 已清」的房，且两者之间有真门
     local near = gt:check_neigh_connected(t, function(rd)
       if (rd.DisplayFlags & 1) == 0 then return false end
-      if not (rd.VisitedCount > 0 and rd.Clear) then return false end
+      if not (rd.VisitedCount > 0 and gt:room_is_clear(rd)) then return false end
       -- FairTripPath 只控制邻居是否在可达岛上，不能跳过目标入口的门状态。
       if reach ~= nil and reach[rd.SafeGridIndex] ~= true then return false end
       -- 最后一跳要区分两个**看起来一样、其实不同**的情形（2026-10-06 实测两次）：

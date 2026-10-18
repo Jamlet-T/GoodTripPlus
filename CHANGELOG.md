@@ -1,3 +1,41 @@
+GoodTripPlus 2.6.6（待发布）
+自 2.5.0 以来的累计更新
+
+新增与调整：
+
+- 在房间内绘制普通、超级、究极隐藏房的白色、金色、红色候选门框；普通／超级两种可能并存时平滑换色，真实隐藏房入口打开前保留门框。
+- 小地图星号和房间门框共用候选信息。候选随探索、公开的特殊房图标、藏宝图和世界牌更新；特殊房入口、Boss 房、L 型房间与窄房长边使用更细的排除规则。未探索灰色房间不会提前暴露真实类型或门位。
+- 狗牙、“嘿，听好！”、红钥匙原版门框，以及已确认来源的踩踏、破墙泪弹、岩石波和整房间效果可排除假候选。真实隐藏房门位在入口打开前受保护。
+- 增强红钥匙、碎裂钥匙和该隐魂卡的原版红色门框显示，修正镜中世界的门框位置与朝向，并覆盖回溯线／家园中实际存在的红钥匙门框。
+- Mod Config Menu 新增候选门框开关、迷失诅咒显示开关和 0%–100% 不透明度选项；打开菜单时门框暂时隐藏。
+- 奖励房门传送限制拆为恶魔／天使房门和 Boss Rush／蓝子宫门两组默认关闭的开关。对应限时内的 Boss Rush／蓝子宫门及持有山羊头／圣餐的玩家可获豁免，其他传送条件仍适用。
+
+修复与优化：
+
+- 已访问且出口开放的无怪普通房、完成的挑战房，在本模组的地图与传送规则中视作已清理，不修改游戏房间状态。
+- 地图操作期间屏蔽堕化遗骸及其灵魂的投掷方向输入；释放地图键及已按住的方向键后恢复正常操作。
+- 候选门框使用固定帧绘制，仅双类型候选逐帧换色；破墙泪弹与岩石波按来源和场景追踪。三美元纸币经实测不能开隐藏房，已从破墙泪弹来源移除。
+- 同步门框、小地图星号与已检查门位的排除记录，减少换房或继续游戏后的错误候选。
+- 普通隐藏房被发现后，立即移除与它相邻的超级隐藏房候选及对应门框、星号。
+
+升级提示：更新后完全退出并重启游戏。门框和星号标记的是候选位置，不保证每处都是真实隐藏房。正式发布前仍需完成最新规则的游戏内回归。
+
+Changes since 2.5.0 (2.6.6, unreleased)
+
+- Added in-room white, gold, and red candidate doorways for regular, super, and ultra secret rooms. Ambiguous regular/super candidates cycle smoothly; revealed real entrances stay marked until opened.
+- Kept minimap stars and doorways on the same candidate data. Exploration, public room icons, Treasure Map, and The World update candidates without exposing hidden room types or door layouts.
+- Improved candidate filtering around special rooms, boss rooms, L-shaped rooms, and narrow room walls; clues and verified wall-opening effects exclude false candidates while protecting real entrances.
+- Improved native Red Key doorway visibility, including Cracked Key and Soul of Cain, mirror-world alignment, and existing Red Key doorways on the Ascent and Home floors.
+- Added doorway visibility, Curse of the Lost, and opacity controls to Mod Config Menu. Doorways hide while the menu is open.
+- Added separate travel settings for Devil/Angel and Boss Rush/Blue Womb doors, with matching time-window and Goat Head/Eucharist exceptions.
+- Treated visited enemy-free rooms with an open exit as cleared for this mod's map and travel logic, and prevented The Forgotten's body throw during map controls.
+- Reduced irrelevant doorway and wall-breaking checks; removed 3 Dollar Bill from the wall-breaking tear source list after in-game testing.
+- Removed adjacent super secret room candidates as soon as a regular secret room is revealed.
+
+Restart the game after updating. The latest candidate and travel rules still need final in-game regression checks before release.
+
+---
+
 GoodTripPlus 2.5.0
 自 2.4.0 以来的累计更新
 
