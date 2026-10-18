@@ -400,6 +400,7 @@ function M.update_knowledge(force)
   local public_typed_lids, public_typed_ids = {}, {}
   local regular_found = false
   local super_found = false
+  local ultra_found = false
   local all_normal_visited = true
   local all_original_rooms_visible = true
   for lid, room in pairs(M.rooms) do
@@ -441,6 +442,7 @@ function M.update_knowledge(force)
         known_ids[#known_ids + 1] = lid
         if room.type == C.SECRET_TYPE.REGULAR then regular_found = true end
         if room.type == C.SECRET_TYPE.SUPER then super_found = true end
+        if room.type == C.SECRET_TYPE.ULTRA then ultra_found = true end
         for _, cid in ipairs(room.cids) do known_cells[cid] = M.cells[cid] end
       elseif public_type then
         public_typed_lids[lid] = true
@@ -526,7 +528,8 @@ function M.update_knowledge(force)
         M.candidates[cid] = nil
       end
       if M.candidates[cid] and ((regular_found and candidate.secret_type == C.SECRET_TYPE.REGULAR)
-        or (super_found and candidate.secret_type == C.SECRET_TYPE.SUPER)) then
+        or (super_found and candidate.secret_type == C.SECRET_TYPE.SUPER)
+        or (ultra_found and candidate.secret_type == C.SECRET_TYPE.ULTRA)) then
         M.candidates[cid] = nil
       end
     end
