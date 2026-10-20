@@ -4,8 +4,8 @@
 -- 传送准入逻辑为 GoodTrip [Fixed] 的忠实移植，选项与 Fixed 同名同默认值
 -- （例外：① 传送范围把 Fixed 的 AllowNeighborRoom + AllowAnyRoom 两项合并成一个三选一的
 --   TravelMode，默认值等价于 Fixed 的原默认组合；② 传送过场把 Fixed 的 TeleportAnimation +
---   FastTransition 两个布尔项合并成 TeleportTransition，当前保留淡入淡出与传送动画两档，默认「淡入淡出」，
---   而 Fixed 默认是「淡入淡出关 + 快速过场关」= 淡入淡出，两边效果一致）。
+--   FastTransition 两个布尔项合并成 TeleportTransition，当前保留两档（淡入淡出 / 传送动画），
+--   默认「淡入淡出」，即 Fixed 的「淡入淡出关 + 快速过场关」组合；淡入淡出改用原生 FADE=1。
 gt.FastRestartEnable = true
 
 -- 键盘传送光标每次按键移动一个 1x1 房间格距；关闭时按光标速度连续移动。
@@ -13,7 +13,8 @@ gt.CursorGridStep = false
 -- 鼠标跟随光标与左键点击传送；关闭后仍可用键盘/手柄。
 gt.MouseTeleport = true
 
--- 传送过场（落地时的表现）：2 = 淡入淡出 / 3 = 传送动画（白闪）；旧值 1 兼容为 2。
+-- 传送过场（落地时的表现）：2 = 淡入淡出(FADE=1，避开 t180 隐身；rewind 恢复到进房状态)
+-- / 3 = 传送动画（白闪，走原生离开时的快照保存入口）；旧值 1 与已删除的 4 兼容为 2。
 -- MCM 里对应「传送过场」项（装了 MCM 时以它为准）；这里只是没装 MCM 时的文件级默认。
 -- 顺带决定传送冷却 tele_cd（10 / 45 帧）：过场越短，冷却越短。
 gt.TeleportTransition = 2
