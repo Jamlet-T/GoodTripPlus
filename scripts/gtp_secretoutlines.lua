@@ -7,6 +7,7 @@ return function(gt)
   local room_check = require("scripts.delver.room")
   local render = require("scripts.delver.render")
   local visibility = require("scripts.gtp_delvervisibility")
+  local redsource = require("scripts.gtp_redsource")
   local game = Game()
 
   -- Render one fixed frame ourselves. The game's DOOR_OUTLINE effect owns its
@@ -45,22 +46,10 @@ return function(gt)
 
   -- Delver intentionally ignores the Ascent/Home floor. Native Red Key
   -- outlines still exist there, so inspect held sources independently.
+  -- gtp_redsource also covers Void (477) that has absorbed the Red Key (580),
+  -- which no longer occupies an active slot.
   local function has_red_key_source()
-    for index = 0, game:GetNumPlayers() - 1 do
-      local player = Isaac.GetPlayer(index)
-      if player and player:Exists() then
-        for slot = 0, 3 do
-          if player:GetActiveItem(slot) == CollectibleType.COLLECTIBLE_RED_KEY then
-            return true
-          end
-          local card = player:GetCard(slot)
-          if card == Card.CARD_CRACKED_KEY or card == Card.CARD_SOUL_CAIN then
-            return true
-          end
-        end
-      end
-    end
-    return false
+    return redsource.has_source()
   end
 
   local function remove_markers()
