@@ -27,7 +27,7 @@
 
   **启用本功能时请禁用 Lazy Delver 本体**，否则两套标记会同时画出来。
 
-  另外两处只覆盖「访问器」、不动上游文件（详见文件里 state.is_lost_cursed 处的注释）：
+  另外三处只覆盖「访问器」、不动上游文件（详见文件里 state.is_lost_cursed 处的注释）：
     * 迷失诅咒状态改成**实时读取**（上游是换房才刷新的缓存，药丸/道具当场给诅咒时会滞后）；
     * 「因迷失诅咒而隐藏」这一条**跟随 MinimapAPI 的 Display During Curse（OverrideLost）**：
       MinimapAPI 强制显示地图时，隐藏房候选与地图边界高亮照常绘制 —— 与「迷失诅咒下能不能传送」
@@ -43,6 +43,7 @@ local map = require("scripts.delver.map")
 local room = require("scripts.delver.room")
 local render = require("scripts.delver.render")
 local visibility = require("scripts.gtp_delvervisibility")
+local redsource = require("scripts.gtp_redsource")
 
 -- 本项目对这个访问器有两处覆盖（都只改 gtp_delver 这一层，不动上游移植文件 delver/state.lua；
 -- 它的消费点只有两处「要不要画」的闸门：delver/render.lua 的 M.render 与 gtp_mapbounds.lua 的 render）：
@@ -56,6 +57,10 @@ local visibility = require("scripts.gtp_delvervisibility")
 --     （其 MCM 里的 "Display During Curse"）为真时地图照常显示 ⇒ 隐藏房候选标记与地图边界高亮
 --     也不再藏。判据统一走 gt:curse_map_visible()（读的是同一份 MinimapAPI 配置）。
 --
+--  ③（2026-10-20，用户报 bug）虚空（477）吸收红钥匙（580）后，红钥匙不再占用主动槽，
+--     但虚空获得其使用效果（游戏仍画红门框、仍能开红房）。上游 can_see_red 只读主动槽缓存，
+--     会把这种情况当成「没有红钥匙」→ 红色究极隐藏房候选与门框一起消失。补上实时来源判定。
+--
 -- ⚠️ 因此本函数的**语义**已从「本层是否带迷失诅咒」收窄为「本层地图是否**因为迷失诅咒**而隐藏」
 --    （诅咒生效 **且** MinimapAPI 没有强制显示）。改名会牵动上游 delver 文件，故沿用原名，
 --    在这里说明。目前没有第三个消费点依赖它的「纯诅咒」语义。
@@ -66,6 +71,13 @@ state.is_lost_cursed = function()
   local level = Game():GetLevel()
   return level ~= nil
     and (level:GetCurses() & LevelCurse.CURSE_OF_THE_LOST) ~= 0
+end
+
+-- ③ 只覆盖访问器：缓存判定照旧，再并上实时来源（红钥匙主动槽 / 卡牌 / 虚空吸收态）。
+-- 消费点是 delver/render.lua 的星号闸门与 gtp_secretoutlines.lua 的究极房门框闸门。
+local base_can_see_red = state.can_see_red
+state.can_see_red = function()
+  return base_can_see_red() or redsource.has_source()
 end
 
 local function enabled()
