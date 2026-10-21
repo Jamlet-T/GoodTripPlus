@@ -8,13 +8,14 @@ return function(gt)
   function gt:adjacent_unlock_pending() return pending~=nil end
   function gt:clear_adjacent_unlock() pending=nil end
   function gt:adjacent_unlock_state(gid)
-    if not gt:get_config_bool('AutoUnlockAdjacent',false) then return nil end
+    if not gt:get_config_bool('AutoUnlockAdjacent',false) then return nil,'disabled' end
     local target=gt:grid_room_desc(gid)
     local st=gt:travel_cur_state()
     local p=st.player
     if not target or not st.cur or not gt:room_is_clear(st.cur) or not st.room or
-      not p or not p:Exists() or p:IsDead() then return nil end
-    if target.ListIndex==st.cur.ListIndex then return nil end
+      not p or not p:Exists() or p:IsDead() then return nil,'invalid_context' end
+    if target.ListIndex==st.cur.ListIndex then return nil,'same_room' end
+    local reason='no_matching_door'
     for slot=0,7 do
       local door=st.room:GetDoor(slot)
       if door and type(door.TargetRoomIndex)=='number' and door.TargetRoomIndex>=0 then
@@ -23,14 +24,25 @@ return function(gt)
           local variant=door.Desc and door.Desc.Variant
           local cost=Policy.cost({variant=variant,open=door:IsOpen(),locked=door:IsLocked(),
             arcade=door.IsTargetRoomArcade and door:IsTargetRoomArcade(),
-            pay_to_play=p.HasCollectible and p:HasCollectible(240)})
+            pay_to_play=p.HasCollectible and p:HasCollectible(CollectibleType.COLLECTIBLE_PAY_TO_PLAY)})
           if cost then
             return {door=door,slot=slot,cost=cost,affordable=Policy.affordable(cost,
               {keys=p:GetNumKeys(),coins=p:GetNumCoins(),golden=p:HasGoldenKey()}),player=p}
           end
+          reason=string.format('unsupported slot=%s variant=%s open=%s locked=%s payToPlay=%s',
+            slot,tostring(variant),tostring(door:IsOpen()),tostring(door:IsLocked()),
+            tostring(p.HasCollectible and p:HasCollectible(CollectibleType.COLLECTIBLE_PAY_TO_PLAY)))
         end
       end
     end
+    return nil,reason
+  end
+  function gt:adjacent_unlock_dump(gid)
+    local s,reason=gt:adjacent_unlock_state(gid)
+    if not s then return '  unlock: '..tostring(reason) end
+    return string.format('  unlock: slot=%s kind=%s need=%s affordable=%s keys=%s coins=%s golden=%s',
+      s.slot,s.cost.kind,s.cost.amount,tostring(s.affordable),s.player:GetNumKeys(),
+      s.player:GetNumCoins(),tostring(s.player:HasGoldenKey()))
   end
   function gt:prepare_adjacent_unlock(gid,source)
     if pending then return 'pending' end

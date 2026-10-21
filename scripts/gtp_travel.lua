@@ -572,7 +572,10 @@ local function auto_log_travel_body(gid, res)
     local t = rd and rd.Data and rd.Data.Type
     if t == nil or t == 1 then return end
   end
+  local unlock = gt.adjacent_unlock_dump and gt:adjacent_unlock_dump(gid) or ""
+  local doors = gt:travel_doors_dump()
   local key = tostring(gid) .. "|" .. tostring(res.rule) .. "|" .. (probe or "")
+    .. "|" .. unlock .. "|" .. doors
   if travel_probe_logged[key] then return end
   travel_probe_logged[key] = true
   local lines = { "[GTPtrip] " .. (res.ok and "allowed" or "rejected") ..
@@ -581,7 +584,8 @@ local function auto_log_travel_body(gid, res)
   lines[#lines + 1] = gt:travel_target_dump(gid)
   lines[#lines + 1] = gt:travel_links_dump(gid)
   if probe then lines[#lines + 1] = probe end
-  lines[#lines + 1] = gt:travel_doors_dump()
+  if unlock ~= "" then lines[#lines + 1] = unlock end
+  lines[#lines + 1] = doors
   Isaac.DebugString(table.concat(lines, "\n"))
 end
 
