@@ -2,7 +2,7 @@ gt = RegisterMod("GoodTripPlus", 1)
 local console_output = require("scripts.gtp_console").write
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.6.12"
+gt.VERSION = "2.6.13"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -1381,9 +1381,12 @@ function gt:get_mouse_screen_pos()
     return Isaac.WorldToScreen(Input.GetMousePosition(true)), Input.GetMousePosition(false)
 end
 function gt:get_cursor_grid_index(pos)
-    if mouse_cursor.mode ~= 'mouse' or not MinimapAPI then
+    if not MinimapAPI then
       return gt:get_pos_grid_index(pos)
     end
+    -- 键盘光标也必须按 MinimapAPI 实际画出的房间命中。迷宫诅咒交换房间时，
+    -- MinimapAPI 会交换 mapRoom.Position；屏幕位置不再等于原 SafeGridIndex 的理论投影。
+    -- 若仍按格子反算，高亮和松键传送都会落到被交换到别处的那间房。
     local mapRoom = mouse_hit(MinimapAPI, pos)
     if not mapRoom then return -99 end
     local rd = mapRoom.Descriptor
@@ -1600,11 +1603,14 @@ function gt:step()
       gt:tab_action()
     else
       if mmp_ctrl and gt:can_open_cursor().ok then
+        -- 松键后 IsLarge() 已切回小图，而 RenderOffset 仍是上一帧的大图坐标。
+        -- 提交按住时命中的目标；try_cursor_travel 会重新验证实时准入和冷却。
+        local selected_gid = mmp_highlight_gid
         mmp_ctrl = false
         mmp_highlight_gid = nil
         mmp_ctrl_fade = CURSOR_FADE_MIN
-        if mouse_cursor.mode == 'keyboard' then
-          gt:try_cursor_travel(gt:get_pos_grid_index(mmp_ctrl_pos))
+        if mouse_cursor.mode == 'keyboard' and selected_gid then
+          gt:try_cursor_travel(selected_gid)
         end
       else
         mmp_ctrl = false
