@@ -1,10 +1,12 @@
 后续更新（基于 2.6.9，待发布）
 
 - 新增“单邻房普通隐藏房候选”设置：可始终显示白金双候选，或在整层房间位置公开且多邻房候选均被有效排除后恢复单邻房的普通隐藏房可能性（默认）。已排除的位置不会重新出现。
+- 修复硫酸、地球、水果蛋糕及数据破解的破墙效果变为激光后，命中假隐藏房门位却不排除候选的问题；直线光束和圆环分别按接触位置检测。
 
 Upcoming changes (after 2.6.9, unreleased)
 
 - Added a one-neighbor Secret Room candidate setting: always show both white/gold possibilities, or restore the regular Secret Room possibility after the full layout is visible and every multi-neighbor candidate has been ruled out (default). Excluded locations stay excluded.
+- Fixed false Secret Room candidates remaining after wall-breaking laser attacks hit their doorway; linear beams and rings now use their actual contact positions.
 
 ---
 
