@@ -26,6 +26,8 @@ local candidate_filter
 local TAB_HOLD_THRESHOLD = 3
 local TAB_HOLD_MAX = 9
 local tab_hold_cnt = -TAB_HOLD_THRESHOLD
+-- 星号贴图的可见像素在枢轴上下 3px；中心至少为 5，整颗星才在屏幕内。
+local MARKER_MIN_CENTER_Y = 5
 
 local marker_sprite = Sprite()
 marker_sprite:Load("gfx/goodtripplus/marker.anm2", true)
@@ -264,6 +266,10 @@ function M.render()
     -- 与传送光标共用同一套投影，保证与 MinimapAPI 的地图逐像素对齐
     project = project or gt:make_rtmap_projector()
     local pos = project(cid)
+    -- 最高可见房间的上方候选会投影到屏幕顶边外；仅挪动该星号的绘制位置。
+    if pos.Y < MARKER_MIN_CENTER_Y then
+      pos = Vector(pos.X, MARKER_MIN_CENTER_Y)
+    end
 
     local kind = clue_reveals and map.truth_type(cid) or cand.secret_type
     local colors = C.MARKER.COLORS[kind]
