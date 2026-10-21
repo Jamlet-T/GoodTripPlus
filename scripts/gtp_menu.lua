@@ -6,10 +6,10 @@ return function(gt)
   if not mcm_registered and ModConfigMenu then
     mcm_registered = true
     local L = get_strings(Options.Language)
-    -- 保留旧存档的 2/3 编号；已删除的值 1（立即出现）和 4（复得游魂修复档）都迁移为 2。
-    if gt.TeleportTransition == 1 or gt.TeleportTransition == 4 then gt.TeleportTransition = 2 end
+    -- 保留 1（立即传送）/ 2（淡入淡出）/ 3（传送动画）编号；已删除的 4（复得游魂修复档）迁移为 2。
+    if gt.TeleportTransition == 4 then gt.TeleportTransition = 2 end
     local saved = ModConfigMenu.Config and ModConfigMenu.Config["GoodTripPlus"]
-    if saved and (saved.TeleportTransition == 1 or saved.TeleportTransition == 4) then
+    if saved and saved.TeleportTransition == 4 then
       saved.TeleportTransition = 2
     end
     local tab = L.tabs.mapping
@@ -184,7 +184,7 @@ return function(gt)
     ModConfigMenu.AddNumberSetting(
       "GoodTripPlus", tab,
       "TeleportTransition",
-      2, 3, 1, 2,
+      1, 3, 1, 2,
       L.transition_name,
       L.transition_values,
       L.transition_desc
@@ -217,7 +217,7 @@ return function(gt)
       )
     end
     -- HighlightCursorRoom 不注册 MCM 菜单项（2026-10-04 用户决定）：默认常开，仅可在 gtconfig.lua 覆盖。
-    -- （FastTransition 原先是同一批，2026-10-05 起已并入上面的「传送过场」两选一项。）
+    -- （FastTransition 原先是同一批，2026-10-05 起已并入上面的「传送过场」三选一项。）
     ModConfigMenu.AddBooleanSetting(
       "GoodTripPlus", tab,
       "ShowMapBounds",

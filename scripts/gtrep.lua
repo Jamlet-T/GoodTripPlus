@@ -2,7 +2,7 @@ gt = RegisterMod("GoodTripPlus", 1)
 local console_output = require("scripts.gtp_console").write
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.6.9"
+gt.VERSION = "2.6.10"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -130,7 +130,7 @@ local room_neighbours = {}
 
 gt.DebugMod = false
 gt.FastRestartEnable = false
--- 传送过场：2 = 淡入淡出(FADE=1) / 3 = 传送动画(TELEPORT=3)；默认 2。
+-- 传送过场：1 = 立即传送(ChangeRoom) / 2 = 淡入淡出(FADE=1) / 3 = 传送动画(TELEPORT=3)；默认 2。
 -- 淡入淡出避开原版 Found Soul(t180) 隐身，但 rewind 只恢复到出发房进房时的状态。
 gt.TeleportTransition = 2
 -- 注：迷失诅咒下是否禁用传送**已不再由我们的配置项控制**（2026-10-05 用户要求）——
@@ -613,16 +613,42 @@ function gt:teleport_to_grid_index(gid)
       tele_door_slot = slot
     end
     local tele_mode = gt:get_teleport_transition()
+    local game = Game()
+    if tele_mode == 1 then
+      -- 立即传送：Game():ChangeRoom 同步换房，没有任何过场（Fixed 的 FastTransition）。
+      -- ChangeRoom 会立即触发 new_room 并消费 tele_pending，落点门槽照常由 land_at_door
+      -- 摆好；但所有代价必须在换房前结算 —— 换房后 crd 已指向目标房，按门路线算的
+      -- 过路费会从目标房起算（= 0）。ChangeRoom 不调用原生沙漏快照保存入口。
+      gt:check_curse_room(gid)
+      level.EnterDoor = -1
+      level.LeaveDoor = -1
+      if level:GetCurses() & LevelCurse.CURSE_OF_MAZE ~= 0 then
+        level:RemoveCurses(LevelCurse.CURSE_OF_MAZE)
+        tele_maze = true
+      end
+      if dist ~= 0 then
+        local speed = player.MoveSpeed
+        local addTime = math.floor((60.0*dist/speed)+0.5)
+        Game().TimeCounter = Game().TimeCounter + addTime
+      end
+      tele_pending = {target=trd.ListIndex, frame=game:GetFrameCount()}
+      tele_cd = 1
+      pcall(function()
+        Isaac.DebugString(string.format('[GTPrewind] instant-dispatch from=%s target=%s cell=%s slot=%s frame=%s time=%s',
+          here,gid,arrive,tele_door_slot,game:GetFrameCount(),game.TimeCounter))
+      end)
+      game:ChangeRoom(arrive, -1)
+      game:GetRoom():PlayMusic()
+      return
+    end
     -- 原生快照入口：TELEPORT=3 在 StartRoomTransition 内同步调用保存辅助函数，
     -- 其他动画（含 FADE=1）在非起始房不调用。
     -- nil player 避免 TELEPORT 的原生出门扣血/窄房退回分支，费用由逐门队列负责。
-    -- 旧立即出现档兼容为短淡出；不叠加/取消过场来伪造无动画保存。
     -- 2 = 淡入淡出：FADE=1，避开 PORTAL_TELEPORT 触发的原版复得游魂隐身。
     -- FADE 在 StartRoomTransition 内不调保存辅助函数；2026-10-20 真机实测 rewind
     -- 能回到出发房，但快照来自引擎的到达保存，恢复到进房状态（会撤销房间内后续变化）。
-    -- 与 ArriveAtDoor 无关。旧值 1 / 已删除的 4 同样落到这一档。
+    -- 与 ArriveAtDoor 无关。已删除的旧值 4 同样落到这一档。
     local anime = tele_mode == 3 and 3 or 1 -- TELEPORT / FADE
-    local game = Game()
     tele_pending = {target=trd.ListIndex, frame=game:GetFrameCount()}
     tele_cd = anime == 3 and 45 or 10
     pcall(function()
@@ -878,16 +904,19 @@ function gt:block_curse_room()
     return gt:get_config_bool("BlockCurseRoom", true) == true
 end
 --
--- 传送过场（落地时的表现）。默认 2：
+-- 传送过场（落地时的表现）。默认 2，值一律夹到 1..3：
+--   1 = 立即传送：Game():ChangeRoom()，没有过场（Fixed 的 FastTransition），冷却 1 帧
 --   2 = 淡入淡出：FADE = 1，避开原版复得游魂隐身；rewind 回到出发房但恢复进房状态
 --   3 = 传送动画：TELEPORT = 3，等同使用传送道具，走原生离开时的快照保存入口
--- 旧值 1（立即出现）与已删除的 4（复得游魂修复档）都读取为 2。
--- 冷却为 10 / 45 帧；另有 pending 锁保证落地前不会覆盖原生过场。
+-- 已删除的 4（复得游魂修复档）读取为 2；越界值按默认 2 处理。
+-- 冷却为 1 / 10 / 45 帧；另有 pending 锁保证落地前不会覆盖原生过场。
 function gt:get_teleport_transition()
     local v = tonumber(gt:get_config_bool("TeleportTransition", 2)) or 2
     v = math.floor(v + 0.5)
-    if v == 3 then return 3 end
-    return 2
+    if v == 4 then return 2 end
+    if v < 1 then return 2 end
+    if v > 3 then return 3 end
+    return v
 end
 --
 -- 迷失诅咒期间 MinimapAPI 还会不会显示地图 = 它的 OverrideLost（MCM 里叫 "Display During Curse"，
