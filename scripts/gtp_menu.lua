@@ -297,6 +297,14 @@ return function(gt)
       L.secret_markers_name,
       L.secret_markers_desc
     )
+    ModConfigMenu.AddNumberSetting(
+      "GoodTripPlus", tab,
+      "SingleNeighborSecretMode",
+      1, 2, 1, 2,
+      L.single_neighbor_secret_name,
+      L.single_neighbor_secret_values,
+      L.single_neighbor_secret_desc
+    )
     ModConfigMenu.AddBooleanSetting(
       "GoodTripPlus", tab,
       "ShowSecretDoorOutlines",

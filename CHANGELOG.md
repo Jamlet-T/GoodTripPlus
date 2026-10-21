@@ -1,3 +1,13 @@
+后续更新（基于 2.6.9，待发布）
+
+- 新增“单邻房普通隐藏房候选”设置：可始终显示白金双候选，或在整层房间位置公开且多邻房候选均被有效排除后恢复单邻房的普通隐藏房可能性（默认）。已排除的位置不会重新出现。
+
+Upcoming changes (after 2.6.9, unreleased)
+
+- Added a one-neighbor Secret Room candidate setting: always show both white/gold possibilities, or restore the regular Secret Room possibility after the full layout is visible and every multi-neighbor candidate has been ruled out (default). Excluded locations stay excluded.
+
+---
+
 GoodTripPlus 2.6.6（待发布）
 自 2.5.0 以来的累计更新
 

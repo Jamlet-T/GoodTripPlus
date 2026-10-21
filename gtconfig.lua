@@ -87,6 +87,9 @@ gt.FairTripTime = false
 -- 隐藏房候选标记（合并自 Lazy Delver）
 gt.ShowSecretMarkers = true
 
+-- 单邻房隐藏房候选：1 = 严谨双候选；2 = 排除所有多邻房候选后再兜底（默认）。
+gt.SingleNeighborSecretMode = 2
+
 -- 隐藏房候选门框：普通／超级／究极隐藏房分别显示白／金／红色门框。
 gt.ShowSecretDoorOutlines = true
 -- 即使迷失诅咒隐藏地图，也继续在房间内显示候选门框。
