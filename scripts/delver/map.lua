@@ -156,7 +156,7 @@ end
 ---@param cid LD_Cid
 ---@return LD_SecretType?
 local classification_cells, classification_visible_lids, classification_full_layout
-local classification_entered_lids
+local classification_entered_lids, classification_one_neighbor_mode
 local function touches_narrow_long_side(dir, shape)
   return ((dir == C.DIR.UP or dir == C.DIR.DOWN)
       and (shape == RoomShape.ROOMSHAPE_IH
@@ -279,10 +279,11 @@ local function fake_type(cid)
     return C.SECRET_TYPE.REGULAR, false, adjacent_sides, known_normal_sides > 0
   end
   if adjacent_sides == 1 and not touches_special_room then
-    if classification_full_layout then
+    if classification_full_layout and classification_one_neighbor_mode ~= 1 then
       return C.SECRET_TYPE.SUPER, false, adjacent_sides, known_normal_sides > 0
     end
-    -- Another room may still be undiscovered, so keep both types possible.
+    -- Before full layout another wall may appear; strict mode also preserves
+    -- the rare regular secret room with only one normal neighbor.
     return C.SECRET_TYPE.REGULAR, true, adjacent_sides, known_normal_sides > 0
   end
 
@@ -375,6 +376,7 @@ function M.exclude_candidate(cid)
   local was_visible = M.candidates[cid] ~= nil
   M.excluded_cids[cid] = true
   M.candidates[cid] = nil
+  knowledge_signature = nil
   return was_visible
 end
 
@@ -463,6 +465,8 @@ function M.update_knowledge(force)
   end
   local full_layout_revealed = treasure_map_owned
     or M.world_card_used or all_original_rooms_visible
+  local one_neighbor_mode = tonumber(gt:get_config_bool('SingleNeighborSecretMode', 2)) == 1
+    and 1 or 2
   if full_layout_revealed then
     -- The map reveals an unentered room's location and shape, but its actual
     -- special type and door layout remain private until entry.
@@ -486,7 +490,7 @@ function M.update_knowledge(force)
   local signature = tostring(state.get_dimension()) .. ":" .. table.concat(known_ids, ",")
     .. "|" .. table.concat(visible_ids, ",") .. "|" .. tostring(regular_found)
     .. "|" .. tostring(super_found) .. "|" .. tostring(all_normal_visited)
-    .. "|" .. tostring(full_layout_revealed)
+    .. "|" .. tostring(full_layout_revealed) .. "|mode:" .. one_neighbor_mode
     .. "|room-icon:" .. table.concat(public_typed_ids, ",")
   if not force and signature == knowledge_signature then return false end
 
@@ -494,6 +498,7 @@ function M.update_knowledge(force)
   M.cells, M.candidates = known_cells, {}
   classification_cells, classification_visible_lids = full_cells, visible_lids
   classification_entered_lids = known_lids
+  classification_one_neighbor_mode = one_neighbor_mode
   -- Only classify a one-sided cell as super-only after the visibility flags
   -- confirm the map reveal has finished propagating to every ordinary tile.
   classification_full_layout = all_original_rooms_visible
@@ -509,23 +514,41 @@ function M.update_knowledge(force)
   classification_cells, classification_visible_lids = nil, nil
   classification_entered_lids = nil
   classification_full_layout = nil
+  classification_one_neighbor_mode = nil
   find_ultra_fakes()
+  -- Door-slot checks only confirm a usable wall. A regular-only location is
+  -- exhausted only when evidence has actually removed the candidate.
+  local regular_only_remaining = false
+  for cid, candidate in pairs(M.candidates) do
+    if candidate.lid == nil and (candidate.adjacent_sides or 0) >= 2
+      and not M.excluded_cids[cid] then
+      regular_only_remaining = true
+      break
+    end
+  end
+  local one_neighbor_fallback = one_neighbor_mode == 2
+    and all_original_rooms_visible and not regular_found
+    and not regular_only_remaining
   for cid, candidate in pairs(M.candidates) do
     if candidate.lid == nil then
-      if candidate.ambiguous then
-        if super_found or (all_normal_visited and not candidate.known_normal_neighbor) then
-          -- A single known wall cannot make a regular secret room; once the
-          -- super-secret room is found, neither candidate type remains here.
+      if candidate.adjacent_sides == 1 then
+        if all_normal_visited and not candidate.known_normal_neighbor then
+          -- A lone untyped footprint cannot become a normal neighbor now.
           M.candidates[cid] = nil
-        elseif regular_found or all_normal_visited then
+        elseif regular_found and super_found then
+          M.candidates[cid] = nil
+        elseif regular_found then
+          candidate.secret_type = C.SECRET_TYPE.SUPER
+          candidate.ambiguous = false
+        elseif one_neighbor_mode == 1 or one_neighbor_fallback then
+          candidate.secret_type = C.SECRET_TYPE.REGULAR
+          candidate.ambiguous = not super_found
+        elseif super_found then
+          M.candidates[cid] = nil
+        elseif all_normal_visited then
           candidate.secret_type = C.SECRET_TYPE.SUPER
           candidate.ambiguous = false
         end
-      elseif candidate.adjacent_sides == 1 and all_normal_visited
-        and not candidate.known_normal_neighbor then
-        -- The last undiscovered ordinary room is gone. A lone public room
-        -- footprint can only be a special room, so it cannot lead to SUPER.
-        M.candidates[cid] = nil
       end
       if M.candidates[cid] and ((regular_found and candidate.secret_type == C.SECRET_TYPE.REGULAR)
         or (super_found and candidate.secret_type == C.SECRET_TYPE.SUPER)
