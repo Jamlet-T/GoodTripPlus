@@ -2,7 +2,7 @@ gt = RegisterMod("GoodTripPlus", 1)
 local console_output = require("scripts.gtp_console").write
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.6.11"
+gt.VERSION = "2.6.12"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -600,14 +600,30 @@ end
 -- 调用方进来之前已经保证 gt:can_travel_to(gid).ok，所以这里只负责「做什么」：
 -- 收代价（过路费）、摘迷宫诅咒、算落点、走过场。
 function gt:teleport_to_grid_index(gid)
-    if tele_pending then return false end
+    if tele_pending or gt._route_transit then return false end
     local dist = gt:travel_time_distance(crd.SafeGridIndex, gid)
     local trd = grid_room[gid]
     local here = Game():GetLevel():GetCurrentRoomDesc().SafeGridIndex
     local there = trd and trd.SafeGridIndex or gid
     tele_door_slot = -1
     local arrive = gid
-    if gt:get_config_bool("ArriveAtDoor", true) then
+    local events,route=gt:plan_door_penalties(here,gid)
+    local routing=gt:prepare_travel_route(route)
+    if routing and routing.failed then
+      if routing.charge_partial and routing.completed>0 then
+        local partial={}
+        for _,event in ipairs(events) do
+          if event.route_index<=routing.completed then partial[#partial+1]=event end
+        end
+        gt:apply_door_penalty_events(partial)
+      end
+      return false
+    end
+    if routing then
+      arrive=routing.arrive
+      if gt:get_config_bool("ArriveAtDoor",true) then tele_door_slot=routing.slot end
+      tele_maze=routing.maze or false
+    elseif gt:get_config_bool("ArriveAtDoor", true) then
       local cell, _, slot = gt:landing_route(here, there)
       arrive = cell or gid
       tele_door_slot = slot
@@ -619,9 +635,9 @@ function gt:teleport_to_grid_index(gid)
       -- ChangeRoom 会立即触发 new_room 并消费 tele_pending，落点门槽照常由 land_at_door
       -- 摆好；但所有代价必须在换房前结算 —— 换房后 crd 已指向目标房，按门路线算的
       -- 过路费会从目标房起算（= 0）。ChangeRoom 不调用原生沙漏快照保存入口。
-      gt:check_curse_room(gid)
+      if events then gt:apply_door_penalty_events(events) else gt:check_curse_room(gid) end
       level.EnterDoor = -1
-      level.LeaveDoor = -1
+      level.LeaveDoor = routing and routing.leave or -1
       if level:GetCurses() & LevelCurse.CURSE_OF_MAZE ~= 0 then
         level:RemoveCurses(LevelCurse.CURSE_OF_MAZE)
         tele_maze = true
@@ -631,7 +647,7 @@ function gt:teleport_to_grid_index(gid)
         local addTime = math.floor((60.0*dist/speed)+0.5)
         Game().TimeCounter = Game().TimeCounter + addTime
       end
-      tele_pending = {target=trd.ListIndex, frame=game:GetFrameCount()}
+      tele_pending = {target=trd.ListIndex, frame=game:GetFrameCount(),floor=gt:level_identity()}
       tele_cd = 1
       pcall(function()
         Isaac.DebugString(string.format('[GTPrewind] instant-dispatch from=%s target=%s cell=%s slot=%s frame=%s time=%s',
@@ -649,17 +665,21 @@ function gt:teleport_to_grid_index(gid)
     -- 能回到出发房，但快照来自引擎的到达保存，恢复到进房状态（会撤销房间内后续变化）。
     -- 与 ArriveAtDoor 无关。已删除的旧值 4 同样落到这一档。
     local anime = tele_mode == 3 and 3 or 1 -- TELEPORT / FADE
-    tele_pending = {target=trd.ListIndex, frame=game:GetFrameCount()}
+    tele_pending = {target=trd.ListIndex, frame=game:GetFrameCount(),floor=gt:level_identity()}
     tele_cd = anime == 3 and 45 or 10
     pcall(function()
       Isaac.DebugString(string.format('[GTPrewind] native-dispatch from=%s target=%s cell=%s anim=%s slot=%s frame=%s time=%s',
         here,gid,arrive,anime,tele_door_slot,game:GetFrameCount(),game.TimeCounter))
     end)
+    -- 明确的相邻真实门槽只用于本次原生过门；远程直达仍使用 warp。
+    if routing then level.EnterDoor,level.LeaveDoor=-1,routing.leave end
     game:StartRoomTransition(arrive, Direction.NO_DIRECTION, anime, nil, -1)
     -- 所有执行代价必须发生在快照之后，rewind 才能撤销这一趟。
-    gt:check_curse_room(gid)
+    -- 已中转时沙漏可能回到中转房；费用始终取最初规划的一份，不再从中转房重算。
+    if events then gt:apply_door_penalty_events(events) else gt:check_curse_room(gid) end
     level.EnterDoor = -1
-    level.LeaveDoor = -1
+    -- 原生过场异步换房前仍需读取真实出门槽；到达 new_room 后才释放。
+    level.LeaveDoor = routing and routing.leave or -1
     if level:GetCurses() & LevelCurse.CURSE_OF_MAZE ~= 0 then
       level:RemoveCurses(LevelCurse.CURSE_OF_MAZE)
       tele_maze = true
@@ -1445,7 +1465,7 @@ end
 -- 键盘松开地图键与鼠标点击共用准入、冷却、诊断和隐藏/诅咒房前室准备。
 -- 来源：原 step() 松键传送分支。
 function gt:try_cursor_travel(gid, source)
-    if tele_pending then return false end
+    if tele_pending or gt._route_transit then return false end
     if gt.adjacent_unlock_pending and gt:adjacent_unlock_pending() then return false end
     if gt:door_penalty_pending() then return false end
     if source == 'mouse' and not gt:get_config_bool('MouseTeleport', true) then return false end
@@ -1471,8 +1491,7 @@ function gt:try_cursor_travel(gid, source)
     elseif crd.Data.Type == 10 then
       gt:pre_secret_curse_room()
     end
-    gt:teleport_to_grid_index(gid)
-    return true
+    return gt:teleport_to_grid_index(gid)~=false
 end
 --
 function gt:tab_action()
@@ -1615,9 +1634,11 @@ function gt:new_room()
     stage = level:GetStage()
     if tele_pending and (Game():GetFrameCount() < tele_pending.frame
         or crd.ListIndex ~= tele_pending.target) then
-      -- rewind / 非预期换房不能消费传送的落点或给回滚房补诅咒。
-      tele_door_slot, tele_maze = -1, false
+      -- rewind / 非预期换房不能消费旧落点；同层恢复为中转暂时摘下的迷宫诅咒。
+      tele_door_slot = -1
+      tele_maze = tele_maze and tele_pending.floor==gt:level_identity()
     end
+    if tele_pending then level.LeaveDoor=-1 end
     tele_pending = nil
     gt:land_at_door()
     if tele_maze then
@@ -1693,6 +1714,7 @@ require("scripts.gtp_menu")(gt)
 gt:register_menu() -- MCM is available at mod load; the game-start callback retries if it loads later.
 require("scripts.gtp_doorpenalty_runtime")(gt)
 require("scripts.gtp_unlock_runtime")(gt)
+require("scripts.gtp_route_runtime")(gt,function() return grid_room end)
 gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
   gt:prep()
   gt:new_room()

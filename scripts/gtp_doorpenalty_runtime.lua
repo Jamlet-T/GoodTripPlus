@@ -66,9 +66,12 @@ return function(gt)
     local result,seen={},{}
     -- 一对房间可能有多扇门：先逐槽枚举，不能只读房间对的单一门槽。
     for slot,e in pairs(gt:door_evidence_from(a)) do
-      if link[a] and link[a][e.to]~=nil then
+      if link[a] and link[a][e.to]~=nil
+          and ((e.variant or -1)<1 or (e.variant or -1)>7 or e.open==true) then
         result[#result+1]=edge_for(a,e.to,slot); seen[e.to]=true
       end
+      -- 同一房间对存在多扇门时，关闭门的快照不能再经房间对兜底变成通路。
+      seen[e.to]=true
     end
     for b,slot in pairs(link[a] or {}) do
       if not seen[b] then result[#result+1]=edge_for(a,b,type(slot)=='number' and slot or -1); seen[b]=true end
@@ -86,6 +89,9 @@ return function(gt)
     return result
   end
 
+  -- 规划一次门图路线，返回 (门事件, 路线)。路线同时是落点依据：执行层用它的
+  -- 最后一条边决定入场门槽与过场出发房，费用与落点不再各算一套。
+  -- 无路线时 route 为 nil（调用方自行回退），events 仍按诅咒房兜底。
   function gt:plan_door_penalties(from,to)
     local p=Isaac.GetPlayer(0)
     owner=p -- 仅规划时使用当前角色；路线优先少惩罚，再比较距离。
@@ -96,33 +102,44 @@ return function(gt)
     local route=Policy.route(from,to,neighbors,descriptor,function(edge)
       return #gt:door_penalties(edge,actor)
     end, function(rd) return gt:room_is_clear(rd) end)
-    if not route then
+    local fallback=not route
+    if fallback then
       route={}
       local a,b=descriptor(from),descriptor(to)
       if a and a.Data and a.Data.Type==10 then route[#route+1]=edge_for(from,to,-1) end
       if b and b.Data and b.Data.Type==10 and not (a and a.Data and a.Data.Type==10) then
         route[#route+1]=edge_for(from,to,-1)
       end
+      if #route==0 then route=nil end
     end
     local events={}
-    for _,edge in ipairs(route) do
+    for index,edge in ipairs(route or {}) do
       -- 保留飞行豁免的门事件，执行时再判断角色状态；避免过程中失去飞行漏扣。
       for _,rule in ipairs(rules) do
         local context=rule.id=='curse_door' and {flying=false} or actor
-        for _,event in ipairs(rule.test(edge,context) or {}) do events[#events+1]=event end
+        for _,event in ipairs(rule.test(edge,context) or {}) do
+          event.route_index=index
+          events[#events+1]=event
+        end
       end
       log(string.format('edge from=%s to=%s slot=%s source=%s spikes=%s types=%s/%s flying=%s',
         edge.from,edge.to,tostring(edge.slot),edge.source,tostring(edge.spikes),
         edge.current_type,edge.target_type,tostring(actor.flying)))
     end
-    return events
+    -- 兜底路线只用于费用，不能拿来当落点路线（它未必是真实通路）。
+    return events, (not fallback) and route or nil
+  end
+  -- 费用按规划结果结算；与 plan_door_penalties 分离，执行层可以在换房/过场前
+  -- 先规划、斩断路线，随后再按快照时序结算。
+  function gt:apply_door_penalty_events(events)
+    assert(not executor:pending(),'previous door penalties still pending')
+    identity=gt:level_identity()
+    executor:add(events or {})
+    executor:step(Game():GetFrameCount(),function() return true end)
   end
   function gt:apply_travel_door_penalties(from,to)
-    assert(not executor:pending(),'previous door penalties still pending')
     local events=gt:plan_door_penalties(from,to)
-    identity=gt:level_identity()
-    executor:add(events)
-    executor:step(Game():GetFrameCount(),function() return true end)
+    gt:apply_door_penalty_events(events)
   end
   function gt:update_door_penalties()
     if not executor:pending() or Game():IsPaused() then return end
