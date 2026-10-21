@@ -2,7 +2,7 @@ gt = RegisterMod("GoodTripPlus", 1)
 local console_output = require("scripts.gtp_console").write
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.6.13"
+gt.VERSION = "2.6.14"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -109,22 +109,6 @@ require("scripts.gtp_doors")(gt, {
     curse_bare_outside, curse_bare_inside, secret_pre_room_id = state.bare_out, state.bare_in, state.pre
   end,
 })
---each room shape's cell offsets beyond the anchor's four direct neighbours
---（floor.lua 的 neighlut 原样；下标 = RoomDescriptor.Data.Shape）
-local neighlut = {
-    {-1, 1, -13, 13},
-    {-1, 1},
-    {-13, 13},
-    {-1, 1, -1+13, 1+13, -13, 13+13},
-    {-13, 13+13},
-    {-1, 2, -13, 13, -13+1, 13+1},
-    {-1, 2},
-    {-1, 2, -1+13, 2+13, -13, 13+13, -13+1, 13+13+1},
-    {-1, 1, -13, -2+13, 1+13, 13+13-1, 13+13},
-    {-13, -1, 1, -1+13, 2+13, 13+13, 13+13+1},
-    {-13, -13+1, -1, 2, 13, 13+2, 13+13+1},
-    {-13, -13+1, -1, 2, 13-1, 13+1, 13+13},
-}
 --每个房间的邻居列表（floor.lua get_room_neighbours；get_grid_room 之后重建）
 local room_neighbours = {}
 
@@ -301,39 +285,15 @@ end
 --may I go there: the predicates a trip is checked against, the reachable set,
 --the fair distance, the door a walk would have come in by.
 function gt:check_neigh_connected(trd, cond)
-    local tid = trd.SafeGridIndex
     if (trd.DisplayFlags & 1) ~= 0 then
-      local function check_grid(off)
-        local id = tid + off
-        if id < 0 or id > 168 then
-          return false
-        end
-        --column guard: a sideways offset must not wrap to the neighbouring row
-        local dcol = ((off % 13) + 6) % 13 - 6
-        if (tid % 13) + dcol ~= id % 13 then
-          return false
-        end
+      -- Use the same actual-cell adjacency as reachability. The old Fixed
+      -- Void branch required two eligible directions for a 2x2 boss room;
+      -- log evidence (79 -> 92) shows one known open door must suffice.
+      -- Door state and reachability remain the caller's predicates.
+      for _, id in ipairs(gt:travel_room_neighbors(trd.SafeGridIndex)) do
         local rd = grid_room[id]
-        return rd ~= nil and cond(rd)
-      end
-      local near_room = {check_grid(-13), check_grid(13), check_grid(-1), check_grid(1)}
-      if stage == 12 and trd.Data.Type == 5 and trd.Data.Shape > 3 then
-        --void bossrooms--type4=1x2/type6=2x1/type8=2x2=Delirium
-        if (near_room[1] and near_room[4])
-          or (near_room[2] and near_room[3])
-          or (trd.Data.Shape == 6 and (near_room[1] or near_room[4]))
-          or (trd.Data.Shape == 4 and (near_room[2] or near_room[3]))
-        then
+        if rd and cond(rd) then
           return true
-        end
-      else
-        if near_room[1] or near_room[4] or near_room[2] or near_room[3] then
-          return true
-        end
-        for _, off in ipairs(neighlut[trd.Data.Shape]) do
-            if check_grid(off) then
-                return true
-            end
         end
       end
     end
