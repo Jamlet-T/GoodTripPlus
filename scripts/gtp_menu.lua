@@ -17,6 +17,12 @@ return function(gt)
       tab = name
       ModConfigMenu.AddTitle("GoodTripPlus", tab, L.title)
     end
+    -- Explicit value labels keep native MCM settings and minimap proxies
+    -- consistent without changing their storage or callback behavior.
+    local function add_boolean_setting(key, default, name, info)
+      ModConfigMenu.AddBooleanSetting("GoodTripPlus", tab, key, default,
+        name, L.boolean_values, info)
+    end
     begin_tab(L.tabs.mapping)
     -- ⚠️ 菜单顺序 = 下面这些注册调用的书写顺序（MCM 无脑 append）。
     -- 全部 MCM 项集中在这里按功能子页注册，子页内保留原有相对顺序。
@@ -102,15 +108,13 @@ return function(gt)
       L.cursor_speed_name,
       L.cursor_speed_desc
     )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", tab,
+    add_boolean_setting(
       "CursorGridStep",
       false,
       L.cursor_grid_step_name,
       L.cursor_grid_step_desc
     )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", tab,
+    add_boolean_setting(
       "MouseTeleport",
       true,
       L.mouse_teleport_name,
@@ -132,50 +136,43 @@ return function(gt)
     -- 把诅咒房排除）。早期移植时把这一条连开关一起删了，导致已探索过的诅咒房能被直接传送进去
     -- （2026-10-05 用户报的 bug）。消费点：scripts/gtp_curseblock.lua（拦住目标）+
     -- 本文件 check_neigh_connected 的白名单（放行类型 10）。
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", tab,
+    add_boolean_setting(
       "BlockCurseRoom",
       true,
       L.block_curse_name,
       L.block_curse_desc
     )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", tab,
+    add_boolean_setting(
       "AllowDevilAngelDoorTeleport",
       false,
       L.allow_devil_angel_name,
       L.allow_devil_angel_desc
     )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", tab,
+    add_boolean_setting(
       "AllowRushHushDoorTeleport",
       false,
       L.allow_rush_hush_name,
       L.allow_rush_hush_desc
     )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", tab,
+    add_boolean_setting(
       "FairTripPath",
       true,
       L.fairpath_name,
       L.fairpath_desc
     )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", tab,
+    add_boolean_setting(
       "AutoUnlockAdjacent",
       false,
       L.auto_unlock_name,
       L.auto_unlock_desc
     )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", tab,
+    add_boolean_setting(
       "ArriveAtDoor",
       true,
       L.arrivedoor_name,
       L.arrivedoor_desc
     )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", tab,
+    add_boolean_setting(
       "FairTripTime",
       false,
       L.fairtime_name,
@@ -207,7 +204,7 @@ return function(gt)
           end,
           Display = function()
             return L.curse_display_name .. ": " ..
-              (MinimapAPI.Config.OverrideLost == true and "ON" or "OFF")
+              L.boolean_values[MinimapAPI.Config.OverrideLost == true]
           end,
           OnChange = function(newVal)
             MinimapAPI.Config.OverrideLost = newVal and true or false
@@ -218,8 +215,7 @@ return function(gt)
     end
     -- HighlightCursorRoom 不注册 MCM 菜单项（2026-10-04 用户决定）：默认常开，仅可在 gtconfig.lua 覆盖。
     -- （FastTransition 原先是同一批，2026-10-05 起已并入上面的「传送过场」三选一项。）
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", tab,
+    add_boolean_setting(
       "ShowMapBounds",
       true,
       L.map_bounds_name,
@@ -244,7 +240,7 @@ return function(gt)
           end,
           Display = function()
             return L.highlight_start_name .. ": " ..
-              (MinimapAPI.Config.HighlightStartRoom == true and "ON" or "OFF")
+              L.boolean_values[MinimapAPI.Config.HighlightStartRoom == true]
           end,
           OnChange = function(newVal)
             MinimapAPI.Config.HighlightStartRoom = newVal and true or false
@@ -282,30 +278,26 @@ return function(gt)
         }
       )
     end
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", tab,
+    add_boolean_setting(
       "CombatKeepLargeMap",
       false,
       L.combat_keep_large_name,
       L.combat_keep_large_desc
     )
     begin_tab(L.tabs.markers)
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", tab,
+    add_boolean_setting(
       "ShowSecretMarkers",
       true,
       L.secret_markers_name,
       L.secret_markers_desc
     )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", tab,
+    add_boolean_setting(
       "ShowSingleSecretCandidates",
       false,
       L.single_secret_name,
       L.single_secret_desc
     )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", tab,
+    add_boolean_setting(
       "ShowSecretDoorOutlines",
       true,
       L.secret_outlines_name,
@@ -318,29 +310,25 @@ return function(gt)
       L.secret_outlines_opacity_name,
       L.secret_outlines_opacity_desc
     )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", tab,
+    add_boolean_setting(
       "DoorOutlinesDuringCurse",
       true,
       L.outlines_curse_name,
       L.outlines_curse_desc
     )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", tab,
+    add_boolean_setting(
       "FoolsSkullRoom",
       true,
       L.fools_skull_name,
       L.fools_skull_desc
     )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", tab,
+    add_boolean_setting(
       "MineButtonRoom",
       true,
       L.minebutton_name,
       L.minebutton_desc
     )
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", tab,
+    add_boolean_setting(
       "DeliriumRoom",
       false,
       L.delirium_name,
@@ -348,8 +336,7 @@ return function(gt)
     )
     begin_tab(L.tabs.debug)
     -- 调试模式（诊断用，默认关）：读配置的 gt:is_debug() 每帧实时取，勾掉立刻生效。
-    ModConfigMenu.AddBooleanSetting(
-      "GoodTripPlus", tab,
+    add_boolean_setting(
       "DebugMod",
       false,
       L.debug_name,

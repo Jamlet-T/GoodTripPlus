@@ -4,6 +4,7 @@
 -- English.
 local GT_STRINGS = {
   en = {
+    boolean_values = {[true] = "ON", [false] = "OFF"},
     tabs = {mapping = "Mapping", cursor = "Cursor", travel = "Teleport", display = "Map Display", markers = "Room Markers", debug = "Debug"},
     title = "GoodTripPlus",
     cursor_speed_name = "Cursor Speed",
@@ -74,6 +75,7 @@ local GT_STRINGS = {
     debug_desc = "Diagnostics only; never changes teleporting. Default: off",
   },
   zh_hans = {
+    boolean_values = {[true] = "开启", [false] = "关闭"},
     tabs = {mapping = "映射", cursor = "光标", travel = "传送设置", display = "地图显示", markers = "房间标记", debug = "调试"},
     title = "GoodTripPlus",
     cursor_speed_name = "光标速度",
