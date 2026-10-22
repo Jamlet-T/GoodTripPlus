@@ -3,8 +3,13 @@
 return function(gt)
   local enabled, started, trip, serial = true, false, nil, 0
   local last_pocket = nil -- 仅记录 API 事件，不能将它当作引擎内部保存标记
+  -- 只在调试模式开启时记录：关闭时不写 [GTPrewind]，并丢弃进行中的行程与用卡记录。
+  local function wanted()
+    return gt.is_debug ~= nil and gt:is_debug() == true
+  end
   local function probe(fn)
     if not enabled then return end
+    if not wanted() then trip, last_pocket = nil, nil; return end
     local ok = pcall(fn)
     if not ok then
       enabled = false

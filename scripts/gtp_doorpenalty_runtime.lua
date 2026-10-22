@@ -4,7 +4,11 @@ return function(gt)
   local owner,identity
   local handlers={}
   local rules={{id='curse_door',test=Policy.penalties}}
-  local function log(line) pcall(function() Isaac.DebugString('[GTPtoll] '..line) end) end
+  -- 过路费取证只在调试模式开启时写 [GTPtoll]；规则与伤害照常执行。
+  local function log(line)
+    if not (gt.is_debug and gt:is_debug()) then return end
+    pcall(function() Isaac.DebugString('[GTPtoll] '..line) end)
+  end
   handlers.curse_damage=function(event)
     local p=owner
     -- 在执行时重新检查飞行（受伤可能使角色/道具状态改变）。

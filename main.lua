@@ -56,5 +56,5 @@ require("scripts.gtp_mapbounds")
 require("scripts.gtp_delirium")
 require("scripts.gtp_minebuttons")
 require("scripts.gtp_mapmemory")
--- 两个 A/B 版本共用计时口径；放在功能装配后，包含现有传送包装及换房回调。
+-- 计时口径只在调试模式开启时记录；放在功能装配后，包含现有传送包装及换房回调。
 require("scripts.gtp_triptiming")(gt)

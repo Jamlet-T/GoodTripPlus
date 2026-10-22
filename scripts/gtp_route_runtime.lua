@@ -1,7 +1,11 @@
 -- 两端中转的游戏适配。首尾使用真实门；安全的中段远程桥接，其余逐门兜底。
+-- 中转取证只在调试模式开启时写 [GTProute]；换房与返回值不受影响。
 local Route=require('scripts.gtp_route')
 return function(gt,cells)
-  local function trace(message) pcall(function() Isaac.DebugString('[GTProute] '..message) end) end
+  local function trace(message)
+    if not (gt.is_debug and gt:is_debug()) then return end
+    pcall(function() Isaac.DebugString('[GTProute] '..message) end)
+  end
   function gt:prepare_travel_route(route)
     if not route or #route==0 then return nil end
     local game=Game()

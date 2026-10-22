@@ -90,11 +90,14 @@ function gt:sweep_doors()
               or old.current_type~=evidence.current_type or old.target_type~=evidence.target_type
               or old.open~=evidence.open or old.locked~=evidence.locked then
             door_state.dirty=true
-            pcall(function()
-              Isaac.DebugString(string.format('[GTPdoor] dim=%s from=%s to=%s slot=%s variant=%s varData=%s spikes=%s types=%s/%s sprite=%s',
-                dim,here,there,i,evidence.variant,evidence.var_data,tostring(evidence.spikes),
-                evidence.current_type,evidence.target_type,evidence.sprite))
-            end)
+            -- 门证据只在调试模式开启时写 [GTPdoor]；记录与存档照常。
+            if gt.is_debug and gt:is_debug() then
+              pcall(function()
+                Isaac.DebugString(string.format('[GTPdoor] dim=%s from=%s to=%s slot=%s variant=%s varData=%s spikes=%s types=%s/%s sprite=%s',
+                  dim,here,there,i,evidence.variant,evidence.var_data,tostring(evidence.spikes),
+                  evidence.current_type,evidence.target_type,evidence.sprite))
+              end)
+            end
           end
           --curse-room spikes are read off the door itself: Flat File strips them
           --once and for good, so the trinket in hand says nothing about this door

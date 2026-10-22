@@ -1,8 +1,14 @@
 -- 2.6.19/2.6.20 共用的观测探针：真实毫秒，不写游戏状态或控制过场。
+-- 只在调试模式（gt:is_debug()，MCM 勾选实时生效）开启时记录：关闭时不读时钟、不写
+-- [GTPperf]，并清空进行中的测量；原传送函数始终照原样执行。
 return function(gt)
   local enabled,active,serial=true,nil,0
+  local function wanted()
+    return gt.is_debug ~= nil and gt:is_debug() == true
+  end
   local function probe(fn)
     if not enabled then return end
+    if not wanted() then active=nil; return end
     local ok=pcall(fn)
     if not ok then
       enabled,active=false,nil

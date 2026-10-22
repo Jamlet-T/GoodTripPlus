@@ -2,7 +2,7 @@ gt = RegisterMod("GoodTripPlus", 1)
 local console_output = require("scripts.gtp_console").write
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.6.20"
+gt.VERSION = "2.6.21"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -610,10 +610,12 @@ function gt:teleport_to_grid_index(gid)
       end
       tele_pending = {target=trd.ListIndex, frame=game:GetFrameCount(),floor=gt:level_identity()}
       tele_cd = 1
-      pcall(function()
-        Isaac.DebugString(string.format('[GTPrewind] instant-dispatch from=%s target=%s cell=%s slot=%s frame=%s time=%s',
-          here,gid,arrive,tele_door_slot,game:GetFrameCount(),game.TimeCounter))
-      end)
+      if gt:is_debug() then
+        pcall(function()
+          Isaac.DebugString(string.format('[GTPrewind] instant-dispatch from=%s target=%s cell=%s slot=%s frame=%s time=%s',
+            here,gid,arrive,tele_door_slot,game:GetFrameCount(),game.TimeCounter))
+        end)
+      end
       game:ChangeRoom(arrive, -1)
       game:GetRoom():PlayMusic()
       return
@@ -628,10 +630,12 @@ function gt:teleport_to_grid_index(gid)
     local anime = tele_mode == 3 and 3 or 1 -- TELEPORT / FADE
     tele_pending = {target=trd.ListIndex, frame=game:GetFrameCount(),floor=gt:level_identity()}
     tele_cd = anime == 3 and 45 or 10
-    pcall(function()
-      Isaac.DebugString(string.format('[GTPrewind] native-dispatch from=%s target=%s cell=%s anim=%s slot=%s frame=%s time=%s',
-        here,gid,arrive,anime,tele_door_slot,game:GetFrameCount(),game.TimeCounter))
-    end)
+    if gt:is_debug() then
+      pcall(function()
+        Isaac.DebugString(string.format('[GTPrewind] native-dispatch from=%s target=%s cell=%s anim=%s slot=%s frame=%s time=%s',
+          here,gid,arrive,anime,tele_door_slot,game:GetFrameCount(),game.TimeCounter))
+      end)
+    end
     -- 明确的相邻真实门槽只用于本次原生过门；远程直达仍使用 warp。
     if routing then level.EnterDoor,level.LeaveDoor=-1,routing.leave end
     game:StartRoomTransition(arrive, Direction.NO_DIRECTION, anime, nil, -1)
