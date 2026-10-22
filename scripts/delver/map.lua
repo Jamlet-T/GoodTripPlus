@@ -325,9 +325,11 @@ function M.update_knowledge(force)
   local known_cells, known_lids, known_ids = {}, {}, {}
   local visible_lids, visible_ids = {}, {}
   local public_typed_lids, public_typed_ids = {}, {}
-  local regular_found = false
-  local super_found = false
-  local ultra_found = false
+  -- Count generated rooms, not currently held items: Fragmented Card can add
+  -- another REGULAR room at floor entry, then be dropped before discovery.
+  -- Only use full descriptors for completion; candidate geometry stays based
+  -- on explored/public map information below.
+  local secret_counts, discovered_counts = {}, {}
   local all_original_rooms_visible = true
   for lid, room in pairs(M.rooms) do
     if lid == room.lid then
@@ -342,6 +344,13 @@ function M.update_knowledge(force)
         or room.type == C.SECRET_TYPE.SUPER
         or room.type == C.SECRET_TYPE.ULTRA
       local revealed = is_secret and flags ~= 0
+      if is_secret and not room.is_red and desc
+        and (state.get_dimension() ~= C.DIMENSION.MIRROR or room.mirror_lid) then
+        secret_counts[room.type] = (secret_counts[room.type] or 0) + 1
+        if entered or revealed then
+          discovered_counts[room.type] = (discovered_counts[room.type] or 0) + 1
+        end
+      end
       -- A visible room icon identifies a boss or special room before entry.
       -- A plain map box reveals only its footprint, not its actual type.
       local category = C.CELL.ROOM_TYPE_TO_CATEGORY[room.type]
@@ -360,9 +369,6 @@ function M.update_knowledge(force)
       if entered or revealed then
         known_lids[lid] = true
         known_ids[#known_ids + 1] = lid
-        if room.type == C.SECRET_TYPE.REGULAR then regular_found = true end
-        if room.type == C.SECRET_TYPE.SUPER then super_found = true end
-        if room.type == C.SECRET_TYPE.ULTRA then ultra_found = true end
         for _, cid in ipairs(room.cids) do known_cells[cid] = M.cells[cid] end
       elseif public_type then
         public_typed_lids[lid] = true
@@ -371,6 +377,13 @@ function M.update_knowledge(force)
       end
     end
   end
+  local function all_found(kind)
+    return (secret_counts[kind] or 0) > 0
+      and discovered_counts[kind] == secret_counts[kind]
+  end
+  local regular_found = all_found(C.SECRET_TYPE.REGULAR)
+  local super_found = all_found(C.SECRET_TYPE.SUPER)
+  local ultra_found = all_found(C.SECRET_TYPE.ULTRA)
   local treasure_map_owned = false
   local game = Game()
   for player_index = 0, game:GetNumPlayers() - 1 do
@@ -406,6 +419,7 @@ function M.update_knowledge(force)
   local signature = tostring(state.get_dimension()) .. ":" .. table.concat(known_ids, ",")
     .. "|" .. table.concat(visible_ids, ",") .. "|" .. tostring(regular_found)
     .. "|" .. tostring(super_found)
+    .. "|" .. tostring(ultra_found)
     .. "|" .. tostring(full_layout_revealed)
     .. "|room-icon:" .. table.concat(public_typed_ids, ",")
   if not force and signature == knowledge_signature then return false end
