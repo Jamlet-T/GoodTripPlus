@@ -1,6 +1,30 @@
 -- 精确门槽几何。只读取描述符及占格，不访问游戏 API。
 local M={}
 local steps={[0]=-1,[1]=-13,[2]=1,[3]=13}
+-- 中段远程桥接不指定入口。隐藏房可能主动炸开选中入口；
+-- 相邻占格还可能让引擎修改两房之间的门。只跳过无此风险的中段。
+function M.bridge_allowed(src,dst,cells)
+  local function known_nonsecret(rd)
+    local kind=rd and rd.Data and rd.Data.Type
+    return type(kind)=='number' and kind~=7 and kind~=8 and kind~=29
+  end
+  if not known_nonsecret(src) or not known_nonsecret(dst) or src.ListIndex==dst.ListIndex then return false end
+  local found_src,found_dst=false,false
+  for cell,rd in pairs(cells) do
+    if rd.ListIndex==dst.ListIndex then found_dst=true end
+    if rd.ListIndex==src.ListIndex then
+      found_src=true
+      for wall=0,3 do
+        local adjacent=cell+steps[wall]
+        if wall%2==1 or cell//13==adjacent//13 then
+          local other=cells[adjacent]
+          if other and other.ListIndex==dst.ListIndex then return false end
+        end
+      end
+    end
+  end
+  return found_src and found_dst
+end
 function M.wall(from,to)
   local dx,dy=from%13-to%13,from//13-to//13
   if math.abs(dx)>math.abs(dy) then return dx>0 and 2 or 0 end

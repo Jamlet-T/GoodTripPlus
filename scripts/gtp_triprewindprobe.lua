@@ -16,14 +16,22 @@ return function(gt)
     local level = game:GetLevel()
     local desc = level:GetCurrentRoomDesc()
     return level:GetCurrentRoomIndex(), string.format(
-      'room=%s safe=%s lid=%s dim=%s frame=%s time=%s enter=%s leave=%s',
+      'room=%s safe=%s lid=%s dim=%s frame=%s time=%s enter=%s leave=%s type=%s variant=%s',
       tostring(level:GetCurrentRoomIndex()), tostring(desc.SafeGridIndex),
       tostring(desc.ListIndex), tostring(gt:get_current_dimension()),
       tostring(game:GetFrameCount()), tostring(game.TimeCounter),
-      tostring(level.EnterDoor), tostring(level.LeaveDoor)), game:GetFrameCount()
+      tostring(level.EnterDoor), tostring(level.LeaveDoor),
+      tostring(desc.Data and desc.Data.Type), tostring(desc.Data and desc.Data.Variant)), game:GetFrameCount()
   end
   local function write(event, detail)
     Isaac.DebugString('[GTPrewind] ' .. event .. ' ' .. detail)
+  end
+  local function clock_ms()
+    return Isaac.GetTime and Isaac.GetTime() or nil
+  end
+  local function elapsed(start)
+    local now=clock_ms()
+    return start and now and math.max(0,now-start) or 'unknown'
   end
   local function pocket_detail()
     if not last_pocket then return ' pocket=none' end
@@ -51,7 +59,8 @@ return function(gt)
     probe(function()
       local origin, detail, frame = context()
       serial = serial + 1
-      trip = {id=serial, from=origin, target=gid, last=origin, frame=frame, dispatching=true}
+      trip = {id=serial, from=origin, target=gid, last=origin, frame=frame,
+        dispatching=true, began_ms=clock_ms()}
       write('begin', string.format('id=%s target=%s mode=%s %s',
         serial, tostring(gid), tostring(gt:get_teleport_transition()), detail) .. pocket_detail())
     end)
@@ -62,7 +71,7 @@ return function(gt)
       trip.dispatching = false
       local current, detail, frame = context()
       trip.last, trip.frame = current, frame
-      write('dispatched', 'id=' .. trip.id .. ' ' .. detail)
+      write('dispatched', 'id=' .. trip.id .. ' sync_ms=' .. elapsed(trip.began_ms) .. ' ' .. detail)
     end)
     return table.unpack(result, 1, result.n)
   end
@@ -76,7 +85,8 @@ return function(gt)
       end
       local reloading = frame < trip.frame
       local phase = reloading and 'reload' or (trip.dispatching and 'dispatch' or 'arrival')
-      write('new-room', 'id=' .. trip.id .. ' phase=' .. phase .. ' ' .. detail .. pocket_detail())
+      write('new-room', 'id=' .. trip.id .. ' phase=' .. phase ..
+        ' since_begin_ms=' .. elapsed(trip.began_ms) .. ' ' .. detail .. pocket_detail())
       if not reloading then trip.last, trip.frame = current, frame end
     end)
   end)

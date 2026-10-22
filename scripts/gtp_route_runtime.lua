@@ -1,4 +1,4 @@
--- 同步中转的游戏适配。仅用原生 API；中转始终经当前房真实、可通行的门槽。
+-- 两端中转的游戏适配。首尾使用真实门；安全的中段远程桥接，其余逐门兜底。
 local Route=require('scripts.gtp_route')
 return function(gt,cells)
   local function trace(message) pcall(function() Isaac.DebugString('[GTProute] '..message) end) end
@@ -10,7 +10,8 @@ return function(gt,cells)
     local first=gt:travel_cur_state()
     -- 任意房间档可从战斗房出发；没有正常步行前提时沿用直接传送，不新增准入禁令。
     if not gt:room_is_clear(first.cur) then return nil end
-    local result={completed=0}
+    -- completed 是已确认抵达的原路线前缀，用于取消时费用；transits 才是实际加载次数。
+    local result={completed=0,transits=0}
     local held_maze=false
     local hops={}
     local function context_ok()
@@ -46,20 +47,31 @@ return function(gt,cells)
         if lvl:GetCurses() & LevelCurse.CURSE_OF_MAZE~=0 then
           lvl:RemoveCurses(LevelCurse.CURSE_OF_MAZE); held_maze=true
         end
-        for i=1,#hops-1 do
+        local i=1
+        while i<#hops do
           local hop=hops[i]
           live_hop(hop)
-          lvl.EnterDoor,lvl.LeaveDoor=-1,hop.slot
-          trace(string.format('transit from=%s to=%s cell=%s leave=%s',hop.from,hop.to,hop.cell,hop.slot))
+          local bridge=i==2 and i<#hops-1 and Route.bridge_allowed(
+            gt:grid_room_desc(hop.from),gt:grid_room_desc(last.from),cells())
+          local reached=i
+          if bridge then
+            reached=#hops-1
+            hop=hops[reached]
+          end
+          lvl.EnterDoor,lvl.LeaveDoor=-1,bridge and -1 or hop.slot
+          trace(string.format('transit from=%s to=%s cell=%s leave=%s bridge=%s',
+            gt:travel_cur_state().cur.SafeGridIndex,hop.to,hop.cell,lvl.LeaveDoor,tostring(not not bridge)))
           game:ChangeRoom(hop.cell,-1)
           local valid,st=context_ok()
           local target=gt:grid_room_desc(hop.to)
           if not valid or not target or st.cur.ListIndex~=target.ListIndex then error('unexpected_arrival') end
-          result.completed=i
+          result.completed=reached
+          result.transits=result.transits+1
+          i=reached+1
         end
       end
       result.leave=-1
-      if needs_transit or #hops==1 then
+      if result.completed==#hops-1 then
         live_hop(last)
         result.leave=last.slot
       end
@@ -78,7 +90,7 @@ return function(gt,cells)
     end
     result.maze=held_maze
     trace(string.format('ready hops=%s transits=%s cell=%s entry=%s leave=%s',
-      #hops,result.completed,result.arrive,result.slot,result.leave))
+      #hops,result.transits,result.arrive,result.slot,result.leave))
     return result
   end
 end
