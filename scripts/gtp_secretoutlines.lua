@@ -166,8 +166,11 @@ return function(gt)
     return not enabled() or candidate_allowed(candidate, has_yo_listen())
   end)
 
-  local function permitted_entrance(room, slot)
-    if not room:IsDoorSlotAllowed(slot) then return false end
+  local function permitted_entrance(room, slot, secret_type)
+    -- White/gold guesses follow visible walls, matching room.door_check.
+    -- Keep the existing red-room doorway constraint for ultra entrances.
+    if secret_type == C.SECRET_TYPE.ULTRA
+      and not room:IsDoorSlotAllowed(slot) then return false end
     local door = room:GetDoor(slot)
     if not door then return true end
     if door:IsOpen() then return false end
@@ -213,10 +216,10 @@ return function(gt)
         for _, entry in ipairs(candidate.entries) do
           local slot = entry.doorslot
           if entry.source_lid == current.lid and slot ~= nil
-            and permitted_entrance(room, slot)
+            and permitted_entrance(room, slot, kind)
             and (not result[slot] or rank > result[slot].rank) then
             result[slot] = {
-              rgb = color, verified = verified, rank = rank,
+              rgb = color, verified = verified, rank = rank, secret_type = kind,
               ambiguous = candidate.ambiguous and not clue_reveals,
             }
           end
@@ -363,8 +366,8 @@ return function(gt)
       or selected_yo_listen ~= yo_listen
       or frame - (selected_frame or 0) >= 30
     if not rebuild then
-      for slot in pairs(selected_entrances) do
-        if not permitted_entrance(room, slot) then
+      for slot, data in pairs(selected_entrances) do
+        if not permitted_entrance(room, slot, data.secret_type) then
           rebuild = true
           break
         end
@@ -419,7 +422,8 @@ return function(gt)
     end
     if draw_candidates then
       for slot, data in pairs(selected_entrances) do
-        if not red_outline_slots[slot] and permitted_entrance(room, slot) then
+        if not red_outline_slots[slot]
+          and permitted_entrance(room, slot, data.secret_type) then
           local rgb = data.rgb
           local ambiguous_opacity
           if data.ambiguous then

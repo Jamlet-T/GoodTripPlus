@@ -7,7 +7,9 @@ local state = require("scripts.delver.state")
 local visibility = require("scripts.gtp_delvervisibility")
 
 ---@class LD_Map
-local M = {}
+-- Legacy exclusions mixed hidden template permissions with observed evidence.
+-- New policy invalidates that old candidate memory once, without game edits.
+local M = { exclusion_policy = "player-wall-v1" }
 
 -- IsaacDocs RoomDescriptor.Flags: FLAG_RED_ROOM = 1 << 10.
 -- Type alone cannot distinguish a Red Key room from the original floor layout.
@@ -155,8 +157,7 @@ end
 
 ---@param cid LD_Cid
 ---@return LD_SecretType?
-local classification_cells, classification_visible_lids, classification_full_layout
-local classification_entered_lids
+local classification_cells, classification_visible_lids
 local function touches_narrow_long_side(dir, shape)
   return ((dir == C.DIR.UP or dir == C.DIR.DOWN)
       and (shape == RoomShape.ROOMSHAPE_IH
@@ -164,61 +165,6 @@ local function touches_narrow_long_side(dir, shape)
     or ((dir == C.DIR.LEFT or dir == C.DIR.RIGHT)
       and (shape == RoomShape.ROOMSHAPE_IV
         or shape == RoomShape.ROOMSHAPE_IIV))
-end
-
--- Door evidence is learned only after entering a room. An unexplored room's
--- configuration says which slots are allowed, not which door is its entrance.
-local function special_entrance_dir(room)
-  -- A public room icon identifies its type, not which wall holds its door.
-  if classification_entered_lids and not classification_entered_lids[room.lid] then
-    return nil
-  end
-  local key = tostring(state.get_dimension()) .. ":" .. room.lid
-  local remembered = M.special_entrance_dirs[key]
-  if remembered ~= nil then return remembered or nil end
-
-  if gt and gt.door_evidence_from then
-    local safe_cid = state.get_dimension() == C.DIMENSION.MIRROR
-      and (room.mirror_safe_cid or room.safe_cid) or room.safe_cid
-    local evidence = gt:door_evidence_from(safe_cid)
-    local entrance
-    for slot, door in pairs(evidence) do
-      if C.CELL.ROOM_TYPE_TO_CATEGORY[door.target_type] == C.CELL.CATEGORY.NORMAL then
-        local direction = slot % 4
-        if entrance ~= nil and entrance ~= direction then return nil end
-        entrance = direction
-      end
-    end
-    if entrance ~= nil then return entrance end
-  end
-
-  -- Older saves may lack door evidence. Use only entered ordinary rooms; if
-  -- more than one direction fits, leave the candidate alone.
-  local entrance
-  for _, room_cid in ipairs(room.cids) do
-    for dir, neighbor_cid in pairs(geo.get_neighbors(room_cid)) do
-      local neighbor = generation_layout_cell(neighbor_cid)
-      if neighbor and neighbor.category == C.CELL.CATEGORY.NORMAL then
-        if entrance ~= nil and entrance ~= dir then return nil end
-        entrance = dir
-      end
-    end
-  end
-  return entrance
-end
-
-local function current_normal_entrance_dir(room_obj)
-  local entrance
-  for slot = 0, DoorSlot.NUM_DOOR_SLOTS - 1 do
-    local door = room_obj:GetDoor(slot)
-    if door and C.CELL.ROOM_TYPE_TO_CATEGORY[door.TargetRoomType]
-      == C.CELL.CATEGORY.NORMAL then
-      local direction = slot % 4
-      if entrance ~= nil and entrance ~= direction then return false end
-      entrance = direction
-    end
-  end
-  return entrance
 end
 
 local function fake_type(cid)
@@ -240,12 +186,6 @@ local function fake_type(cid)
         local neighbor_room = M.rooms[n_cell.lid]
         local shape = neighbor_room.shape
         if touches_narrow_long_side(dir, shape) then return nil end
-        if n_cell.category == C.CELL.CATEGORY.SPECIAL
-          and special_entrance_dir(neighbor_room) == dir then
-          -- `dir` points from the candidate toward the room, so equality
-          -- places this wall directly opposite the room's entrance.
-          return nil
-        end
 
         adjacent_sides = adjacent_sides + 1
         if n_cell.category == C.CELL.CATEGORY.NORMAL then
@@ -278,12 +218,12 @@ local function fake_type(cid)
     -- as regular, even when an adjacent room's type is still hidden.
     return C.SECRET_TYPE.REGULAR, false, adjacent_sides, known_normal_sides > 0
   end
-  if adjacent_sides == 1 and not touches_special_room then
-    if classification_full_layout then
-      return C.SECRET_TYPE.SUPER, false, adjacent_sides, known_normal_sides > 0
-    end
-    -- Another room may still be undiscovered, so keep both types possible.
-    return C.SECRET_TYPE.REGULAR, true, adjacent_sides, known_normal_sides > 0
+  if adjacent_sides == 1 then
+    -- Single-connection REGULAR rooms are rare but valid, including behind
+    -- special rooms. Full map visibility does not make them SUPER-only.
+    -- Only SUPER is ruled out when the sole neighbor is known to be special.
+    return C.SECRET_TYPE.REGULAR, not touches_special_room,
+      adjacent_sides, known_normal_sides > 0
   end
 
   return nil
@@ -320,7 +260,6 @@ end
 -- items; the candidate table shown to the player uses explored rooms only.
 M.truth_real = {}
 M.known_lids = {}
-M.special_entrance_dirs = {}
 M.excluded_cids = {}
 M.floor_revision = 0
 M.world_card_used = false
@@ -383,25 +322,12 @@ function M.update_knowledge(force)
   local descriptors = level:GetRooms()
   local current = level:GetCurrentRoomDesc()
   local current_lid = current and current.ListIndex
-  local current_room = current_lid and M.rooms[current_lid]
-  if current_room and not current_room.is_red
-    and C.CELL.ROOM_TYPE_TO_CATEGORY[current_room.type] == C.CELL.CATEGORY.SPECIAL then
-    local entrance = current_normal_entrance_dir(Game():GetRoom())
-    if entrance ~= nil then
-      local key = tostring(state.get_dimension()) .. ":" .. current_room.lid
-      if M.special_entrance_dirs[key] ~= entrance then
-        M.special_entrance_dirs[key] = entrance
-        knowledge_signature = nil
-      end
-    end
-  end
   local known_cells, known_lids, known_ids = {}, {}, {}
   local visible_lids, visible_ids = {}, {}
   local public_typed_lids, public_typed_ids = {}, {}
   local regular_found = false
   local super_found = false
   local ultra_found = false
-  local all_normal_visited = true
   local all_original_rooms_visible = true
   for lid, room in pairs(M.rooms) do
     if lid == room.lid then
@@ -411,12 +337,6 @@ function M.update_knowledge(force)
       local visited = desc and (desc.VisitedCount or 0) > 0
       local entered = visited or (current_lid ~= nil
         and (current_lid == lid or current_lid == room.mirror_lid))
-      if not room.is_red
-        and (state.get_dimension() ~= C.DIMENSION.MIRROR or room.mirror_lid)
-        and C.CELL.ROOM_TYPE_TO_CATEGORY[room.type] == C.CELL.CATEGORY.NORMAL
-        and not entered then
-        all_normal_visited = false
-      end
       local flags = desc and visibility.flags(desc, state.get_dimension()) or 0
       local is_secret = room.type == C.SECRET_TYPE.REGULAR
         or room.type == C.SECRET_TYPE.SUPER
@@ -485,7 +405,7 @@ function M.update_knowledge(force)
   table.sort(public_typed_ids)
   local signature = tostring(state.get_dimension()) .. ":" .. table.concat(known_ids, ",")
     .. "|" .. table.concat(visible_ids, ",") .. "|" .. tostring(regular_found)
-    .. "|" .. tostring(super_found) .. "|" .. tostring(all_normal_visited)
+    .. "|" .. tostring(super_found)
     .. "|" .. tostring(full_layout_revealed)
     .. "|room-icon:" .. table.concat(public_typed_ids, ",")
   if not force and signature == knowledge_signature then return false end
@@ -493,10 +413,6 @@ function M.update_knowledge(force)
   local full_cells, previous = M.cells, M.candidates
   M.cells, M.candidates = known_cells, {}
   classification_cells, classification_visible_lids = full_cells, visible_lids
-  classification_entered_lids = known_lids
-  -- Only classify a one-sided cell as super-only after the visibility flags
-  -- confirm the map reveal has finished propagating to every ordinary tile.
-  classification_full_layout = all_original_rooms_visible
   for cid, cell in pairs(known_cells) do
     if cell.category == C.CELL.CATEGORY.SECRET then
       M.candidates[cid] = {
@@ -507,25 +423,17 @@ function M.update_knowledge(force)
   end
   find_fakes()
   classification_cells, classification_visible_lids = nil, nil
-  classification_entered_lids = nil
-  classification_full_layout = nil
   find_ultra_fakes()
   for cid, candidate in pairs(M.candidates) do
     if candidate.lid == nil then
       if candidate.ambiguous then
-        if super_found or (all_normal_visited and not candidate.known_normal_neighbor) then
-          -- A single known wall cannot make a regular secret room; once the
-          -- super-secret room is found, neither candidate type remains here.
-          M.candidates[cid] = nil
-        elseif regular_found or all_normal_visited then
+        if regular_found then
           candidate.secret_type = C.SECRET_TYPE.SUPER
           candidate.ambiguous = false
+        elseif super_found then
+          candidate.secret_type = C.SECRET_TYPE.REGULAR
+          candidate.ambiguous = false
         end
-      elseif candidate.adjacent_sides == 1 and all_normal_visited
-        and not candidate.known_normal_neighbor then
-        -- The last undiscovered ordinary room is gone. A lone public room
-        -- footprint can only be a special room, so it cannot lead to SUPER.
-        M.candidates[cid] = nil
       end
       if M.candidates[cid] and ((regular_found and candidate.secret_type == C.SECRET_TYPE.REGULAR)
         or (super_found and candidate.secret_type == C.SECRET_TYPE.SUPER)
@@ -539,7 +447,14 @@ function M.update_knowledge(force)
   M.full_layout_revealed = full_layout_revealed
   knowledge_signature = signature
   for cid, candidate in pairs(M.candidates) do
-    if M.excluded_cids[cid] and not M.is_real(cid) then
+    local occupied = M.cells[cid]
+    local visible_red = occupied and M.rooms[occupied.lid].is_red
+      and (known_lids[occupied.lid] or visible_lids[occupied.lid])
+    if candidate.lid == nil and visible_red then
+      -- Red rooms cannot extend generation, but an already visible occupied
+      -- tile cannot itself remain a fake single-connection candidate.
+      M.candidates[cid] = nil
+    elseif M.excluded_cids[cid] and not M.is_real(cid) then
       M.candidates[cid] = nil
     else
       local old = previous[cid]
@@ -660,7 +575,7 @@ find_ultra_fakes = function()
 
   for cid, cand in pairs(M.candidates) do
     if cand.secret_type == C.SECRET_TYPE.ULTRA and
-       not cand.lid and #cand.entries < 2 then
+       not cand.lid and #cand.entries == 0 then
       M.candidates[cid] = nil
     end
   end
@@ -677,7 +592,6 @@ function M.reload()
   M.rooms = {}
   M.truth_real = {}
   M.known_lids = {}
-  M.special_entrance_dirs = {}
   M.excluded_cids = {}
   M.floor_revision = M.floor_revision + 1
   M.world_card_used = false

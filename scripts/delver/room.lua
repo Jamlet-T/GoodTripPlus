@@ -100,12 +100,12 @@ function M.door_check()
       end
 
       local valid = false
-      -- The doorway overlay already rejects slots disabled by the room's
-      -- STB/XML layout. Apply that same known-room evidence to map stars.
-      if entry.doorslot == nil or not room_obj:IsDoorSlotAllowed(entry.doorslot) then
+      -- Ordinary/super guesses use player-visible wall accessibility. Hidden
+      -- STB/XML door permissions are not observable evidence against a wall.
+      if entry.doorslot == nil then
         valid = false
       elseif cand.secret_type == C.SECRET_TYPE.ULTRA then
-        valid = true
+        valid = room_obj:IsDoorSlotAllowed(entry.doorslot)
       else
         local door = room_obj:GetDoor(entry.doorslot)
         local has_door = door

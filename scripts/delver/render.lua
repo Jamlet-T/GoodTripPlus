@@ -31,6 +31,12 @@ local marker_sprite = Sprite()
 marker_sprite:Load("gfx/goodtripplus/marker.anm2", true)
 marker_sprite:SetFrame(marker_sprite:GetDefaultAnimation(), 1)
 
+-- User-provided white/gold combined icon; render its original pixels without
+-- tint cycling or opacity pulsing. Map-key fade still applies to all markers.
+local ambiguous_sprite = Sprite()
+ambiguous_sprite:Load("gfx/goodtripplus/marker_ambiguous.anm2", true)
+ambiguous_sprite:SetFrame(ambiguous_sprite:GetDefaultAnimation(), 1)
+
 -- MinimapAPI 的「战斗时隐藏地图」（HideInCombat，外加几处无条件隐藏）是在它的
 -- 渲染回调**开头直接 return**——条件命中时整块地图（含按住 TAB 的大地图）都不画。
 -- 我们自己画的标记不在它的管辖范围，若不跟进，会出现「地图没了、标记浮在屏幕上」。
@@ -268,15 +274,17 @@ function M.render()
     local kind = clue_reveals and map.truth_type(cid) or cand.secret_type
     local colors = C.MARKER.COLORS[kind]
     local alpha = C.MARKER.ALPHA[cand.marker_status]
+    local sprite = marker_sprite
     if cand.ambiguous and not clue_reveals then
-      colors, alpha = C.MARKER.ambiguous_pulse(Game():GetFrameCount())
+      sprite = ambiguous_sprite
+      colors = { 1, 1, 1 }
     end
-    marker_sprite.Color = Color(
+    sprite.Color = Color(
       colors[1], colors[2], colors[3],
       alpha * (tab_hold_cnt / TAB_HOLD_MAX),
       0, 0, 0
     )
-    marker_sprite:Render(pos)
+    sprite:Render(pos)
 
     ::continue::
   end

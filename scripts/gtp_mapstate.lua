@@ -60,6 +60,7 @@ function M.icons_restore(text,levels,current_lid,current_dim)
 end
 function M.delver_capture(map)
   local lines={}
+  if map.exclusion_policy then lines[#lines+1]='P '..map.exclusion_policy end
   for cid in pairs(map.excluded_cids or {}) do lines[#lines+1]='X '..cid end
   for cid,candidate in pairs(map.candidates or {}) do
     for _,entry in ipairs(candidate.entries or {}) do
@@ -71,11 +72,13 @@ function M.delver_capture(map)
 end
 function M.delver_restore(text,map)
   local removed=0
+  local saved_policy=('\n'..(text or '')):match('\nP ([^\n]+)')
+  local restore_exclusions=not map.exclusion_policy or saved_policy==map.exclusion_policy
   for line in (text or ''):gmatch('[^\n]+') do
     local cid=line:match('^X (%d+)$')
     if cid then
       cid=tonumber(cid)
-      if map.exclude_candidate(cid) then removed=removed+1 end
+      if restore_exclusions and map.exclude_candidate(cid) then removed=removed+1 end
     else
       local c,l,s=line:match('^C (%d+) (%d+) (%d+)$')
       local candidate=c and map.candidates[tonumber(c)]
