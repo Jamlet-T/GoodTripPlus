@@ -250,6 +250,7 @@ function M.render()
 
   local show_red = state.can_see_red()
   local show_single = gt:get_config_bool("ShowSingleSecretCandidates", false)
+  local fallback = candidate_view.fallback(map.candidates)
   local project
 
   for cid, cand in pairs(map.candidates) do
@@ -270,7 +271,7 @@ function M.render()
     end
 
     local kind, ambiguous = candidate_view.select(cand, show_single,
-      clue_reveals and map.truth_type(cid) or nil)
+      clue_reveals and map.truth_type(cid) or nil, fallback)
     if not kind then goto continue end
 
     -- 与传送光标共用同一套投影，保证与 MinimapAPI 的地图逐像素对齐

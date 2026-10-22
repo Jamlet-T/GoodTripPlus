@@ -27,6 +27,7 @@ return function(gt)
   local mama_state_sampled_map, mama_state_sampled_room, mama_mega_active
   local selected_entrances, selected_map, selected_room, selected_revision
   local selected_frame, selected_yo_listen, markers_visible
+  local selected_regular_fallback, selected_ultra_fallback
   local selected_show_single
   local last_red_outline_scan_frame, last_red_outline_scan_room
   local red_outline_slots = {}
@@ -192,7 +193,7 @@ return function(gt)
     return (verified and 10 or 0) + type_rank
   end
 
-  local function collect_entrances(level, room)
+  local function collect_entrances(level, room, fallback)
     local descriptor = level:GetCurrentRoomDesc()
     local current = descriptor and map.rooms[descriptor.ListIndex]
     if not current then return {} end
@@ -205,7 +206,7 @@ return function(gt)
       local kind = candidate.secret_type
       local clue_reveals = yo_listen and map.is_real(candidate.cid)
       local display_kind, ambiguous = candidate_view.select(candidate, show_single,
-        clue_reveals and map.truth_type(candidate.cid) or nil)
+        clue_reveals and map.truth_type(candidate.cid) or nil, fallback)
       local color = C.MARKER.COLORS[display_kind]
       local ultra_hidden = kind == C.SECRET_TYPE.ULTRA
         and not state.can_see_red()
@@ -366,10 +367,13 @@ return function(gt)
     local frame = game:GetFrameCount()
     local yo_listen = has_yo_listen()
     local show_single = gt:get_config_bool("ShowSingleSecretCandidates", false)
+    local fallback = candidate_view.fallback(map.candidates)
     local rebuild = not markers_visible or selected_map ~= map.candidates
       or selected_room ~= room_index or selected_revision ~= revision
       or selected_yo_listen ~= yo_listen
       or selected_show_single ~= show_single
+      or selected_regular_fallback ~= fallback[C.SECRET_TYPE.REGULAR]
+      or selected_ultra_fallback ~= fallback[C.SECRET_TYPE.ULTRA]
       or frame - (selected_frame or 0) >= 30
     if not rebuild then
       for slot, data in pairs(selected_entrances) do
@@ -380,11 +384,13 @@ return function(gt)
       end
     end
     if rebuild then
-      selected_entrances = collect_entrances(level, room)
+      selected_entrances = collect_entrances(level, room, fallback)
       selected_map, selected_room = map.candidates, room_index
       selected_revision, selected_frame = revision, frame
       selected_yo_listen = yo_listen
       selected_show_single = show_single
+      selected_regular_fallback = fallback[C.SECRET_TYPE.REGULAR]
+      selected_ultra_fallback = fallback[C.SECRET_TYPE.ULTRA]
     end
     markers_visible = true
   end
