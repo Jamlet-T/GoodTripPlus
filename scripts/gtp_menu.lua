@@ -299,6 +299,13 @@ return function(gt)
     )
     ModConfigMenu.AddBooleanSetting(
       "GoodTripPlus", tab,
+      "ShowSingleSecretCandidates",
+      false,
+      L.single_secret_name,
+      L.single_secret_desc
+    )
+    ModConfigMenu.AddBooleanSetting(
+      "GoodTripPlus", tab,
       "ShowSecretDoorOutlines",
       true,
       L.secret_outlines_name,

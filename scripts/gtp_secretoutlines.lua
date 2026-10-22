@@ -8,6 +8,7 @@ return function(gt)
   local render = require("scripts.delver.render")
   local visibility = require("scripts.gtp_delvervisibility")
   local redsource = require("scripts.gtp_redsource")
+  local candidate_view = require("scripts.gtp_candidateview")
   local game = Game()
 
   -- Render one fixed frame ourselves. The game's DOOR_OUTLINE effect owns its
@@ -26,6 +27,7 @@ return function(gt)
   local mama_state_sampled_map, mama_state_sampled_room, mama_mega_active
   local selected_entrances, selected_map, selected_room, selected_revision
   local selected_frame, selected_yo_listen, markers_visible
+  local selected_show_single
   local last_red_outline_scan_frame, last_red_outline_scan_room
   local red_outline_slots = {}
   local yo_listen_frame, yo_listen_owned
@@ -198,10 +200,12 @@ return function(gt)
     local result = {}
     local room_list = level:GetRooms()
     local yo_listen = has_yo_listen()
+    local show_single = gt:get_config_bool("ShowSingleSecretCandidates", false)
     for _, candidate in pairs(map.candidates) do
       local kind = candidate.secret_type
       local clue_reveals = yo_listen and map.is_real(candidate.cid)
-      local display_kind = clue_reveals and map.truth_type(candidate.cid) or kind
+      local display_kind, ambiguous = candidate_view.select(candidate, show_single,
+        clue_reveals and map.truth_type(candidate.cid) or nil)
       local color = C.MARKER.COLORS[display_kind]
       local ultra_hidden = kind == C.SECRET_TYPE.ULTRA
         and not state.can_see_red()
@@ -220,7 +224,7 @@ return function(gt)
             and (not result[slot] or rank > result[slot].rank) then
             result[slot] = {
               rgb = color, verified = verified, rank = rank, secret_type = kind,
-              ambiguous = candidate.ambiguous and not clue_reveals,
+              ambiguous = ambiguous,
             }
           end
         end
@@ -361,9 +365,11 @@ return function(gt)
     local revision = render.revision()
     local frame = game:GetFrameCount()
     local yo_listen = has_yo_listen()
+    local show_single = gt:get_config_bool("ShowSingleSecretCandidates", false)
     local rebuild = not markers_visible or selected_map ~= map.candidates
       or selected_room ~= room_index or selected_revision ~= revision
       or selected_yo_listen ~= yo_listen
+      or selected_show_single ~= show_single
       or frame - (selected_frame or 0) >= 30
     if not rebuild then
       for slot, data in pairs(selected_entrances) do
@@ -378,6 +384,7 @@ return function(gt)
       selected_map, selected_room = map.candidates, room_index
       selected_revision, selected_frame = revision, frame
       selected_yo_listen = yo_listen
+      selected_show_single = show_single
     end
     markers_visible = true
   end

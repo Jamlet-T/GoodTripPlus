@@ -16,6 +16,7 @@ local log = require("scripts.delver.log")
 local state = require("scripts.delver.state")
 local map = require("scripts.delver.map")
 local visibility = require("scripts.gtp_delvervisibility")
+local candidate_view = require("scripts.gtp_candidateview")
 
 local M = {}
 
@@ -248,6 +249,7 @@ function M.render()
   if minimapapi_hides_map() then return end
 
   local show_red = state.can_see_red()
+  local show_single = gt:get_config_bool("ShowSingleSecretCandidates", false)
   local project
 
   for cid, cand in pairs(map.candidates) do
@@ -267,15 +269,18 @@ function M.render()
       goto continue
     end
 
+    local kind, ambiguous = candidate_view.select(cand, show_single,
+      clue_reveals and map.truth_type(cid) or nil)
+    if not kind then goto continue end
+
     -- 与传送光标共用同一套投影，保证与 MinimapAPI 的地图逐像素对齐
     project = project or gt:make_rtmap_projector()
     local pos = project(cid)
 
-    local kind = clue_reveals and map.truth_type(cid) or cand.secret_type
     local colors = C.MARKER.COLORS[kind]
     local alpha = C.MARKER.ALPHA[cand.marker_status]
     local sprite = marker_sprite
-    if cand.ambiguous and not clue_reveals then
+    if ambiguous then
       sprite = ambiguous_sprite
       colors = { 1, 1, 1 }
     end

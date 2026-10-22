@@ -87,6 +87,8 @@ gt.FairTripTime = false
 
 -- 隐藏房候选标记（合并自 Lazy Delver）
 gt.ShowSecretMarkers = true
+-- 显示罕见单连普通/究极候选；关闭仍保留超级候选。
+gt.ShowSingleSecretCandidates = false
 
 -- 隐藏房候选门框：普通／超级／究极隐藏房分别显示白／金／红色门框。
 gt.ShowSecretDoorOutlines = true
