@@ -22,7 +22,7 @@ return function(gt)
         local rd=gt:room_desc_at(door.TargetRoomIndex)
         if rd and rd.Data and rd.ListIndex==target.ListIndex then
           local variant=door.Desc and door.Desc.Variant
-          local cost=Policy.cost({variant=variant,open=door:IsOpen(),locked=door:IsLocked(),
+          local cost=Policy.cost({variant=variant,state=door.State,open=door:IsOpen(),locked=door:IsLocked(),
             arcade=door.IsTargetRoomArcade and door:IsTargetRoomArcade(),
             pay_to_play=p.HasCollectible and p:HasCollectible(CollectibleType.COLLECTIBLE_PAY_TO_PLAY)})
           if cost then
@@ -52,6 +52,7 @@ return function(gt)
     local p,door=s.player,s.door
     local keys,coins=p:GetNumKeys(),p:GetNumCoins()
     local accepted
+    local remaining=s.cost.amount
     if s.cost.kind=='coin' then
       -- TryUnlock 文档仅保证钥匙解锁；金币门显式扣费，不调用钥匙接口。
       p:AddCoins(-s.cost.amount)
@@ -62,18 +63,29 @@ return function(gt)
       accepted=false
       for _=1,s.cost.amount do
         if not door:IsLocked() then accepted=true; break end
-        if not door:TryUnlock(p,false) then break end
+        local beforeKeys,beforeState=p:GetNumKeys(),door.State
+        local result=door:TryUnlock(p,false)
         accepted=not door:IsLocked()
+        -- 双锁的第一把可能已扣费却返回 false。仅在有进展时继续，
+        -- 总调用次数仍受预检费用限制，不强开、不手工扣钥匙。
+        trace(string.format('step gid=%s slot=%s result=%s keys=%s->%s state=%s->%s locked=%s',
+          gid,s.slot,tostring(result),beforeKeys,p:GetNumKeys(),tostring(beforeState),
+          tostring(door.State),tostring(door:IsLocked())))
+        if accepted then remaining=0; break end
+        if p:GetNumKeys()<beforeKeys or door.State~=beforeState then
+          remaining=remaining-1
+        end
+        if not result and p:GetNumKeys()>=beforeKeys and door.State==beforeState then break end
       end
     end
     trace(string.format('gid=%s slot=%s kind=%s accepted=%s keys=%s->%s coins=%s->%s open=%s locked=%s',
       gid,s.slot,s.cost.kind,tostring(accepted),keys,p:GetNumKeys(),coins,p:GetNumCoins(),
       tostring(door:IsOpen()),tostring(door:IsLocked())))
-    if not accepted then return 'failed' end
+    if not accepted and remaining==s.cost.amount then return 'failed' end
     gt:sweep_doors(); gt:save_door_state()
     if door:IsOpen() then return 'ready' end
     pending={gid=gid,source=source,door=door,from=gt:travel_cur_state().cur.ListIndex,
-      identity=gt:level_identity(),frame=Game():GetFrameCount(),player=p}
+      identity=gt:level_identity(),frame=Game():GetFrameCount(),player=p,remaining=remaining,slot=s.slot}
     return 'pending'
   end
   gt:AddCallback(ModCallbacks.MC_POST_UPDATE,function()
@@ -85,7 +97,25 @@ return function(gt)
       or Game():GetFrameCount()-req.frame>120 then
       pending=nil; trace('cancel gid='..req.gid); return
     end
-    if not req.door:IsOpen() then return end
+    if req.door:IsLocked() and req.remaining>0 then
+      -- 第一锁动画可能暂时拒绝第二把；保留用户请求，逐更新帧尝试。
+      local p,door=req.player,req.door
+      if not p:HasGoldenKey() and p:GetNumKeys()<1 then
+        pending=nil; trace('cancel insufficient keys gid='..req.gid); return
+      end
+      local beforeKeys,beforeState=p:GetNumKeys(),door.State
+      local result=door:TryUnlock(p,false)
+      if not door:IsLocked() then req.remaining=0
+      elseif p:GetNumKeys()<beforeKeys or door.State~=beforeState then
+        req.remaining=req.remaining-1
+      end
+      if result or p:GetNumKeys()~=beforeKeys or door.State~=beforeState then
+        trace(string.format('resume gid=%s result=%s keys=%s->%s state=%s->%s remaining=%s',
+          req.gid,tostring(result),beforeKeys,p:GetNumKeys(),tostring(beforeState),
+          tostring(door.State),req.remaining))
+      end
+    end
+    if req.door:IsLocked() or not req.door:IsOpen() then return end
     pending=nil
     gt:sweep_doors(); gt:save_door_state()
     gt:try_cursor_travel(req.gid,req.source)

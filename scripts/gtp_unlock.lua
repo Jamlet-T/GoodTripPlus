@@ -5,7 +5,10 @@ function M.cost(e)
   if e.variant==1 and e.arcade then return {kind='coin',amount=1} end
   if e.pay_to_play then return nil end -- 转换门的外观/费用尚未核实，不能误扣钥匙。
   if e.variant==1 then return {kind='key',amount=1} end
-  if e.variant==2 then return {kind='key',amount=2} end
+  if e.variant==2 then
+    -- DoorState.STATE_ONE_CHAIN (基础 API)：双锁已解开一道。
+    return {kind='key',amount=e.state==3 and 1 or 2}
+  end
 end
 function M.affordable(cost,actor)
   if cost.kind=='coin' then return (actor.coins or 0)>=cost.amount end
