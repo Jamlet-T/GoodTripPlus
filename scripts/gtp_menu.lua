@@ -124,7 +124,7 @@ return function(gt)
     ModConfigMenu.AddNumberSetting(
       "GoodTripPlus", tab,
       "TravelMode",
-      1, 2, 1, 2,
+      1, 3, 1, 2,
       L.travel_mode_name,
       L.travel_mode_values,
       function()
