@@ -28,6 +28,7 @@
 --  11. 隐藏房候选门框（scripts/gtp_secretoutlines.lua）：白／金／红门框、狗牙与踩踏线索、
 --      迷失诅咒下继续显示。
 
+require("scripts.gtp_minimapdefaults")(MinimapAPI)
 require("scripts.gtrep")
 require("scripts.gtp_mapinput")(gt, MinimapAPI)
 require("scripts.gtp_combatmap")(gt, MinimapAPI)

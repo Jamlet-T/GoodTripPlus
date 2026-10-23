@@ -43,8 +43,8 @@ return function(gt)
   local rock_source_entities = {}
 
   local function enabled()
-    return gt:get_config_bool("ShowSecretMarkers", true)
-      and gt:get_config_bool("ShowSecretDoorOutlines", true)
+    return gt:get_config_bool("ShowSecretMarkers", false)
+      and gt:get_config_bool("ShowSecretDoorOutlines", false)
   end
 
   -- Delver intentionally ignores the Ascent/Home floor. Native Red Key
@@ -356,7 +356,7 @@ return function(gt)
       game:GetFrameCount())
     local map_cursed = (level:GetCurses() & LevelCurse.CURSE_OF_THE_LOST) ~= 0
     if not enabled() or (map_cursed
-      and not gt:get_config_bool("DoorOutlinesDuringCurse", true)) then
+      and not gt:get_config_bool("DoorOutlinesDuringCurse", false)) then
       remove_markers()
       return
     end
@@ -403,7 +403,7 @@ return function(gt)
     local level = game:GetLevel()
     if not level or not enabled() then return end
     local map_cursed = (level:GetCurses() & LevelCurse.CURSE_OF_THE_LOST) ~= 0
-    if map_cursed and not gt:get_config_bool("DoorOutlinesDuringCurse", true) then
+    if map_cursed and not gt:get_config_bool("DoorOutlinesDuringCurse", false) then
       return
     end
     local draw_candidates = markers_visible and selected_entrances
@@ -412,7 +412,7 @@ return function(gt)
     local room = game:GetRoom()
     local frame = game:GetFrameCount()
     local outline_opacity = math.max(0, math.min(100,
-      tonumber(gt:get_config_bool("SecretDoorOutlineOpacity", 100)) or 100)) / 100
+      tonumber(gt:get_config_bool("SecretDoorOutlineOpacity", 50)) or 50)) / 100
     -- MC_POST_RENDER draws on the final image. The mirror-world pass has
     -- already flipped the room, so our manually rendered sprites must use
     -- the same screen-space reflection rather than unmirrored world slots.
@@ -492,7 +492,7 @@ return function(gt)
     local pending = pending_stomps[key]
     pending_stomps[key] = nil
     if not pending or pending.updates == 0 then return end
-    if not gt:get_config_bool("ShowSecretMarkers", true) then return end
+    if not gt:get_config_bool("ShowSecretMarkers", false) then return end
     local descriptor = game:GetLevel():GetCurrentRoomDesc()
     if not descriptor or descriptor.ListIndex ~= pending.room_index then return end
     if state.is_ignored() then return end
@@ -738,7 +738,7 @@ return function(gt)
     best_source.points[#best_source.points + 1] = {
       position = Vector(effect.Position.X, effect.Position.Y), frame = frame,
     }
-    if not gt:get_config_bool("ShowSecretMarkers", true)
+    if not gt:get_config_bool("ShowSecretMarkers", false)
       or state.is_ignored() then return end
     local hit_position = game:GetRoom():GetClampedPosition(effect.Position, 0)
     if room_check.wall_hit_check(hit_position, rock_wave_door_radius) then
@@ -781,7 +781,7 @@ return function(gt)
     nearest_wave.position = effect.Position
     nearest_wave.last_frame = frame
 
-    if not gt:get_config_bool("ShowSecretMarkers", true)
+    if not gt:get_config_bool("ShowSecretMarkers", false)
       or state.is_ignored() then return end
     local hit_position = game:GetRoom():GetClampedPosition(effect.Position, 0)
     if room_check.wall_hit_check(hit_position, rock_wave_door_radius) then

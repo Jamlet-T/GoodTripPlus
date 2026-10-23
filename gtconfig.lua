@@ -73,7 +73,7 @@ gt.AllowRushHushDoorTeleport = false
 gt.FairTripPath = true
 
 -- 确认传送时自动支付并打开当前房间直接相邻的普通钥匙门/街机厅金币门。
-gt.AutoUnlockAdjacent = false
+gt.AutoUnlockAdjacent = true
 
 -- 传送后站在走路会进来的门口（Fixed: ArriveAtDoor）
 -- 默认改为开：偏离 Fixed 的默认关（2026-10-04 用户决定）
@@ -86,14 +86,15 @@ gt.FairTripTime = false
 -- 原来的两个布尔项 gt.TeleportAnimation / gt.FastTransition 自 2026-10-05 起不再读取。
 
 -- 隐藏房候选标记（合并自 Lazy Delver）
-gt.ShowSecretMarkers = true
+gt.ShowSecretMarkers = false
 -- 显示罕见单连普通/究极候选；关闭仍保留超级候选。
 gt.ShowSingleSecretCandidates = false
 
 -- 隐藏房候选门框：普通／超级／究极隐藏房分别显示白／金／红色门框。
-gt.ShowSecretDoorOutlines = true
+gt.SecretDoorOutlineOpacity = 50
+gt.ShowSecretDoorOutlines = false
 -- 即使迷失诅咒隐藏地图，也继续在房间内显示候选门框。
-gt.DoorOutlinesDuringCurse = true
+gt.DoorOutlinesDuringCurse = false
 
 -- 深牢 II 的「标记骷髅」房间标记（炸掉固定掉愚者卡牌的那个骷髅）
 gt.FoolsSkullRoom = true

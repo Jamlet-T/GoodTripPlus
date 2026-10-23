@@ -8,7 +8,7 @@ return function(gt)
   function gt:adjacent_unlock_pending() return pending~=nil end
   function gt:clear_adjacent_unlock() pending=nil end
   function gt:adjacent_unlock_state(gid)
-    if not gt:get_config_bool('AutoUnlockAdjacent',false) then return nil,'disabled' end
+    if not gt:get_config_bool('AutoUnlockAdjacent',true) then return nil,'disabled' end
     local target=gt:grid_room_desc(gid)
     local st=gt:travel_cur_state()
     local p=st.player
@@ -92,7 +92,7 @@ return function(gt)
     if not pending or Game():IsPaused() then return end
     local req=pending
     local st=gt:travel_cur_state()
-    if not gt:get_config_bool('AutoUnlockAdjacent',false) or req.identity~=gt:level_identity()
+    if not gt:get_config_bool('AutoUnlockAdjacent',true) or req.identity~=gt:level_identity()
       or not st.cur or st.cur.ListIndex~=req.from or not req.player:Exists() or req.player:IsDead()
       or Game():GetFrameCount()-req.frame>120 then
       pending=nil; trace('cancel gid='..req.gid); return

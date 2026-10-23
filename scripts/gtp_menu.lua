@@ -17,6 +17,11 @@ return function(gt)
       tab = name
       ModConfigMenu.AddTitle("GoodTripPlus", tab, L.title)
     end
+    -- EID features/eid_mcm.lua:347-357: use whitespace and non-selectable section labels.
+    local function section(name, first)
+      if not first then ModConfigMenu.AddSpace("GoodTripPlus", tab) end
+      ModConfigMenu.AddText("GoodTripPlus", tab, name)
+    end
     -- Explicit value labels keep native MCM settings and minimap proxies
     -- consistent without changing their storage or callback behavior.
     local function add_boolean_setting(key, default, name, info)
@@ -24,6 +29,7 @@ return function(gt)
         name, L.boolean_values, info)
     end
     begin_tab(L.tabs.mapping)
+    section(L.sections.map_keys, true)
     -- ⚠️ 菜单顺序 = 下面这些注册调用的书写顺序（MCM 无脑 append）。
     -- 全部 MCM 项集中在这里按功能子页注册，子页内保留原有相对顺序。
     -- 各功能模块（gtp_mapbounds / gtp_minebuttons / gtp_delirium 等）
@@ -101,6 +107,7 @@ return function(gt)
       L.map_controller_key_name, L.map_controller_key_desc,
       InputHelper and InputHelper.ControllerToString or {})
     begin_tab(L.tabs.cursor)
+    section(L.sections.movement, true)
     ModConfigMenu.AddNumberSetting(
       "GoodTripPlus", tab,
       "CursorSpeed",
@@ -114,6 +121,7 @@ return function(gt)
       L.cursor_grid_step_name,
       L.cursor_grid_step_desc
     )
+    section(L.sections.mouse)
     add_boolean_setting(
       "MouseTeleport",
       true,
@@ -121,6 +129,7 @@ return function(gt)
       L.mouse_teleport_desc
     )
     begin_tab(L.tabs.travel)
+    section(L.sections.scope, true)
     ModConfigMenu.AddNumberSetting(
       "GoodTripPlus", tab,
       "TravelMode",
@@ -131,6 +140,19 @@ return function(gt)
         return L.travel_mode_desc[gt:get_travel_mode()] or L.travel_mode_desc[2]
       end
     )
+    add_boolean_setting(
+      "FairTripPath",
+      true,
+      L.fairpath_name,
+      L.fairpath_desc
+    )
+    add_boolean_setting(
+      "AutoUnlockAdjacent",
+      true,
+      L.auto_unlock_name,
+      L.auto_unlock_desc
+    )
+    section(L.sections.prohibitions)
     -- 「禁止传送进诅咒房」= 恢复移植基底（MLX's Tweak）的同名选项（变量 gt.BlockCurseRoom，
     -- 默认开；现行 GoodTrip [Fixed] 2.2.58 已无此项，它靠 check_neigh_connected 的类型白名单
     -- 把诅咒房排除）。早期移植时把这一条连开关一起删了，导致已探索过的诅咒房能被直接传送进去
@@ -154,29 +176,12 @@ return function(gt)
       L.allow_rush_hush_name,
       L.allow_rush_hush_desc
     )
-    add_boolean_setting(
-      "FairTripPath",
-      true,
-      L.fairpath_name,
-      L.fairpath_desc
-    )
-    add_boolean_setting(
-      "AutoUnlockAdjacent",
-      false,
-      L.auto_unlock_name,
-      L.auto_unlock_desc
-    )
+    section(L.sections.arrival)
     add_boolean_setting(
       "ArriveAtDoor",
       true,
       L.arrivedoor_name,
       L.arrivedoor_desc
-    )
-    add_boolean_setting(
-      "FairTripTime",
-      false,
-      L.fairtime_name,
-      L.fairtime_desc
     )
     ModConfigMenu.AddNumberSetting(
       "GoodTripPlus", tab,
@@ -186,7 +191,15 @@ return function(gt)
       L.transition_values,
       L.transition_desc
     )
+    section(L.sections.timing)
+    add_boolean_setting(
+      "FairTripTime",
+      false,
+      L.fairtime_name,
+      L.fairtime_desc
+    )
     begin_tab(L.tabs.display)
+    section(L.sections.visibility, true)
     -- 「迷失诅咒下显示地图」= 代理 MinimapAPI 的 OverrideLost（它的菜单里叫 "Display During Curse"，
     -- 默认关）。这一项同时决定迷失诅咒期间能否传送（见 gt:curse_map_visible() 与
     -- gtp_travel 的 departure.lost_curse 规则）：
@@ -213,45 +226,7 @@ return function(gt)
         }
       )
     end
-    -- HighlightCursorRoom 不注册 MCM 菜单项（2026-10-04 用户决定）：默认常开，仅可在 gtconfig.lua 覆盖。
-    -- （FastTransition 原先是同一批，2026-10-05 起已并入上面的「传送过场」二选一项。）
-    add_boolean_setting(
-      "ShowMapBounds",
-      true,
-      L.map_bounds_name,
-      L.map_bounds_desc
-    )
-    -- 以下两项 = **代理** MinimapAPI 自己的设置（不是我们自己的配置项）：
-    -- 值只存在 MinimapAPI.Config 里，所以用 MCM 的自定义设置表（CurrentSetting 读、OnChange 写），
-    -- 而不是 AddBooleanSetting / AddNumberSetting（那些会往 ModConfigMenu.Config 里另存一份，
-    -- 两边就会各说各话）。读写同一份 MinimapAPI.Config = 与 MinimapAPI 自己菜单里那一项天然双向同步
-    -- （在它那边改，这边也变），存档也照旧由 MinimapAPI 自己 SaveData 保存。
-    -- 结构照抄 MinimapAPI config_menu.lua 的对应项（布尔：Type/Default/CurrentSetting/Display/OnChange/Info；
-    -- 数字：再加 Minimum/Maximum/ModifyBy —— 注意这几个字段是首字母大写）。
     if MinimapAPI and MinimapAPI.Config then
-      -- ①「高亮初始房间」→ MinimapAPI 的 HighlightStartRoom
-      ModConfigMenu.AddSetting(
-        "GoodTripPlus", tab,
-        {
-          Type = ModConfigMenu.OptionType.BOOLEAN,
-          Default = false,
-          CurrentSetting = function()
-            return MinimapAPI.Config.HighlightStartRoom == true
-          end,
-          Display = function()
-            return L.highlight_start_name .. ": " ..
-              L.boolean_values[MinimapAPI.Config.HighlightStartRoom == true]
-          end,
-          OnChange = function(newVal)
-            MinimapAPI.Config.HighlightStartRoom = newVal and true or false
-            -- 与 MinimapAPI 自己那份菜单的处理一致：改了就变成「自定义」配置（预设 0）
-            if MinimapAPI.Config.ConfigPreset ~= nil then
-              MinimapAPI.Config.ConfigPreset = 0
-            end
-          end,
-          Info = L.highlight_start_desc,
-        }
-      )
       -- ②「战斗时隐藏地图」→ MinimapAPI 的 HideInCombat（1 从不 / 2 仅 Boss 房 / 3 总是，出厂默认 1）
       ModConfigMenu.AddSetting(
         "GoodTripPlus", tab,
@@ -284,10 +259,52 @@ return function(gt)
       L.combat_keep_large_name,
       L.combat_keep_large_desc
     )
+    section(L.sections.highlights)
+    -- HighlightCursorRoom 不注册 MCM 菜单项（2026-10-04 用户决定）：默认常开，仅可在 gtconfig.lua 覆盖。
+    -- （FastTransition 原先是同一批，2026-10-05 起已并入上面的「传送过场」二选一项。）
+    add_boolean_setting(
+      "ShowMapBounds",
+      true,
+      L.map_bounds_name,
+      L.map_bounds_desc
+    )
+    -- 以下设置 = **代理** MinimapAPI 自己的设置（不是我们自己的配置项）：
+    -- 值只存在 MinimapAPI.Config 里，所以用 MCM 的自定义设置表（CurrentSetting 读、OnChange 写），
+    -- 而不是 AddBooleanSetting / AddNumberSetting（那些会往 ModConfigMenu.Config 里另存一份，
+    -- 两边就会各说各话）。读写同一份 MinimapAPI.Config = 与 MinimapAPI 自己菜单里那一项天然双向同步
+    -- （在它那边改，这边也变），存档也照旧由 MinimapAPI 自己 SaveData 保存。
+    -- 结构照抄 MinimapAPI config_menu.lua 的对应项（布尔：Type/Default/CurrentSetting/Display/OnChange/Info；
+    -- 数字：再加 Minimum/Maximum/ModifyBy —— 注意这几个字段是首字母大写）。
+    if MinimapAPI and MinimapAPI.Config then
+      -- 高亮初始房间仍读写 MinimapAPI 的同一份设置。
+      ModConfigMenu.AddSetting(
+        "GoodTripPlus", tab,
+        {
+          Type = ModConfigMenu.OptionType.BOOLEAN,
+          Default = true,
+          CurrentSetting = function()
+            return MinimapAPI.Config.HighlightStartRoom == true
+          end,
+          Display = function()
+            return L.highlight_start_name .. ": " ..
+              L.boolean_values[MinimapAPI.Config.HighlightStartRoom == true]
+          end,
+          OnChange = function(newVal)
+            MinimapAPI.Config.HighlightStartRoom = newVal and true or false
+            -- 与 MinimapAPI 自己那份菜单的处理一致：改了就变成「自定义」配置（预设 0）
+            if MinimapAPI.Config.ConfigPreset ~= nil then
+              MinimapAPI.Config.ConfigPreset = 0
+            end
+          end,
+          Info = L.highlight_start_desc,
+        }
+      )
+    end
     begin_tab(L.tabs.markers)
+    section(L.sections.candidates, true)
     add_boolean_setting(
       "ShowSecretMarkers",
-      true,
+      false,
       L.secret_markers_name,
       L.secret_markers_desc
     )
@@ -297,25 +314,27 @@ return function(gt)
       L.single_secret_name,
       L.single_secret_desc
     )
+    section(L.sections.outlines)
     add_boolean_setting(
       "ShowSecretDoorOutlines",
-      true,
+      false,
       L.secret_outlines_name,
       L.secret_outlines_desc
     )
     ModConfigMenu.AddNumberSetting(
       "GoodTripPlus", tab,
       "SecretDoorOutlineOpacity",
-      0, 100, 5, 100,
+      0, 100, 5, 50,
       L.secret_outlines_opacity_name,
       L.secret_outlines_opacity_desc
     )
     add_boolean_setting(
       "DoorOutlinesDuringCurse",
-      true,
+      false,
       L.outlines_curse_name,
       L.outlines_curse_desc
     )
+    section(L.sections.special_rooms)
     add_boolean_setting(
       "FoolsSkullRoom",
       true,
@@ -335,6 +354,7 @@ return function(gt)
       L.delirium_desc
     )
     begin_tab(L.tabs.debug)
+    section(L.sections.diagnostics, true)
     -- 调试模式（诊断用，默认关）：读配置的 gt:is_debug() 每帧实时取，勾掉立刻生效。
     add_boolean_setting(
       "DebugMod",

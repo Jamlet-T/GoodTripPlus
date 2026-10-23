@@ -81,7 +81,7 @@ state.can_see_red = function()
 end
 
 local function enabled()
-  return gt:get_config_bool("ShowSecretMarkers", true)
+  return gt:get_config_bool("ShowSecretMarkers", false)
 end
 require("scripts.gtp_delverlive")(gt, state, map, room, render, enabled)
 

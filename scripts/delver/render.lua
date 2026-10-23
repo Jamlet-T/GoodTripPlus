@@ -241,7 +241,7 @@ function M.render()
 
   if tab_hold_cnt <= 0 then return end
 
-  if not gt:get_config_bool("ShowSecretMarkers", true) then return end
+  if not gt:get_config_bool("ShowSecretMarkers", false) then return end
 
   if not MinimapAPI then return end
 
