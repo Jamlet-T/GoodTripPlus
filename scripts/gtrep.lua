@@ -2,7 +2,7 @@ gt = RegisterMod("GoodTripPlus", 1)
 local console_output = require("scripts.gtp_console").write
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "2.6.24"
+gt.VERSION = "2.6.25"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -568,7 +568,13 @@ function gt:teleport_to_grid_index(gid)
     local there = trd and trd.SafeGridIndex or gid
     tele_door_slot = -1
     local arrive = gid
-    local events,route=gt:plan_door_penalties(here,gid)
+    local events,route
+    if gt:get_travel_mode()==1 then
+      -- 任意档直接免费传送，不规划付费路线或触发刺门兜底费用。
+      events={}
+    else
+      events,route=gt:plan_door_penalties(here,gid)
+    end
     local routing=gt:prepare_travel_route(route)
     if routing and routing.failed then
       if routing.charge_partial and routing.completed>0 then
@@ -1442,7 +1448,7 @@ function gt:try_cursor_travel(gid, source)
     end
     if gt.auto_log_travel then gt:auto_log_travel(gid, res) end
     if not res.ok or tele_cd >= 1 then return false end
-    if gt.prepare_adjacent_unlock then
+    if gt:get_travel_mode()~=1 and gt.prepare_adjacent_unlock then
       local prepared=gt:prepare_adjacent_unlock(gid,source)
       if prepared=='failed' then return false end
       if prepared=='pending' then return true end

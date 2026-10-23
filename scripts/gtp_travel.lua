@@ -61,11 +61,11 @@ end
 
 -- 纯引擎：逐段逐条跑，命中即返回。不碰任何游戏 API，所以能 headless 测
 -- （见 tests/travel.lua）。
--- 任意档保留目标有效性检查和显式开启的相邻门资源检查；其他档执行完整规则。
+-- 任意档只保留目标有效性检查；不检查相邻锁门资源。其他档执行完整规则。
 function gt:travel_rule_enabled(rule, ctx)
   if ctx.mode ~= 1 then return true end
   return rule.id == "target.no_target" or rule.id == "target.unknown_cell"
-    or rule.id == "target.same_room" or rule.id == "target.unlock_resources"
+    or rule.id == "target.same_room"
 end
 
 function gt:run_travel_stages(stage_names, ctx)
