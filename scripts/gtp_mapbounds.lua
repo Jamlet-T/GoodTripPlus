@@ -27,8 +27,8 @@
   * **只画已探索的房间**：MinimapAPI 房间对象的 `IsVisible()`
     （显示标志 & 1 且未被隐藏），与投影所用的「已显示」判定同源，
     不会剧透还没探索的区域。
-  * **坐标**：直接用 `gt:gid_to_rtmap_pos()` —— 传送光标与隐藏房标记用的同一套投影
-    （逐项复刻 MinimapAPI 的布局数学，含镜像世界的负缩放），因此天然对齐。
+  * **坐标**：使用传送光标与隐藏房标记的同一套投影计算格子中心；边线相对中心的
+    横向偏移及水平线长度也同步 GlobalScaleX，覆盖镜世界翻转与过渡动画。
   * **画线**：Isaac 的 Lua 没有画矩形的 API（本机所有 mod 都靠 Sprite），所以用一张
     8×8 纯白贴图 `resources/gfx/goodtripplus/bounds.png`（配 `bounds.anm2`）按需要的
     宽高缩放后绘制，颜色/透明度由 sprite.Color 控制。
@@ -79,7 +79,7 @@ local function draw_line(cx, cy, w, h)
 end
 
 -- 单个格子：贴哪条边就画哪条（角房两条）
-local function draw_cell(gid, project)
+local function draw_cell(gid, project, scale_x)
   local col = gid % COLS
   local row = math.floor(gid / COLS)
   if row < 0 or row >= ROWS then
@@ -91,15 +91,18 @@ local function draw_cell(gid, project)
     return -- 内部格：不算投影（gid_to_rtmap_pos 的锚点虽按帧缓存，能不调就不调）
   end
   local pos = project(gid)
+  -- 中心投影已翻转，格内横向偏移也必须同步翻转，否则左边界仍画在屏幕左侧。
+  local half_w = CELL_W / 2 * scale_x
+  local line_w = LINE_W * math.abs(scale_x)
   if left then
-    draw_line(pos.X - CELL_W / 2, pos.Y, LINE_T, LINE_H)
+    draw_line(pos.X - half_w, pos.Y, LINE_T, LINE_H)
   elseif right then
-    draw_line(pos.X + CELL_W / 2, pos.Y, LINE_T, LINE_H)
+    draw_line(pos.X + half_w, pos.Y, LINE_T, LINE_H)
   end
   if top then
-    draw_line(pos.X, pos.Y - CELL_H / 2, LINE_W, LINE_T)
+    draw_line(pos.X, pos.Y - CELL_H / 2, line_w, LINE_T)
   elseif bottom then
-    draw_line(pos.X, pos.Y + CELL_H / 2, LINE_W, LINE_T)
+    draw_line(pos.X, pos.Y + CELL_H / 2, line_w, LINE_T)
   end
 end
 
@@ -145,6 +148,7 @@ function M.render()
   end
   local zero = Vector(0, 0)
   local project = gt:make_rtmap_projector()
+  local scale_x = MinimapAPI.GlobalScaleX or 1
   for _, mr in ipairs(map) do
     if mr.Shape and mr.Position and mr:IsVisible() then
       local base = mr.DisplayPosition or mr.Position
@@ -152,7 +156,7 @@ function M.render()
         local col = base.X + off.X
         local row = base.Y + off.Y
         if col >= 0 and col < COLS and row >= 0 and row < ROWS then
-          draw_cell(math.floor(row * COLS + col + 0.5), project)
+          draw_cell(math.floor(row * COLS + col + 0.5), project, scale_x)
         end
       end
     end
