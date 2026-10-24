@@ -2,7 +2,7 @@ gt = RegisterMod("GoodTripPlus", 1)
 local console_output = require("scripts.gtp_console").write
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "3.0.2"
+gt.VERSION = "3.0.3"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -47,6 +47,14 @@ local n_room_num = 0
 local mmp_ctrl = false
 local mmp_ctrl_pos = Vector(0, 0)
 local mmp_highlight_gid = nil
+-- 高亮要画的那枚图标（ListIndex）。混乱诅咒交换房间内容时 MiniMAPI 会把图标搬到
+-- 「内容现在所在的那一格」上，图标所属的 descriptor 就不是画在它下面的那一格了：
+-- 目标格按屏幕位置算，高亮仍按这枚图标画，两者必须分开存。
+local mmp_highlight_list_index = nil
+local function clear_cursor_highlight()
+    mmp_highlight_gid = nil
+    mmp_highlight_list_index = nil
+end
 -- 光标「出生后还没被玩家挪动过」：这个状态下**每帧**都把它贴回当前房间
 -- （跨层 / R 重开 / rewind 后地图重绘都能自愈，和隐藏房标记同一套做法）。
 -- 玩家一按方向键就置 true，之后完全照旧 —— 光标放哪儿待在哪儿。
@@ -69,6 +77,7 @@ end, function()
     tostring(MinimapAPI and MinimapAPI:GetConfig('MouseTeleport') or false))
 end)
 local mouse_hit = require("scripts.gtp_mousehit")
+local resolve_cursor_cell = require("scripts.gtp_cursorresolve")
 local draw_room_highlight = require("scripts.gtp_roomhighlight")
 -- 光标淡入（2026-10-05 用户要求：与隐藏房候选标记 / 地图边界高亮同一节奏）：
 -- 按住地图键后先等几帧、再渐显，免得光标在 MinimapAPI 的大地图还没就位时就先冒出来
@@ -1135,22 +1144,6 @@ function gt:room_desc_at(gid)
   return lvl:GetRoomByIdx(gid, gt:get_current_dimension())
 end
 --
--- 「玩家标记压着的那枚图标」对应的房间描述。
--- 迷宫诅咒下 MiniMAPI 的标记和图标会错开一格：HandleCurseOfMaze 交换的是
--- mapRoom.Position（图标跟着换位），而 updatePlayerPos 仍按 currentroom.GridIndex
--- 画玩家标记。换位之后标记可能压在一间并不是玩家所在房的图标上，玩家看到的
--- 「自己站的那间」就是它。判定层用它把这一间也算作当前房（见 gtp_travel 的
--- target.same_room），否则会出现「点自己站着的房间，却被传送到另一间」。
--- 迷你地图不可用 / 标记此刻没有落在任何房间上时返回 nil（判定层按原逻辑走）。
-function gt:marker_room_desc()
-    if not MinimapAPI or type(MinimapAPI.GetCurrentRoom) ~= "function" then
-      return nil
-    end
-    local ok, room = pcall(function() return MinimapAPI:GetCurrentRoom() end)
-    if not ok or not room or not room.Descriptor then return nil end
-    return room.Descriptor
-end
-
 -- 当前房 / 层 / 房间 / 玩家的一份新鲜拷贝（判定上下文用）
 function gt:travel_cur_state()
   local lvl = Game():GetLevel()
@@ -1362,27 +1355,43 @@ function gt:get_mouse_screen_pos()
     -- 第二个返回值只用于输入意图：不受 WorldToScreen 投影变化影响。
     return Isaac.WorldToScreen(Input.GetMousePosition(true)), Input.GetMousePosition(false)
 end
+-- 光标命中 → (目标格号, 高亮图标所属 ListIndex)。
+--   · 目标格：按**屏幕位置**反算。位置↔格号是原版约定（画面第 56 格就是 56 号房），
+--     与 MiniMAPI 是否换过位无关 —— ChangeRoom 要去的正是画面上的这一格。
+--   · 高亮图标：mouse_hit 实际命中的 room 对象。混乱诅咒交换房间内容时 MiniMAPI
+--     会交换 room.Position（图标跟着内容走，见它的 HandleCurseOfMaze），所以这枚
+--     图标所属的 descriptor 已经不是画在它下面的那一格；高亮必须仍画在它上面，
+--     否则会漂到对面那枚图标去（2026-10-21 2.6.13 修过一次的就是这个漂移）。
+-- 两者在没换位时完全一致；换位时用 position_gid 定目标、用命中图标定高亮。
 function gt:get_cursor_grid_index(pos)
     if not MinimapAPI then
-      return gt:get_pos_grid_index(pos)
+      return gt:get_pos_grid_index(pos), nil
     end
-    -- 键盘光标也必须按 MinimapAPI 实际画出的房间命中。迷宫诅咒交换房间时，
-    -- MinimapAPI 会交换 mapRoom.Position；屏幕位置不再等于原 SafeGridIndex 的理论投影。
-    -- 若仍按格子反算，高亮和松键传送都会落到被交换到别处的那间房。
     local mapRoom = mouse_hit(MinimapAPI, pos)
-    if not mapRoom then return -99 end
+    if not mapRoom then return -99, nil end
     local rd = mapRoom.Descriptor
-    -- 大房间/L 形房的 descriptor 锚点未必是 grid_room 占据格，匹配同房间格。
-    local gid = rd.SafeGridIndex
-    if grid_room[gid] and grid_room[gid].ListIndex == rd.ListIndex then return gid end
-    for cell, descriptor in pairs(grid_room) do
-      if descriptor.ListIndex == rd.ListIndex then return cell end
+    local hit_list_index = rd and rd.ListIndex or nil
+    -- 命中图标自己所在的格（大房间/L 形房的 descriptor 锚点未必是占据格，匹配同房间格）
+    local hit_cell = -99
+    if rd then
+      local anchor = rd.SafeGridIndex
+      if grid_room[anchor] and grid_room[anchor].ListIndex == rd.ListIndex then
+        hit_cell = anchor
+      else
+        for cell, descriptor in pairs(grid_room) do
+          if descriptor.ListIndex == rd.ListIndex then
+            hit_cell = cell
+            break
+          end
+        end
+      end
     end
-    return -99
+    -- 目标格以屏幕位置为准；只有投影落空时才退回命中图标所在的格。
+    return resolve_cursor_cell(gt:get_pos_grid_index(pos), hit_cell), hit_list_index
 end
 --
 function gt:update_cursor_room_highlight()
-    local gid = gt:get_cursor_grid_index(mmp_ctrl_pos)
+    local gid, hit_list_index = gt:get_cursor_grid_index(mmp_ctrl_pos)
     local res = gt:can_travel_to(gid)
     -- 调试模式下免按键取证：光标扫到目标就把判定过程 + 门表写进 log.txt
     -- （被拒要记，挑战房被放行也要记 —— 放行同样可能判错）
@@ -1391,8 +1400,9 @@ function gt:update_cursor_room_highlight()
     end
     if res.ok then
       mmp_highlight_gid = gid
+      mmp_highlight_list_index = hit_list_index
     else
-      mmp_highlight_gid = nil
+      clear_cursor_highlight()
     end
 end
 --
@@ -1428,10 +1438,12 @@ function gt:render_cursor()
       local fade = gt:get_cursor_fade()
       if fade > 0 then
         if gt:get_config_bool("HighlightCursorRoom", true) and mmp_highlight_gid then
+          -- 画在鼠标命中的那枚图标上（换位后它可能不属于目标格，见 get_cursor_grid_index）
           local desc = grid_room[mmp_highlight_gid]
-          if desc then
+          local list_index = mmp_highlight_list_index or (desc and desc.ListIndex)
+          if list_index then
             gt:draw_minapi_room_highlight(
-              gt:get_minapi_room_by_list_index(desc.ListIndex),
+              gt:get_minapi_room_by_list_index(list_index),
               -- RGB multipliers of 1 preserve the original room art.  Zeroing
               -- them and applying a white RGB offset leaves only its silhouette.
               Color(0, 0, 0, 0.45 * fade, 1, 1, 1)
@@ -1551,7 +1563,7 @@ function gt:tab_action()
       mmp_ctrl_fade = math.min(mmp_ctrl_fade + 1, CURSOR_FADE_MAX)
     else
       mmp_ctrl = false
-      mmp_highlight_gid = nil
+      clear_cursor_highlight()
       mmp_ctrl_fade = CURSOR_FADE_MIN
       local pos, motion = gt:get_mouse_screen_pos()
       mouse_probe:update(mouse_cursor, {x=pos.X, y=pos.Y, motion_x=motion.X, motion_y=motion.Y,
@@ -1569,7 +1581,7 @@ function gt:step()
     if Game():IsPaused() then
       mmp_ctrl = false
       mmp_ctrl_fade = CURSOR_FADE_MIN
-      mmp_highlight_gid = nil
+      clear_cursor_highlight()
       local pos, motion = gt:get_mouse_screen_pos()
       mouse_probe:update(mouse_cursor, {x=pos.X, y=pos.Y, motion_x=motion.X, motion_y=motion.Y,
         down=Input.IsMouseBtnPressed(0), active=false})
@@ -1589,7 +1601,7 @@ function gt:step()
         -- 提交按住时命中的目标；try_cursor_travel 会重新验证实时准入和冷却。
         local selected_gid = mmp_highlight_gid
         mmp_ctrl = false
-        mmp_highlight_gid = nil
+        clear_cursor_highlight()
         mmp_ctrl_fade = CURSOR_FADE_MIN
         if mouse_cursor.mode == 'keyboard' and selected_gid then
           gt:try_cursor_travel(selected_gid)
@@ -1597,7 +1609,7 @@ function gt:step()
       else
         mmp_ctrl = false
         mmp_ctrl_fade = CURSOR_FADE_MIN
-        mmp_highlight_gid = nil
+        clear_cursor_highlight()
       end
       local pos, motion = gt:get_mouse_screen_pos()
       mouse_probe:update(mouse_cursor, {x=pos.X, y=pos.Y, motion_x=motion.X, motion_y=motion.Y,
@@ -1688,7 +1700,7 @@ function gt:new_level()
     -- 覆盖范围：MC_POST_NEW_LEVEL + MC_POST_GAME_STARTED（开局、R 重开、控制台 rewind）。
     mmp_ctrl = false
     mmp_ctrl_pos = Vector(0, 0)
-    mmp_highlight_gid = nil
+    clear_cursor_highlight()
     mmp_ctrl_moved = false
     mmp_ctrl_fade = CURSOR_FADE_MIN
     mouse_cursor:reset()

@@ -250,18 +250,8 @@ gt:add_travel_rule({
   id = "target.same_room", stage = "target_entry", order = 30,
   text = "目标就是当前房间",
   test = function(ctx)
-    if ctx.target.ListIndex == ctx.cur.ListIndex then
-      return { list_index = ctx.target.ListIndex }
-    end
-    -- 迷宫诅咒下 MiniMAPI 交换的是图标位置，玩家标记仍按真实格号画
-    -- （见 gtrep 的 gt:marker_room_desc）。换位后标记压着的图标是另一间房，
-    -- 但玩家看到的就是「我站在这间」—— 选中它必须视同当前房，否则会变成
-    -- 「点自己站着的房间，却被传送到另一间」。
-    local marker = gt.marker_room_desc and gt:marker_room_desc() or nil
-    if marker and marker.ListIndex == ctx.target.ListIndex then
-      return { list_index = ctx.target.ListIndex, marker = true }
-    end
-    return nil
+    if ctx.target.ListIndex ~= ctx.cur.ListIndex then return nil end
+    return { list_index = ctx.target.ListIndex }
   end,
 })
 
