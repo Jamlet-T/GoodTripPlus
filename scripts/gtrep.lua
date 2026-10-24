@@ -2,7 +2,7 @@ gt = RegisterMod("GoodTripPlus", 1)
 local console_output = require("scripts.gtp_console").write
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "3.0.0"
+gt.VERSION = "3.0.1"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -1133,6 +1133,22 @@ function gt:room_desc_at(gid)
   local lvl = Game():GetLevel()
   if not lvl then return nil end
   return lvl:GetRoomByIdx(gid, gt:get_current_dimension())
+end
+--
+-- 「玩家标记压着的那枚图标」对应的房间描述。
+-- 迷宫诅咒下 MiniMAPI 的标记和图标会错开一格：HandleCurseOfMaze 交换的是
+-- mapRoom.Position（图标跟着换位），而 updatePlayerPos 仍按 currentroom.GridIndex
+-- 画玩家标记。换位之后标记可能压在一间并不是玩家所在房的图标上，玩家看到的
+-- 「自己站的那间」就是它。判定层用它把这一间也算作当前房（见 gtp_travel 的
+-- target.same_room），否则会出现「点自己站着的房间，却被传送到另一间」。
+-- 迷你地图不可用 / 标记此刻没有落在任何房间上时返回 nil（判定层按原逻辑走）。
+function gt:marker_room_desc()
+    if not MinimapAPI or type(MinimapAPI.GetCurrentRoom) ~= "function" then
+      return nil
+    end
+    local ok, room = pcall(function() return MinimapAPI:GetCurrentRoom() end)
+    if not ok or not room or not room.Descriptor then return nil end
+    return room.Descriptor
 end
 
 -- 当前房 / 层 / 房间 / 玩家的一份新鲜拷贝（判定上下文用）
