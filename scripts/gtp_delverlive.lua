@@ -1,4 +1,4 @@
--- 同房间现场更新：揭露标志变化，以及真正撞网格的破墙泪弹/挥动中的铁镐。
+-- 同房间现场更新：揭露标志变化，以及命中门位的破墙泪弹/激光/挥动中的铁镐。
 -- REPENTOGON 使用 MC_TEAR_GRID_COLLISION；原版回退到 CollidesWithGrid。
 -- HasTearFlags/CollidesWithGrid：IsaacDocs EntityTear/Entity；
 -- GetIsSwinging/GetHitboxParentKnife/NOTCHED_AXE：REPENTOGON EntityKnife/KnifeVariant。
@@ -147,6 +147,27 @@ return function(gt, state, map, room, render, enabled)
       hit(tear, 'tear')
     end
   end
+
+  -- 激光不会触发泪弹网格碰撞回调。直线光束用终点，圆环用圆周；
+  -- 不能把激光的 Position 当作直线光束的墙面命中点。
+  gt:AddCallback(ModCallbacks.MC_POST_LASER_UPDATE, function(_, laser)
+    if not inspect_breaking_tears() then return end
+    if not (laser:HasTearFlags(TearFlags.TEAR_ACID)
+      or laser:HasTearFlags(TearFlags.TEAR_ROCK)) then return end
+
+    local radius = 20 + math.min(laser.Size or 0, 20)
+    local position, ring_radius
+    if laser:IsCircleLaser() then
+      if laser.SubType == 4 then return end -- 无碰撞效果的圆环
+      position, ring_radius = laser.Position, laser.Radius
+      if not ring_radius or ring_radius <= 0 then return end
+    else
+      position = laser:GetEndPoint()
+    end
+    if position and room.wall_hit_check(position, radius, ring_radius, true) then
+      render.refresh()
+    end
+  end)
 
   if REPENTOGON and ModCallbacks.MC_TEAR_GRID_COLLISION then
     -- REPENTOGON reports the actual grid impact, so no tear update polling.
