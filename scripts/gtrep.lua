@@ -2,7 +2,7 @@ gt = RegisterMod("GoodTripPlus", 1)
 local console_output = require("scripts.gtp_console").write
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "3.0.3"
+gt.VERSION = "3.0.4"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -595,6 +595,10 @@ function gt:teleport_to_grid_index(gid)
         end
         gt:apply_door_penalty_events(partial)
       end
+      -- 失败必须有反馈（2026-10-25 用户报）：原来这里只 return false，调用方把返回值丢掉，
+      -- 于是松手后既没有失败音也没有屏幕提示，和「没按到」完全分不出来。
+      gt:tele_failed()
+      if gt.show_travel_error then gt:show_travel_error(routing.reason, gid) end
       return false
     end
     if routing then
@@ -1432,6 +1436,10 @@ function gt:render_cursor()
     -- 这是屏幕上唯一的诊断显示（黄色的一次性 dump 浮层 2026-10-06 已删）。
     if gt.render_travel_reason then
       gt:render_travel_reason(mmp_ctrl_pos, mmp_ctrl)
+    end
+    -- 执行期失败（判定放行、路线/落点算不出来）：短寿命一行，与上面的实时理由互不遮挡。
+    if gt.render_travel_error then
+      gt:render_travel_error()
     end
     if mmp_ctrl then
       -- 淡入：前几帧 fade == 0（不画），之后渐显 —— 与标记 / 地图边界同一节奏

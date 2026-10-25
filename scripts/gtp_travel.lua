@@ -634,3 +634,59 @@ function gt:render_travel_reason(cursor_pos, cursor_active)
     end
   end
 end
+
+-- ===== 执行期失败浮层（仅调试模式）=====
+-- 判定层说「能传」、执行层却在算落点/中转路线时失败 —— 这类失败以前**完全静默**：
+-- 返回值被调用方丢掉，`gt:tele_failed()` 也早在 2026-10-06 判定上移后成了死代码。
+-- 2026-10-25 用户实测：连续几次传送失败，屏幕上什么提示都没有，只能靠翻 log.txt。
+-- 所以执行失败留一条短寿命记录，由 render_cursor 每帧取用；只画 ASCII（诊断字体画不出中文）。
+local travel_error, TRAVEL_ERROR_FRAMES = nil, 240
+local function error_log(message)
+  pcall(function() Isaac.DebugString(message) end)
+end
+
+-- 失败原因同时进 log.txt（不受调试开关控制）—— 复现时用户不必再先开调试。
+function gt:show_travel_error(reason, gid)
+  local ok = pcall(function()
+    local text = string.format("[GTP] travel failed: %s (target=%s)",
+      tostring(reason or "?"), tostring(gid))
+    travel_error = { text = text:gsub('[\128-\255]', '?'), frame = Game():GetFrameCount() }
+  end)
+  if not ok then travel_error = nil end
+  error_log(string.format("[GTPtrip] travel failed target=%s reason=%s",
+    tostring(gid), tostring(reason)))
+end
+
+function gt:clear_travel_error()
+  travel_error = nil
+end
+
+local function render_travel_error()
+  if not travel_error then return end
+  -- 过期就丢弃（与调试开关无关）：调试关着时只是不画，4 秒内把它打开仍能看到原因。
+  local elapsed = Game():GetFrameCount() - travel_error.frame
+  if elapsed < 0 or elapsed > TRAVEL_ERROR_FRAMES then
+    travel_error = nil
+    return
+  end
+  if not gt:is_debug() then return end
+  local font = gt:get_diag_font()
+  if not font then return end
+  -- 画在拒绝理由浮层上方一行，两者同时出现时不叠字。
+  font:DrawString(travel_error.text, 16, 8, KColor(1, 0.45, 0.35, 1), 0, false)
+end
+
+function gt:render_travel_error()
+  local ok, err = pcall(render_travel_error)
+  if not ok then
+    travel_error = nil
+    error_log('[GTPtrip] failure overlay disabled: ' .. tostring(err))
+  end
+end
+
+-- 新局、rewind、换层与退出均不能保留上一段行程的诊断。
+if gt.AddCallback and ModCallbacks then
+  for _, name in ipairs({'MC_POST_GAME_STARTED', 'MC_POST_NEW_LEVEL', 'MC_PRE_GAME_EXIT'}) do
+    if ModCallbacks[name] then gt:AddCallback(ModCallbacks[name], gt.clear_travel_error) end
+  end
+end

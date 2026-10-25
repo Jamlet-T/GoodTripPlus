@@ -6,6 +6,11 @@ return function(gt,cells)
     if not (gt.is_debug and gt:is_debug()) then return end
     pcall(function() Isaac.DebugString('[GTProute] '..message) end)
   end
+  -- 取消行**不受调试开关控制**：静默失败就是 2026-10-25 用户报的问题本体 —— 屏幕上一句话
+  -- 都没有，日志里也只有开了调试才有一行。每次失败的行程只多写这一行，不会刷屏。
+  local function trace_failure(message)
+    pcall(function() Isaac.DebugString('[GTProute] '..message) end)
+  end
   function gt:prepare_travel_route(route)
     if not route or #route==0 then return nil end
     local game=Game()
@@ -41,7 +46,10 @@ return function(gt,cells)
       for i,edge in ipairs(route) do
         if i>1 and edge.from~=route[i-1].to then error('broken_route') end
         hops[i]=Route.hop(edge,function(gid) return gt:grid_room_desc(gid) end,cells())
-        if not hops[i] then error('ambiguous_geometry') end
+        -- 带上出问题的那一跳：只写 ambiguous_geometry 时看不出是哪条边、更看不出
+        -- 目标是不是离网房（0 个候选和多个候选都会走到这里）。
+        if not hops[i] then error(string.format('ambiguous_geometry hop=%s->%s slot=%s',
+          tostring(edge.from),tostring(edge.to),tostring(edge.slot))) end
       end
       local last=hops[#hops]
       result.arrive,result.slot=last.cell,last.entry
@@ -83,13 +91,14 @@ return function(gt,cells)
     gt._route_transit=false
     if not ok then
       result.failed=true
+      result.reason=tostring(err)
       local valid=context_ok()
       result.charge_partial=not not valid
       if gt:level_identity()==identity then
         lvl.EnterDoor,lvl.LeaveDoor=-1,-1
         if held_maze then lvl:AddCurse(LevelCurse.CURSE_OF_MAZE,false) end
       end
-      trace('cancel completed='..result.completed..' reason='..tostring(err))
+      trace_failure('cancel completed='..result.completed..' reason='..result.reason)
       return result
     end
     result.maze=held_maze
