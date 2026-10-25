@@ -84,6 +84,7 @@ local function enabled()
   return gt:get_config_bool("ShowSecretMarkers", false)
 end
 require("scripts.gtp_delverlive")(gt, state, map, room, render, enabled)
+require("scripts.gtp_seeforever")(gt, state, map, render, enabled)
 
 -- 换房间：重算地图数据、做门位检查、标记需要刷新
 --
