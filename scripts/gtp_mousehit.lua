@@ -20,7 +20,9 @@ return function(api, pos)
         local top = origin.Y + inset + cell.Y * height
         if pos.X >= math.min(left, right) and pos.X < math.max(left, right)
           and pos.Y >= top and pos.Y < top + height then
-          return room
+          -- 返回命中占格的实际中心。目标反投影必须按整块图标取同一个格，
+          -- 不能再用边缘处的原始光标坐标（理论格心和像素边界可能差半像素）。
+          return room, {X=(left+right)/2,Y=top+height/2}
         end
       end
     end

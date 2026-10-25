@@ -2,7 +2,7 @@ gt = RegisterMod("GoodTripPlus", 1)
 local console_output = require("scripts.gtp_console").write
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "3.0.4"
+gt.VERSION = "3.0.5"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -1371,7 +1371,7 @@ function gt:get_cursor_grid_index(pos)
     if not MinimapAPI then
       return gt:get_pos_grid_index(pos), nil
     end
-    local mapRoom = mouse_hit(MinimapAPI, pos)
+    local mapRoom, hit_center = mouse_hit(MinimapAPI, pos)
     if not mapRoom then return -99, nil end
     local rd = mapRoom.Descriptor
     local hit_list_index = rd and rd.ListIndex or nil
@@ -1390,8 +1390,9 @@ function gt:get_cursor_grid_index(pos)
         end
       end
     end
-    -- 目标格以屏幕位置为准；只有投影落空时才退回命中图标所在的格。
-    return resolve_cursor_cell(gt:get_pos_grid_index(pos), hit_cell), hit_list_index
+    -- 目标格以命中占格的屏幕中心为准；图块边缘不能借用相邻格的准入。
+    -- 只有投影落空时才退回命中图标所在的格，仍保留混乱诅咒换位后的分离语义。
+    return resolve_cursor_cell(gt:get_pos_grid_index(hit_center), hit_cell), hit_list_index
 end
 --
 function gt:update_cursor_room_highlight()
@@ -1445,6 +1446,9 @@ function gt:render_cursor()
       -- 淡入：前几帧 fade == 0（不画），之后渐显 —— 与标记 / 地图边界同一节奏
       local fade = gt:get_cursor_fade()
       if fade > 0 then
+        -- MinimapAPI 在输入处理后才更新 RenderOffset（含平滑滑动）。
+        -- 最终绘制前按本帧图块重取目标与准入，避免旧放行结果画到新目标上。
+        gt:update_cursor_room_highlight()
         if gt:get_config_bool("HighlightCursorRoom", true) and mmp_highlight_gid then
           -- 画在鼠标命中的那枚图标上（换位后它可能不属于目标格，见 get_cursor_grid_index）
           local desc = grid_room[mmp_highlight_gid]
