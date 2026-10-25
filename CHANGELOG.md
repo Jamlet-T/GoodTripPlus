@@ -1,3 +1,13 @@
+GoodTripPlus 3.0.6（待发布）
+
+- 修复硫酸、地球、水果蛋糕及数据破解的破墙效果变为硫磺火、科技 X 等激光后，命中假隐藏房门位却不排除候选的问题；直线光束按终点、圆环按圆周检测。
+
+GoodTripPlus 3.0.6 (unreleased)
+
+- Fixed false Secret Room candidates remaining after wall-breaking laser attacks hit their doorway; linear beams use their endpoint and rings use their circumference.
+
+---
+
 GoodTripPlus 2.6.6（待发布）
 自 2.5.0 以来的累计更新
 

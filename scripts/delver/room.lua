@@ -142,7 +142,9 @@ end
 
 ---@param position Vector
 ---@param radius number
-function M.wall_hit_check(position, radius)
+---@param ring_radius? number
+---@param allow_outside? boolean
+function M.wall_hit_check(position, radius, ring_radius, allow_outside)
   if state.is_ignored() then return false end
 
   local lid = Game():GetLevel():GetCurrentRoomDesc().ListIndex
@@ -152,7 +154,7 @@ function M.wall_hit_check(position, radius)
 
   local room_obj = Game():GetRoom()
   local hit_gid = room_obj:GetGridIndex(position)
-  if hit_gid < 0 then return false end
+  if hit_gid < 0 and not allow_outside then return false end
   local changed = false
 
   for cid, cand in pairs(map.candidates) do
@@ -172,6 +174,7 @@ function M.wall_hit_check(position, radius)
 
       local door_pos = room_obj:GetDoorSlotPosition(entry.doorslot)
       local dist = (position - door_pos):Length()
+      if ring_radius then dist = math.abs(dist - ring_radius) end
       if dist < radius then
         if not cand.lid then
           changed = map.exclude_candidate(cid) or changed
