@@ -1,4 +1,4 @@
--- Some visited empty trap rooms keep RoomDescriptor.Clear=false after their exit opens.
+-- Some visited empty rooms keep RoomDescriptor.Clear=false after their exit opens.
 -- Treat them as cleared for this mod's map and travel rules without changing game state.
 return function(gt, api)
   local cleared = {}
@@ -17,6 +17,11 @@ return function(gt, api)
     local kind = desc.Data.Type
     local eligible = kind == RoomType.ROOM_DEFAULT
       or (kind == RoomType.ROOM_CHALLENGE and desc.ChallengeDone)
+    -- Extra secret rooms (Fragmented Card / Luna) use the same guarded live
+    -- evidence; never infer clear state from room type or trinket possession.
+    local secret = kind == RoomType.ROOM_SECRET or kind == RoomType.ROOM_SUPERSECRET
+      or kind == RoomType.ROOM_ULTRASECRET
+    eligible = eligible or (secret and room:IsClear())
     local open_exit = false
     for slot = 0, 7 do
       local door = room:GetDoor(slot)
