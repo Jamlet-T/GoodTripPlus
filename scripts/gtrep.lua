@@ -2,7 +2,7 @@ gt = RegisterMod("GoodTripPlus", 1)
 local console_output = require("scripts.gtp_console").write
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "3.0.8"
+gt.VERSION = "3.0.9"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -1334,7 +1334,11 @@ function gt:mmp_ctrl_move()
       if pressed then
         local amount = grid_step and ((i == 1 or i == 4) and 15 or 17) or speed
         local newpos = mmp_ctrl_pos + dir[i] * amount
-        if newpos.X >= xmin and newpos.Y >= ymin and newpos.X <= xmax and newpos.Y <= ymax then
+        -- Vector 保存 float，投影/逐格加减后的格心与 Lua 边界可能相差数个 ULP。
+        -- 顶/底行恰好落在边界，严格比较会拒绝最后一格；容差远小于一个像素。
+        local epsilon = 0.001
+        if newpos.X >= xmin - epsilon and newpos.Y >= ymin - epsilon
+            and newpos.X <= xmax + epsilon and newpos.Y <= ymax + epsilon then
           mmp_ctrl_pos = newpos
           -- 玩家自己动过光标了：从此不再自动归位（照旧"你放哪儿就待在哪儿"）
           mmp_ctrl_moved = true
