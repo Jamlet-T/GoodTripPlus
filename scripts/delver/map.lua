@@ -170,6 +170,7 @@ end
 local function fake_type(cid)
   local known_normal_sides = 0
   local touches_special_room = false
+  local touches_regular_secret = false
   -- Count walls touching this grid cell, not distinct room IDs. At the
   -- missing corner of an L-shaped room, two walls belong to one room but
   -- still rule out a super-secret room.
@@ -181,6 +182,13 @@ local function fake_type(cid)
     if n_cell then
       if n_cell.category == C.CELL.CATEGORY.BOSS then
         return nil
+      elseif n_cell.category == C.CELL.CATEGORY.SECRET then
+        -- Known REGULAR rooms do not supply entrances (build_entries skips
+        -- secrets), but they still rule out SUPER at an adjacent location.
+        -- Use only public knowledge here, never the hidden floor descriptors.
+        if M.rooms[n_cell.lid].type == C.SECRET_TYPE.REGULAR then
+          touches_regular_secret = true
+        end
       elseif n_cell.category == C.CELL.CATEGORY.NORMAL or
              n_cell.category == C.CELL.CATEGORY.SPECIAL then
         local neighbor_room = M.rooms[n_cell.lid]
@@ -221,8 +229,9 @@ local function fake_type(cid)
   if adjacent_sides == 1 then
     -- Single-connection REGULAR rooms are rare but valid, including behind
     -- special rooms. Full map visibility does not make them SUPER-only.
-    -- Only SUPER is ruled out when the sole neighbor is known to be special.
-    return C.SECRET_TYPE.REGULAR, not touches_special_room,
+    -- SUPER is also ruled out beside a known REGULAR secret room, even though
+    -- that secret wall is not counted as a possible entrance.
+    return C.SECRET_TYPE.REGULAR, not (touches_special_room or touches_regular_secret),
       adjacent_sides, known_normal_sides > 0
   end
 
