@@ -128,16 +128,15 @@ function M.door_check()
       elseif cand.lid == nil then
         map.exclude_candidate(cid)
         break
-      else
-        log.error("Try to remove a real secret room: ")
-        log.print_room(cand.lid, map):error()
       end
+      -- A real descriptor (including ListIndex 0) is authoritative. A failed
+      -- wall test only excludes guesses; it is not an error for a real room.
 
       ::next_entry::
     end
   end
 
-  -- log.info 为 no-op；错误分支的 print_room(...):error() 仍保留。
+  -- Real rooms are never candidates for this exclusion pass.
 end
 
 ---@param position Vector
