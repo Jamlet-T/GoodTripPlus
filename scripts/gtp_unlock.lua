@@ -1,6 +1,9 @@
 -- 直接相邻门的费用策略；不访问游戏 API、不把特殊闸门或隐藏墙当钥匙门。
 local M={}
 function M.cost(e)
+  -- Redirect flags belong to the target descriptor, not the current inventory.
+  -- An already unlocked Blue Key door must still be entered through the engine.
+  if e.blue_redirect and not e.locked then return {kind='native',amount=0} end
   if e.open or not e.locked then return nil end
   if e.variant~=1 and e.variant~=2 then return nil end
   if e.blue_key then return {kind='key',amount=0} end
