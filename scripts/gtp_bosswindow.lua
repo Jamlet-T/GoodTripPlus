@@ -13,7 +13,8 @@
     任一玩家持有山羊头（215）或圣餐（499）时，本条奖励门规则直接放行，
     无视两项菜单设置；其他传送规则仍照常判定。
     Boss Rush 门在深牢 II 的 20 分钟内或陵墓 II 的 25 分钟内放行；
-    蓝子宫门在子宫 II 的 30 分钟内放行。两者的限时豁免不放行恶魔／天使房门。
+    蓝子宫门在子宫 II 的 30 分钟内放行，奇怪钥匙仅对蓝子宫门豁免时限。
+    两者的限时豁免不放行恶魔／天使房门。
 
   为什么不是「刚打完 boss 就禁传」
   --------------------------------
@@ -126,6 +127,15 @@ local function timed_door_allowed(category, game, level)
 end
 
 local function reward_door_allowed(category, game, level)
+    -- Strange Key keeps the Hush entrance available irrespective of the timer.
+    -- Its exemption is category-local: devil/angel and Boss Rush stay protected.
+    if category == "blue_womb" then
+      for index = 0, game:GetNumPlayers() - 1 do
+        local p = Isaac.GetPlayer(index)
+        if p and p:Exists() and p.HasTrinket and TrinketType
+            and p:HasTrinket(TrinketType.TRINKET_STRANGE_KEY) then return true end
+      end
+    end
     if category == "boss_rush" or category == "blue_womb" then
       if timed_door_allowed(category, game, level) then return true end
       return gt:get_config_bool("AllowRushHushDoorTeleport", false) == true
