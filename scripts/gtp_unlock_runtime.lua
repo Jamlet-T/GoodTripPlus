@@ -2,6 +2,9 @@
 local Policy=require('scripts.gtp_unlock')
 return function(gt)
   local pending
+  local function has_trinket(p,name)
+    return TrinketType and TrinketType[name] and p.HasTrinket and p:HasTrinket(TrinketType[name]) or false
+  end
   local function trace(message)
     pcall(function() Isaac.DebugString('[GTPunlock] '..message) end)
   end
@@ -24,6 +27,8 @@ return function(gt)
           local variant=door.Desc and door.Desc.Variant
           local cost=Policy.cost({variant=variant,state=door.State,open=door:IsOpen(),locked=door:IsLocked(),
             arcade=door.IsTargetRoomArcade and door:IsTargetRoomArcade(),
+            shop=rd.Data.Type==RoomType.ROOM_SHOP,
+            store_key=has_trinket(p,'TRINKET_STORE_KEY'),blue_key=has_trinket(p,'TRINKET_BLUE_KEY'),
             pay_to_play=p.HasCollectible and p:HasCollectible(CollectibleType.COLLECTIBLE_PAY_TO_PLAY)})
           if cost then
             return {door=door,slot=slot,cost=cost,affordable=Policy.affordable(cost,
@@ -61,7 +66,7 @@ return function(gt)
       if not accepted then p:AddCoins(s.cost.amount) end
     else
       accepted=false
-      for _=1,s.cost.amount do
+      for _=1,math.max(1,s.cost.amount) do
         if not door:IsLocked() then accepted=true; break end
         local beforeKeys,beforeState=p:GetNumKeys(),door.State
         local result=door:TryUnlock(p,false)

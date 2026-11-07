@@ -2,6 +2,9 @@
 local M={}
 function M.cost(e)
   if e.open or not e.locked then return nil end
+  if e.variant~=1 and e.variant~=2 then return nil end
+  if e.blue_key then return {kind='key',amount=0} end
+  if e.store_key and e.shop and not e.pay_to_play then return {kind='key',amount=0} end
   if e.variant==1 and e.arcade then return {kind='coin',amount=1} end
   if e.pay_to_play then return nil end -- 转换门的外观/费用尚未核实，不能误扣钥匙。
   if e.variant==1 then return {kind='key',amount=1} end
@@ -11,6 +14,7 @@ function M.cost(e)
   end
 end
 function M.affordable(cost,actor)
+  if cost.amount==0 then return true end
   if cost.kind=='coin' then return (actor.coins or 0)>=cost.amount end
   return actor.golden==true or (actor.keys or 0)>=cost.amount
 end
