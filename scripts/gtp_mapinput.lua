@@ -4,16 +4,11 @@ return function(gt, api)
   if not api or api._gtpMapInputInstalled or type(api.IsLarge)~='function'
     or type(api.GetTransparency)~='function' then return end
   api._gtpMapInputInstalled=true
-  local original_large=api.IsLarge
   local original_transparency=api.GetTransparency
   if gt.replace_minimap_map_input then gt:replace_minimap_map_input(api) end
   local held_frames,last_frame=0,nil
   local function poll()
-    local active,frame,paused,ready=gt:get_map_input_sample()
-    if ready==false then
-      held_frames,last_frame=0,nil
-      return nil
-    end
+    local active,frame,paused=gt:get_map_input_sample()
     if not active then
       local released=held_frames
       local valid_release=last_frame~=nil and frame>=last_frame and not paused
@@ -36,13 +31,11 @@ return function(gt, api)
   gt.update_map_input=poll
   function api:IsLarge(...)
     local held=poll()
-    if held==nil then return original_large(self,...) end
     return held or self:GetConfig('DisplayMode')==3
   end
   function api:GetTransparency(...)
-    local held=poll()
     local value=original_transparency(self,...)
-    if not held or not self:GetConfig('LargeMapFadeInOnHold') then return value end
+    if not poll() or not self:GetConfig('LargeMapFadeInOnHold') then return value end
     local base=gt:get_map_base_opacity(self)
     return base+(1-base)*math.min(held_frames/5,1)
   end

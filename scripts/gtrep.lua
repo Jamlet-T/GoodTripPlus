@@ -2,7 +2,7 @@ gt = RegisterMod("GoodTripPlus", 1)
 local console_output = require("scripts.gtp_console").write
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "3.0.16"
+gt.VERSION = "3.0.15"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -773,7 +773,6 @@ function gt:get_map_key_binding(key)
     if value ~= nil then return value ~= false and value ~= -1 and value or nil end
 end
 function gt:is_map_key_pressed()
-    if not gt:prep() then return false end
     local controller = player.ControllerIndex
     local keyboard_key = gt:get_map_key_binding("MapKeyboardKey")
     local controller_key = gt:get_map_key_binding("MapControllerKey")
@@ -789,14 +788,12 @@ end
 function gt:get_map_input_sample()
     local game=Game()
     local paused=game:IsPaused()
-    local ready=gt:prep()~=nil
-    return ready and not paused and gt:is_map_key_pressed(), game:GetFrameCount(), paused, ready
+    return not paused and gt:is_map_key_pressed(), game:GetFrameCount(), paused
 end
 function gt:get_map_base_opacity(api)
     return Options and Options.MapOpacity or api:GetConfig('TransparencyLargeMap')
 end
 function gt:is_map_key_triggered()
-    if not gt:prep() then return false end
     local controller = player.ControllerIndex
     local keyboard_key = gt:get_map_key_binding("MapKeyboardKey")
     local controller_key = gt:get_map_key_binding("MapControllerKey")
@@ -824,8 +821,7 @@ function gt:replace_minimap_map_input(api)
       if entry.Mod==api and not entry._gtpMapBindingWrapped then
         local original=entry.Function
         entry.Function=function(mod,entity,hook,action,...)
-           if hook==InputHook.IS_ACTION_PRESSED and action==ButtonAction.ACTION_MAP
-               and gt:prep() then return nil end
+          if hook==InputHook.IS_ACTION_PRESSED and action==ButtonAction.ACTION_MAP then return nil end
           return original(mod,entity,hook,action,...)
         end
         entry._gtpMapBindingWrapped=true
@@ -836,7 +832,6 @@ end
 -- MiniMAPI 回调代理配合使用。暂停菜单和其它玩家继续交给引擎处理。
 function gt:map_input_override(entity,hook,action)
     if not entity then return nil end
-    if not gt:prep() then return nil end
     local owner=entity:ToPlayer()
     local shoot_action = action==ButtonAction.ACTION_SHOOTUP
         or action==ButtonAction.ACTION_SHOOTLEFT
@@ -1442,7 +1437,6 @@ end
 -- minimap art was painted on top of it afterwards, making the cursor appear
 -- to be stuck underneath the map with REPENTOGON installed.
 function gt:render_cursor()
-    if not gt:prep() then return end
     -- 调试模式下的实时拒绝理由（由 gtp_travel 提供；模块不在时跳过）。
     -- 这是屏幕上唯一的诊断显示（黄色的一次性 dump 浮层 2026-10-06 已删）。
     if gt.render_travel_reason then
@@ -1479,16 +1473,7 @@ function gt:render_cursor()
 end
 --
 function gt:prep()
-    -- 开局回调可能被先执行的其它模组异常中断；输入/绘制入口自行刷新，
-    -- 不能依赖加载时的玩家缓存，也不能在读完输入后才尝试恢复。
-    local game=Game()
-    if game.GetNumPlayers and game:GetNumPlayers()==0 then
-      player=nil
-      return nil
-    end
     player = Isaac.GetPlayer(0)
-    if player and player.Exists and not player:Exists() then player=nil end
-    return player
 end
 -- 键盘松开地图键与鼠标点击共用准入、冷却、诊断和隐藏/诅咒房前室准备。
 -- 来源：原 step() 松键传送分支。
@@ -1603,16 +1588,6 @@ function gt:tab_action()
 end
 --
 function gt:step()
-    if not gt:prep() then
-      mmp_ctrl=false
-      mmp_ctrl_moved=false
-      mmp_ctrl_fade=CURSOR_FADE_MIN
-      tainted_shoot_latched=false
-      clear_cursor_highlight()
-      mouse_cursor:reset()
-      if gt.update_map_input then gt:update_map_input() end
-      return
-    end
     if gt.update_map_input then gt:update_map_input() end
     --a wall can open under the player's feet (bomb, red key), so sweep every
     --tick; but not mid-transition, when the live room and the cached descriptor disagree
