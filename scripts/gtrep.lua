@@ -1,8 +1,10 @@
 gt = RegisterMod("GoodTripPlus", 1)
 local console_output = require("scripts.gtp_console").write
+-- 地图键的设备解析：J510 起键盘玩家的 ControllerIndex 由 0 变为 -2。
+local map_key_device = require("scripts.gtp_device")
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "3.0.15"
+gt.VERSION = "3.0.16"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -773,17 +775,18 @@ function gt:get_map_key_binding(key)
     if value ~= nil then return value ~= false and value ~= -1 and value or nil end
 end
 function gt:is_map_key_pressed()
+    if not player then return false end
     local controller = player.ControllerIndex
     local keyboard_key = gt:get_map_key_binding("MapKeyboardKey")
     local controller_key = gt:get_map_key_binding("MapControllerKey")
-    local keyboard_pressed,controller_pressed=false,false
-    if keyboard_key~=nil then keyboard_pressed=Input.IsButtonPressed(keyboard_key,0)
-    else keyboard_pressed=Input.IsActionPressed(ButtonAction.ACTION_MAP,0) end
-    if controller~=0 then
-      if controller_key~=nil then controller_pressed=Input.IsButtonPressed(controller_key,controller)
-      else controller_pressed=Input.IsActionPressed(ButtonAction.ACTION_MAP,controller) end
-    end
-    return keyboard_pressed or controller_pressed
+    local keyboard_device = map_key_device.keyboard_device(controller)
+    local keyboard_pressed
+    if keyboard_key~=nil then keyboard_pressed=Input.IsButtonPressed(keyboard_key,keyboard_device)
+    else keyboard_pressed=Input.IsActionPressed(ButtonAction.ACTION_MAP,keyboard_device) end
+    if keyboard_pressed then return true end
+    if not map_key_device.is_gamepad(controller) then return false end
+    if controller_key~=nil then return Input.IsButtonPressed(controller_key,controller) end
+    return Input.IsActionPressed(ButtonAction.ACTION_MAP,controller)
 end
 function gt:get_map_input_sample()
     local game=Game()
@@ -794,17 +797,18 @@ function gt:get_map_base_opacity(api)
     return Options and Options.MapOpacity or api:GetConfig('TransparencyLargeMap')
 end
 function gt:is_map_key_triggered()
+    if not player then return false end
     local controller = player.ControllerIndex
     local keyboard_key = gt:get_map_key_binding("MapKeyboardKey")
     local controller_key = gt:get_map_key_binding("MapControllerKey")
-    local keyboard_triggered,controller_triggered=false,false
-    if keyboard_key~=nil then keyboard_triggered=Input.IsButtonTriggered(keyboard_key,0)
-    else keyboard_triggered=Input.IsActionTriggered(ButtonAction.ACTION_MAP,0) end
-    if controller~=0 then
-      if controller_key~=nil then controller_triggered=Input.IsButtonTriggered(controller_key,controller)
-      else controller_triggered=Input.IsActionTriggered(ButtonAction.ACTION_MAP,controller) end
-    end
-    return keyboard_triggered or controller_triggered
+    local keyboard_device = map_key_device.keyboard_device(controller)
+    local keyboard_triggered
+    if keyboard_key~=nil then keyboard_triggered=Input.IsButtonTriggered(keyboard_key,keyboard_device)
+    else keyboard_triggered=Input.IsActionTriggered(ButtonAction.ACTION_MAP,keyboard_device) end
+    if keyboard_triggered then return true end
+    if not map_key_device.is_gamepad(controller) then return false end
+    if controller_key~=nil then return Input.IsButtonTriggered(controller_key,controller) end
+    return Input.IsActionTriggered(ButtonAction.ACTION_MAP,controller)
 end
 -- GetCallbacks 的 Mod/Function/Param 为公开字段。只代理 MiniMAPI 的地图输入处理，
 -- 保持回调优先级、顺序和其它输入原样；避免原生 Tab 松开时再次切换显示模式。
