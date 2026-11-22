@@ -9,6 +9,10 @@ gt.FastRestartEnable = true
 
 -- 键盘传送光标每次按键移动一个 1x1 房间格距；关闭时按光标速度连续移动。
 gt.CursorGridStep = false
+-- 单格模式下长按方向键连续走格；间隔单位是帧（60 帧 ≈ 1 秒）。
+-- 只在 CursorGridStep 开启时生效，默认关闭以保持“一次按下走一格”。
+gt.GridStepRepeat = false
+gt.GridStepRepeatInterval = 8
 -- 鼠标跟随光标与左键点击传送；关闭后仍可用键盘/手柄。
 gt.MouseTeleport = true
 

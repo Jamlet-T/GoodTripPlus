@@ -121,6 +121,19 @@ return function(gt)
       L.cursor_grid_step_name,
       L.cursor_grid_step_desc
     )
+    add_boolean_setting(
+      "GridStepRepeat",
+      false,
+      L.grid_step_repeat_name,
+      L.grid_step_repeat_desc
+    )
+    ModConfigMenu.AddNumberSetting(
+      "GoodTripPlus", tab,
+      "GridStepRepeatInterval",
+      2, 30, 1, 8,
+      L.grid_step_repeat_interval_name,
+      L.grid_step_repeat_interval_desc
+    )
     section(L.sections.mouse)
     add_boolean_setting(
       "MouseTeleport",

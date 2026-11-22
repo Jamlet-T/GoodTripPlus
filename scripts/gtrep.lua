@@ -4,7 +4,7 @@ local console_output = require("scripts.gtp_console").write
 local map_key_device = require("scripts.gtp_device")
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "3.0.17"
+gt.VERSION = "3.0.18"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -80,6 +80,8 @@ end, function()
 end)
 local mouse_hit = require("scripts.gtp_mousehit")
 local resolve_cursor_cell = require("scripts.gtp_cursorresolve")
+-- 单格移动的长按连续移动：每个方向独立计时，纯状态机见 gtp_cursorrepeat。
+local cursor_repeat = require("scripts.gtp_cursorrepeat").new()
 local draw_room_highlight = require("scripts.gtp_roomhighlight")
 -- 光标淡入（2026-10-05 用户要求：与隐藏房候选标记 / 地图边界高亮同一节奏）：
 -- 按住地图键后先等几帧、再渐显，免得光标在 MinimapAPI 的大地图还没就位时就先冒出来
@@ -142,6 +144,9 @@ gt.ArriveAtDoor = true
 gt.FairTripTime = false
 gt.HighlightCursorRoom = true
 gt.CursorGridStep = false
+-- 单格移动时长按方向键连续走格；间隔单位是帧（60 帧 ≈ 1 秒）。
+gt.GridStepRepeat = false
+gt.GridStepRepeatInterval = 8
 gt.MouseTeleport = true
 gt.ShowSecretMarkers = false
 gt.ShowSingleSecretCandidates = false
@@ -1301,6 +1306,11 @@ function gt:mmp_ctrl_move()
     local moved = false
     local speed = gt:get_cursor_speed()
     local grid_step = gt:get_config_bool("CursorGridStep", false)
+    -- 长按连续移动只在单格模式下有意义；关闭时保持原来的“一次按下走一格”。
+    local grid_repeat = grid_step and gt:get_config_bool("GridStepRepeat", false)
+    local repeat_interval = grid_repeat
+      and math.max(2, math.floor(tonumber(gt:get_config_bool("GridStepRepeatInterval", 8)) or 8)) or 8
+    local frame = grid_repeat and Game():GetFrameCount() or 0
     local xmin, xmax, ymin, ymax
     if MinimapAPI then
       local offsetVec = gt:get_minapi_offset_vec()
@@ -1327,10 +1337,16 @@ function gt:mmp_ctrl_move()
     for i = 1, 4 do
       local pressed
       if grid_step then
-        pressed = Input.IsActionTriggered(key[i], player.ControllerIndex)
-        if not pressed then
+        local edge = Input.IsActionTriggered(key[i], player.ControllerIndex)
+        if not edge then
           local button = gt:get_cursor_arrow_button(i)
-          pressed = button ~= nil and Input.IsButtonTriggered(button, 0) or false
+          edge = button ~= nil and Input.IsButtonTriggered(button, 0) or false
+        end
+        if grid_repeat then
+          pressed = cursor_repeat:should_move(i, frame, edge,
+            gt:cursor_direction_pressed(i), repeat_interval)
+        else
+          pressed = edge
         end
       else
         pressed = gt:cursor_direction_pressed(i)
