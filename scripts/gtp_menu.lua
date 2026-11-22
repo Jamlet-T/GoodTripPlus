@@ -141,6 +141,15 @@ return function(gt)
       L.mouse_teleport_name,
       L.mouse_teleport_desc
     )
+    section(L.sections.appearance)
+    ModConfigMenu.AddNumberSetting(
+      "GoodTripPlus", tab,
+      "CursorColor",
+      1, #L.cursor_color_values, 1, 1,
+      L.cursor_color_name,
+      L.cursor_color_values,
+      L.cursor_color_desc
+    )
     begin_tab(L.tabs.travel)
     section(L.sections.scope, true)
     ModConfigMenu.AddNumberSetting(

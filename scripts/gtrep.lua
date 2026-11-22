@@ -4,7 +4,7 @@ local console_output = require("scripts.gtp_console").write
 local map_key_device = require("scripts.gtp_device")
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "3.0.19"
+gt.VERSION = "3.0.20"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -82,6 +82,8 @@ local mouse_hit = require("scripts.gtp_mousehit")
 local resolve_cursor_cell = require("scripts.gtp_cursorresolve")
 -- 单格移动的长按连续移动：每个方向独立计时，纯状态机见 gtp_cursorrepeat。
 local cursor_repeat = require("scripts.gtp_cursorrepeat").new()
+-- 光标颜色预设：白色箭头贴图按乘法着色，返回 {r, g, b}。
+local cursor_color = require("scripts.gtp_cursorcolor")
 local draw_room_highlight = require("scripts.gtp_roomhighlight")
 -- 光标淡入（2026-10-05 用户要求：与隐藏房候选标记 / 地图边界高亮同一节奏）：
 -- 按住地图键后先等几帧、再渐显，免得光标在 MinimapAPI 的大地图还没就位时就先冒出来
@@ -147,6 +149,8 @@ gt.CursorGridStep = false
 -- 单格移动时长按方向键连续走格；间隔单位是帧（60 帧 ≈ 1 秒）。
 gt.GridStepRepeat = false
 gt.GridStepRepeatInterval = 8
+-- 光标颜色预设序号（1 = 白色，见 scripts/gtp_cursorcolor.lua）。
+gt.CursorColor = 1
 gt.MouseTeleport = true
 gt.ShowSecretMarkers = false
 gt.ShowSingleSecretCandidates = false
@@ -1486,7 +1490,8 @@ function gt:render_cursor()
             )
           end
         end
-        cursor.Color = Color(1, 1, 1, fade, 0, 0, 0)
+        local tint = cursor_color.get(gt:get_config_bool("CursorColor", 1))
+        cursor.Color = Color(tint[1], tint[2], tint[3], fade, 0, 0, 0)
         gt:draw_rtmap_cursor()
       end
     end

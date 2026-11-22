@@ -13,6 +13,8 @@ gt.CursorGridStep = false
 -- 只在 CursorGridStep 开启时生效，默认关闭以保持“一次按下走一格”。
 gt.GridStepRepeat = false
 gt.GridStepRepeatInterval = 8
+-- 传送光标颜色预设（1 = 白色）；色表见 scripts/gtp_cursorcolor.lua。
+gt.CursorColor = 1
 -- 鼠标跟随光标与左键点击传送；关闭后仍可用键盘/手柄。
 gt.MouseTeleport = true
 
