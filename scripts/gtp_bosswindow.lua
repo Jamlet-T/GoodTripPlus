@@ -45,7 +45,8 @@
   ------
   登记为 ① departure 段的规则 `departure.reward_door`（2026-10-06 起不包装函数）。
   ① 段是「现在能不能走」，它决定**光标能不能呼出** —— 未放行的奖励门会阻止呼出光标。
-  表现与其它准入拒绝完全一致。两个菜单选项默认关闭；调试模式只出诊断。
+  表现与其它准入拒绝完全一致。两个菜单选项自 3.0.22 起默认开启（只影响新订阅玩家的
+  MCM 初值，老玩家存档值不变）；调试模式只出诊断。
 
   诊断
   ----
@@ -138,9 +139,9 @@ local function reward_door_allowed(category, game, level)
     end
     if category == "boss_rush" or category == "blue_womb" then
       if timed_door_allowed(category, game, level) then return true end
-      return gt:get_config_bool("AllowRushHushDoorTeleport", false) == true
+      return gt:get_config_bool("AllowRushHushDoorTeleport", true) == true
     end
-    return gt:get_config_bool("AllowDevilAngelDoorTeleport", false) == true
+    return gt:get_config_bool("AllowDevilAngelDoorTeleport", true) == true
 end
 
 -- 联机时任一玩家持有即可豁免；先验证实体，避免初始化期间调用 HasCollectible 崩溃。

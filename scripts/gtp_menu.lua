@@ -186,15 +186,18 @@ return function(gt)
       L.block_curse_name,
       L.block_curse_desc
     )
+    -- 3.0.22 起两项奖励门开关的注册默认值改为 true（Fixed 原默认 false）。
+    -- MCM 只在键缺失时写入 Default（modconfig.lua:987-990），所以这只改「新订阅玩家」
+    -- 的初值与「恢复默认」的目标值；老玩家存档里已有的 false 保持不变。
     add_boolean_setting(
       "AllowDevilAngelDoorTeleport",
-      false,
+      true,
       L.allow_devil_angel_name,
       L.allow_devil_angel_desc
     )
     add_boolean_setting(
       "AllowRushHushDoorTeleport",
-      false,
+      true,
       L.allow_rush_hush_name,
       L.allow_rush_hush_desc
     )

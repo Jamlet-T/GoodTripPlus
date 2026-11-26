@@ -4,7 +4,9 @@
 -- 传送准入逻辑为 GoodTrip [Fixed] 的忠实移植，选项与 Fixed 同名同默认值
 -- （例外：① 传送范围把 Fixed 的 AllowNeighborRoom + AllowAnyRoom 两项合并成一个三选一的
 --   TravelMode，默认值等价于 Fixed 的原默认组合；② 传送过场把 Fixed 的 TeleportAnimation +
---   FastTransition 两个布尔项合并成 TeleportTransition，当前两档（立即传送 / 淡入淡出），默认「淡入淡出」；淡入淡出改用原生 FADE=1，立即传送对应 Fixed 的 FastTransition。
+--   FastTransition 两个布尔项合并成 TeleportTransition，当前两档（立即传送 / 淡入淡出），默认「淡入淡出」；淡入淡出改用原生 FADE=1，立即传送对应 Fixed 的 FastTransition；
+--   ③ 两类奖励门开关（AllowDevilAngelDoorTeleport / AllowRushHushDoorTeleport）自 3.0.22 起
+--   默认开，Fixed 为默认关 —— 只为新订阅玩家少踩坑，老玩家存档值不受影响，理由见下文对应项。）
 gt.FastRestartEnable = true
 
 -- 键盘传送光标每次按键移动一个 1x1 房间格距；关闭时按光标速度连续移动。
@@ -68,12 +70,16 @@ gt.TravelMode = 2
 gt.BlockCurseRoom = true
 
 -- 当前房间有临时恶魔房/天使房门时允许传送；红钥匙常驻房间的门本来就不受此限制。
-gt.AllowDevilAngelDoorTeleport = false
+-- 3.0.22 起默认开：新订阅玩家不会因为 boss 房开出恶魔/天使门就突然传不出去。
+-- **已订阅的玩家不受影响** —— MCM 只在键缺失时写入 Default（modconfig.lua:987），
+-- 老玩家存档里已有的 false 继续生效；只有主动「恢复默认」或清档才会变成新默认。
+gt.AllowDevilAngelDoorTeleport = true
 -- 当前房间有 Boss Rush/蓝子宫门时允许传送。Boss Rush 在深牢 II 20 分钟内、
 -- 陵墓 II 25 分钟内可限时豁免；蓝子宫在子宫 II 30 分钟内可限时豁免。
 -- 同时有恶魔/天使房门时，该门仍须由第一项放行或由下述道具豁免。
 -- 任一玩家持有山羊头（215）或圣餐（499）时，本条奖励门限制无视上述两项设置。
-gt.AllowRushHushDoorTeleport = false
+-- 3.0.22 起默认开，新旧玩家隔离机制同上一条。
+gt.AllowRushHushDoorTeleport = true
 
 -- 只能传送到经已清房间逐门连通的房间（Fixed: FairTripPath）
 gt.FairTripPath = true
