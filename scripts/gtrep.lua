@@ -1,10 +1,11 @@
 gt = RegisterMod("GoodTripPlus", 1)
 local console_output = require("scripts.gtp_console").write
--- 地图键的设备解析：J510 起键盘玩家的 ControllerIndex 由 0 变为 -2。
+-- 地图键的设备解析：J510 起键盘玩家的 ControllerIndex 由 0 变为 -2；
+-- J514 起输入查询改为「0=键盘、1=第一个手柄」的槽位编号（见 gtp_device）。
 local map_key_device = require("scripts.gtp_device")
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "3.0.20"
+gt.VERSION = "3.0.21"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -793,9 +794,10 @@ function gt:is_map_key_pressed()
     if keyboard_key~=nil then keyboard_pressed=Input.IsButtonPressed(keyboard_key,keyboard_device)
     else keyboard_pressed=Input.IsActionPressed(ButtonAction.ACTION_MAP,keyboard_device) end
     if keyboard_pressed then return true end
-    if not map_key_device.is_gamepad(controller) then return false end
-    if controller_key~=nil then return Input.IsButtonPressed(controller_key,controller) end
-    return Input.IsActionPressed(ButtonAction.ACTION_MAP,controller)
+    local gamepad_device = map_key_device.gamepad_device(controller)
+    if gamepad_device == nil then return false end
+    if controller_key~=nil then return Input.IsButtonPressed(controller_key,gamepad_device) end
+    return Input.IsActionPressed(ButtonAction.ACTION_MAP,gamepad_device)
 end
 function gt:get_map_input_sample()
     local game=Game()
@@ -815,9 +817,10 @@ function gt:is_map_key_triggered()
     if keyboard_key~=nil then keyboard_triggered=Input.IsButtonTriggered(keyboard_key,keyboard_device)
     else keyboard_triggered=Input.IsActionTriggered(ButtonAction.ACTION_MAP,keyboard_device) end
     if keyboard_triggered then return true end
-    if not map_key_device.is_gamepad(controller) then return false end
-    if controller_key~=nil then return Input.IsButtonTriggered(controller_key,controller) end
-    return Input.IsActionTriggered(ButtonAction.ACTION_MAP,controller)
+    local gamepad_device = map_key_device.gamepad_device(controller)
+    if gamepad_device == nil then return false end
+    if controller_key~=nil then return Input.IsButtonTriggered(controller_key,gamepad_device) end
+    return Input.IsActionTriggered(ButtonAction.ACTION_MAP,gamepad_device)
 end
 -- GetCallbacks 的 Mod/Function/Param 为公开字段。只代理 MiniMAPI 的地图输入处理，
 -- 保持回调优先级、顺序和其它输入原样；避免原生 Tab 松开时再次切换显示模式。
@@ -861,8 +864,9 @@ function gt:map_input_override(entity,hook,action)
             tainted_shoot_latched=true
           elseif tainted_shoot_latched then
             local direction_held=false
+            local owner_device=map_key_device.input_device(owner.ControllerIndex)
             for _,shoot in ipairs(key) do
-              if Input.IsActionPressed(shoot,owner.ControllerIndex) then
+              if Input.IsActionPressed(shoot,owner_device) then
                 direction_held=true
                 break
               end
@@ -1302,7 +1306,7 @@ function gt:get_cursor_arrow_button(i)
     return Keyboard[cursor_arrow_keys[i]]
 end
 function gt:cursor_direction_pressed(i)
-    if Input.IsActionPressed(key[i], player.ControllerIndex) then return true end
+    if Input.IsActionPressed(key[i], map_key_device.input_device(player.ControllerIndex)) then return true end
     local button = gt:get_cursor_arrow_button(i)
     return button ~= nil and Input.IsButtonPressed(button, 0) or false
 end
@@ -1341,7 +1345,7 @@ function gt:mmp_ctrl_move()
     for i = 1, 4 do
       local pressed
       if grid_step then
-        local edge = Input.IsActionTriggered(key[i], player.ControllerIndex)
+        local edge = Input.IsActionTriggered(key[i], map_key_device.input_device(player.ControllerIndex))
         if not edge then
           local button = gt:get_cursor_arrow_button(i)
           edge = button ~= nil and Input.IsButtonTriggered(button, 0) or false
@@ -1558,7 +1562,7 @@ function gt:tab_action()
       gt:console_dump_diag(cell, "gtpdiag TAB+F4")
     end
     --
-    if Input.IsActionTriggered(ButtonAction.ACTION_RESTART, player.ControllerIndex) and fastrestartenable then
+    if Input.IsActionTriggered(ButtonAction.ACTION_RESTART, map_key_device.input_device(player.ControllerIndex)) and fastrestartenable then
       Isaac.ExecuteCommand("restart")
     end
     --
@@ -1629,8 +1633,8 @@ function gt:step()
       return
     end
     if gt:is_map_key_triggered()
-    or Input.IsActionTriggered(ButtonAction.ACTION_ITEM,player.ControllerIndex)
-    or Input.IsActionTriggered(ButtonAction.ACTION_PILLCARD,player.ControllerIndex) then
+    or Input.IsActionTriggered(ButtonAction.ACTION_ITEM,map_key_device.input_device(player.ControllerIndex))
+    or Input.IsActionTriggered(ButtonAction.ACTION_PILLCARD,map_key_device.input_device(player.ControllerIndex)) then
       gt:get_grid_room()
       gt:prep()
     end
