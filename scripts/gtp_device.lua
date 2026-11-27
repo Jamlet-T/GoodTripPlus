@@ -31,6 +31,13 @@ function M.keyboard_device(controller)
   if s and s < 0 then return controller end
   return 0
 end
+-- 方向键物理回退只给键盘玩家；J514 的 0 号玩家设备已明确是手柄。
+-- 旧 API 的 0 无法区分 J460 键盘与之后的首个手柄，保留原有回退行为。
+function M.keyboard_arrow_device(controller)
+  local s = signed(controller)
+  if s == -2 then return M.keyboard_device(controller) end
+  if s == 0 and not slot_api() then return 0 end
+end
 -- 手柄查询槽位；不是手柄（键盘 / nil）时返回 nil。
 -- J514+ 手柄槽位 = ControllerIndex + 1；旧版本直接用手柄槽位。
 -- 0 号槽必须按手柄处理：曾经只对 >0 的槽位读手柄绑定，结果热插拔换槽后

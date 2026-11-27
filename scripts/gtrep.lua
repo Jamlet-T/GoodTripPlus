@@ -5,7 +5,7 @@ local console_output = require("scripts.gtp_console").write
 local map_key_device = require("scripts.gtp_device")
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "3.0.23"
+gt.VERSION = "3.0.24"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -1313,14 +1313,15 @@ function gt:get_cursor_fade()
 end
 --
 function gt:get_cursor_arrow_button(i)
-    -- 物理键盘用索引 0；手柄仍按动作映射，不能拿键盘码查手柄按钮。
-    if player.ControllerIndex ~= 0 or not Keyboard then return nil end
-    return Keyboard[cursor_arrow_keys[i]]
+    -- 玩家设备 ID 用于辨别键盘；物理按键查询要用该版本的键盘槽位。
+    local device = map_key_device.keyboard_arrow_device(player.ControllerIndex)
+    if device == nil or not Keyboard then return nil end
+    return Keyboard[cursor_arrow_keys[i]], device
 end
 function gt:cursor_direction_pressed(i)
     if Input.IsActionPressed(key[i], map_key_device.input_device(player.ControllerIndex)) then return true end
-    local button = gt:get_cursor_arrow_button(i)
-    return button ~= nil and Input.IsButtonPressed(button, 0) or false
+    local button, device = gt:get_cursor_arrow_button(i)
+    return button ~= nil and Input.IsButtonPressed(button, device) or false
 end
 function gt:mmp_ctrl_move()
     local moved = false
@@ -1359,8 +1360,8 @@ function gt:mmp_ctrl_move()
       if grid_step then
         local edge = Input.IsActionTriggered(key[i], map_key_device.input_device(player.ControllerIndex))
         if not edge then
-          local button = gt:get_cursor_arrow_button(i)
-          edge = button ~= nil and Input.IsButtonTriggered(button, 0) or false
+          local button, device = gt:get_cursor_arrow_button(i)
+          edge = button ~= nil and Input.IsButtonTriggered(button, device) or false
         end
         if grid_repeat then
           pressed = cursor_repeat:should_move(i, frame, edge,
