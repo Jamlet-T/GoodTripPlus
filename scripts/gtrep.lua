@@ -5,7 +5,7 @@ local console_output = require("scripts.gtp_console").write
 local map_key_device = require("scripts.gtp_device")
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "3.0.22"
+gt.VERSION = "3.0.23"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -507,7 +507,7 @@ end
 function gt:start_room_lock()
     -- 先说持有道具：房间里出现同名特效（例如玩家自己传送时的漩涡）时，
     -- 这一条能挡掉误判，也省下一次实体遍历。想纯按实体判定就把这段删掉。
-    local p = player or Isaac.GetPlayer(0)
+    local p = Isaac.GetPlayer(0)
     -- ⚠️ 光判 nil 不够：开局初始化期间 / 过场里拿到的是「对象在、但还没就绪」的玩家，
     -- 直接 HasCollectible 会在原生层崩溃（2026-10-05 实测：POST_GAME_STARTED 期间调用即闪退两次）。
     -- 用 Exists() 兜底，任何调用时机都不会再把游戏带崩。
@@ -562,14 +562,15 @@ function gt:land_at_door()
     tele_door_slot = -1
     if slot < 0 then return end
     local door = room:GetDoor(slot)
-    if not door then return end
+    local primary = Isaac.GetPlayer(0)
+    if not door or not primary then return end
     local dx, dy = 0, 0
     local side = slot % 4
     if side == 0 then dx = 40 elseif side == 2 then dx = -40
     elseif side == 1 then dy = 40 else dy = -40 end
     local stand = Vector(door.Position.X + dx, door.Position.Y + dy)
     --one shift for all, so a co-op pair keeps its spacing
-    local shift = stand - player.Position
+    local shift = stand - primary.Position
     for _, e in ipairs(gt:landed_party()) do
       e.Position = e.Position + shift
     end
@@ -784,9 +785,13 @@ function gt:get_map_key_binding(key)
     local value = gt[key]
     if value ~= nil then return value ~= false and value ~= -1 and value or nil end
 end
-function gt:is_map_key_pressed()
-    if not player then return false end
-    local controller = player.ControllerIndex
+local function primary_controller()
+    local primary = Isaac.GetPlayer(0)
+    return primary and primary.ControllerIndex
+end
+function gt:is_map_key_pressed(controller)
+    controller = controller or primary_controller()
+    if controller == nil then return false end
     local keyboard_key = gt:get_map_key_binding("MapKeyboardKey")
     local controller_key = gt:get_map_key_binding("MapControllerKey")
     local keyboard_device = map_key_device.keyboard_device(controller)
@@ -801,15 +806,17 @@ function gt:is_map_key_pressed()
 end
 function gt:get_map_input_sample()
     local game=Game()
-    local paused=game:IsPaused()
-    return not paused and gt:is_map_key_pressed(), game:GetFrameCount(), paused
+    local controller=primary_controller()
+    -- 没有玩家时取消按住计数，而不是把它当成一次松键。
+    local suspended=controller==nil or game:IsPaused()
+    return not suspended and gt:is_map_key_pressed(controller), game:GetFrameCount(), suspended
 end
 function gt:get_map_base_opacity(api)
     return Options and Options.MapOpacity or api:GetConfig('TransparencyLargeMap')
 end
-function gt:is_map_key_triggered()
-    if not player then return false end
-    local controller = player.ControllerIndex
+function gt:is_map_key_triggered(controller)
+    controller = controller or primary_controller()
+    if controller == nil then return false end
     local keyboard_key = gt:get_map_key_binding("MapKeyboardKey")
     local controller_key = gt:get_map_key_binding("MapControllerKey")
     local keyboard_device = map_key_device.keyboard_device(controller)
@@ -848,44 +855,49 @@ end
 -- MiniMAPI 回调代理配合使用。暂停菜单和其它玩家继续交给引擎处理。
 function gt:map_input_override(entity,hook,action)
     if not entity then return nil end
-    local owner=entity:ToPlayer()
+    local map_action = action==ButtonAction.ACTION_MAP
     local shoot_action = action==ButtonAction.ACTION_SHOOTUP
         or action==ButtonAction.ACTION_SHOOTLEFT
         or action==ButtonAction.ACTION_SHOOTRIGHT
         or action==ButtonAction.ACTION_SHOOTDOWN
-    if action==ButtonAction.ACTION_DROP or shoot_action then
-      local player_type=owner and owner:GetPlayerType()
-      if owner and player and (player_type==PlayerType.PLAYER_THESOUL_B
-          or player_type==PlayerType.PLAYER_THEFORGOTTEN_B)
-          and owner.ControllerIndex==player.ControllerIndex and not Game():IsPaused() then
-        local map_held=gt:is_map_key_pressed()
-        if shoot_action then
-          if map_held then
-            tainted_shoot_latched=true
-          elseif tainted_shoot_latched then
-            local direction_held=false
-            local owner_device=map_key_device.input_device(owner.ControllerIndex)
-            for _,shoot in ipairs(key) do
-              if Input.IsActionPressed(shoot,owner_device) then
-                direction_held=true
-                break
-              end
+    if not map_action and action~=ButtonAction.ACTION_DROP and not shoot_action then return nil end
+    local owner=entity:ToPlayer()
+    if not owner then return nil end
+    if not map_action then
+      local player_type=owner:GetPlayerType()
+      if player_type~=PlayerType.PLAYER_THESOUL_B and player_type~=PlayerType.PLAYER_THEFORGOTTEN_B then
+        return nil
+      end
+    end
+    -- 输入钩子可以早于渲染；不要依赖渲染帧或开局回调缓存的玩家。
+    local controller=primary_controller()
+    if controller==nil or owner.ControllerIndex~=controller or Game():IsPaused() then return nil end
+    if not map_action then
+      local map_held=gt:is_map_key_pressed(controller)
+      if shoot_action then
+        if map_held then
+          tainted_shoot_latched=true
+        elseif tainted_shoot_latched then
+          local owner_device=map_key_device.input_device(controller)
+          local direction_held=false
+          for _,shoot in ipairs(key) do
+            if Input.IsActionPressed(shoot,owner_device) then
+              direction_held=true
+              break
             end
-            if not direction_held then tainted_shoot_latched=false end
           end
+          if not direction_held then tainted_shoot_latched=false end
         end
-        if map_held or (shoot_action and tainted_shoot_latched) then
-          if hook==InputHook.GET_ACTION_VALUE then return 0 end
-          return false
-        end
+      end
+      if map_held or (shoot_action and tainted_shoot_latched) then
+        if hook==InputHook.GET_ACTION_VALUE then return 0 end
+        return false
       end
       return nil
     end
-    if action~=ButtonAction.ACTION_MAP then return nil end
-    if not owner or owner.ControllerIndex~=player.ControllerIndex or Game():IsPaused() then return nil end
-    if hook==InputHook.IS_ACTION_PRESSED then return gt:is_map_key_pressed() end
-    if hook==InputHook.IS_ACTION_TRIGGERED then return gt:is_map_key_triggered() end
-    if hook==InputHook.GET_ACTION_VALUE then return gt:is_map_key_pressed() and 1 or 0 end
+    if hook==InputHook.IS_ACTION_PRESSED then return gt:is_map_key_pressed(controller) end
+    if hook==InputHook.IS_ACTION_TRIGGERED then return gt:is_map_key_triggered(controller) end
+    if hook==InputHook.GET_ACTION_VALUE then return gt:is_map_key_pressed(controller) and 1 or 0 end
 end
 --
 -- 调试模式（**纯诊断开关**），默认关，两个开关任一为真即开：
@@ -1500,10 +1512,6 @@ function gt:render_cursor()
       end
     end
 end
---
-function gt:prep()
-    player = Isaac.GetPlayer(0)
-end
 -- 键盘松开地图键与鼠标点击共用准入、冷却、诊断和隐藏/诅咒房前室准备。
 -- 来源：原 step() 松键传送分支。
 function gt:try_cursor_travel(gid, source)
@@ -1617,13 +1625,16 @@ function gt:tab_action()
 end
 --
 function gt:step()
+    -- 若开局刷新没有执行，或玩家尚未创建，让下一帧自行取得主玩家。
+    player = Isaac.GetPlayer(0)
     if gt.update_map_input then gt:update_map_input() end
     --a wall can open under the player's feet (bomb, red key), so sweep every
     --tick; but not mid-transition, when the live room and the cached descriptor disagree
     if level:GetCurrentRoomDesc().SafeGridIndex == crid then
       gt:sweep_doors()
     end
-    if Game():IsPaused() then
+    if not player or Game():IsPaused() then
+      if not player then tainted_shoot_latched = false end
       mmp_ctrl = false
       mmp_ctrl_fade = CURSOR_FADE_MIN
       clear_cursor_highlight()
@@ -1632,13 +1643,14 @@ function gt:step()
         down=Input.IsMouseBtnPressed(0), active=false})
       return
     end
-    if gt:is_map_key_triggered()
-    or Input.IsActionTriggered(ButtonAction.ACTION_ITEM,map_key_device.input_device(player.ControllerIndex))
-    or Input.IsActionTriggered(ButtonAction.ACTION_PILLCARD,map_key_device.input_device(player.ControllerIndex)) then
+    local controller = player.ControllerIndex
+    local device = map_key_device.input_device(controller)
+    if gt:is_map_key_triggered(controller)
+    or Input.IsActionTriggered(ButtonAction.ACTION_ITEM,device)
+    or Input.IsActionTriggered(ButtonAction.ACTION_PILLCARD,device) then
       gt:get_grid_room()
-      gt:prep()
     end
-    if gt:is_map_key_pressed() then
+    if gt:is_map_key_pressed(controller) then
       gt:tab_action()
     else
       if mmp_ctrl and gt:can_open_cursor().ok then
@@ -1761,7 +1773,6 @@ require("scripts.gtp_doorpenalty_runtime")(gt)
 require("scripts.gtp_unlock_runtime")(gt)
 require("scripts.gtp_route_runtime")(gt,function() return grid_room end)
 gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
-  gt:prep()
   gt:new_room()
   gt:new_level()
   gt:register_menu()

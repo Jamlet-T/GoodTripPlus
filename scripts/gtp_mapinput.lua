@@ -1,5 +1,5 @@
 -- MiniMAPI main.lua:IsLarge/GetTransparency：配置绑定替代原生地图动作。
--- 游戏输入、暂停和帧号由 gt 适配层提供，避免全局改写 Input 或访问上游私有计数。
+-- 游戏输入、暂停／玩家就绪状态和帧号由 gt 适配层提供，避免全局改写 Input 或访问上游私有计数。
 return function(gt, api)
   if not api or api._gtpMapInputInstalled or type(api.IsLarge)~='function'
     or type(api.GetTransparency)~='function' then return end
@@ -8,10 +8,10 @@ return function(gt, api)
   if gt.replace_minimap_map_input then gt:replace_minimap_map_input(api) end
   local held_frames,last_frame=0,nil
   local function poll()
-    local active,frame,paused=gt:get_map_input_sample()
+    local active,frame,suspended=gt:get_map_input_sample()
     if not active then
       local released=held_frames
-      local valid_release=last_frame~=nil and frame>=last_frame and not paused
+      local valid_release=last_frame~=nil and frame>=last_frame and not suspended
       held_frames,last_frame=0,nil
       if valid_release and released>0 and type(api.NextMapDisplayMode)=='function'
         and (released<=8 or (api:GetConfig('DisplayMode')==3 and released==9)) then
