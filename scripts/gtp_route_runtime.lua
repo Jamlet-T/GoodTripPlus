@@ -11,11 +11,11 @@ return function(gt,cells)
   local function trace_failure(message)
     pcall(function() Isaac.DebugString('[GTProute] '..message) end)
   end
-  function gt:prepare_travel_route(route)
+  function gt:prepare_travel_route(route, view)
     if not route or #route==0 then return nil end
     local game=Game()
     local lvl=game:GetLevel()
-    local identity,dimension,frame=gt:level_identity(),gt:get_current_dimension(),game:GetFrameCount()
+    local identity,dimension,frame=view and view.floorId or gt:level_identity(),view and view.dimension or gt:get_current_dimension(),game:GetFrameCount()
     local first=gt:travel_cur_state()
     -- 任意房间档可从战斗房出发；没有正常步行前提时沿用直接传送，不新增准入禁令。
     if not gt:room_is_clear(first.cur) then return nil end
@@ -45,7 +45,7 @@ return function(gt,cells)
       if #route>168 or not first.cur or route[1].from~=first.cur.SafeGridIndex then error('invalid_route') end
       for i,edge in ipairs(route) do
         if i>1 and edge.from~=route[i-1].to then error('broken_route') end
-        hops[i]=Route.hop(edge,function(gid) return gt:grid_room_desc(gid) end,cells())
+        hops[i]=Route.hop(edge,function(gid) return gt:grid_room_desc(gid,view) end,cells(view))
         -- 带上出问题的那一跳：只写 ambiguous_geometry 时看不出是哪条边、更看不出
         -- 目标是不是离网房（0 个候选和多个候选都会走到这里）。
         if not hops[i] then error(string.format('ambiguous_geometry hop=%s->%s slot=%s',

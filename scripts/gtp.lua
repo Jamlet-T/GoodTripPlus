@@ -5,7 +5,7 @@ local console_output = require("scripts.gtp_console").write
 local map_key_device = require("scripts.gtp_device")
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "3.0.27"
+gt.VERSION = "3.1.0"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -22,7 +22,6 @@ local stage = level:GetStage()
 local curse = 0
 local room = Game():GetRoom()
 local crd = level:GetCurrentRoomDesc()
-local last_crd
 local crid = crd.SafeGridIndex
 ---
 local sfx = SFXManager()
@@ -36,7 +35,8 @@ local tainted_shoot_latched = false
 local cursor_arrow_keys = {'KEY_UP', 'KEY_LEFT', 'KEY_RIGHT', 'KEY_DOWN'}
 local dir = {Vector(0, -1),Vector(-1, 0),Vector(1, 0),Vector(0, 1)}
 local scpos = Vector(0, 0)
-local grid_room = {}
+local layout = require("scripts.gtp_floorlayout").new()
+local active_room
 local ltroom = Vector(6, 6)
 local rbroom = Vector(6, 6)
 ---
@@ -46,7 +46,6 @@ local tele_pending = nil -- 原生异步传送落地前禁止覆盖 pending tran
 local secret_pre_room_id = {}
 local prep_alarm = false
 local testnum = 0
-local layout_room_count
 local mmp_ctrl = false
 local mmp_ctrl_pos = Vector(0, 0)
 local mmp_highlight_gid = nil
@@ -54,9 +53,11 @@ local mmp_highlight_gid = nil
 -- 「内容现在所在的那一格」上，图标所属的 descriptor 就不是画在它下面的那一格了：
 -- 目标格按屏幕位置算，高亮仍按这枚图标画，两者必须分开存。
 local mmp_highlight_list_index = nil
+local mmp_highlight_room
 local function clear_cursor_highlight()
     mmp_highlight_gid = nil
     mmp_highlight_list_index = nil
+    mmp_highlight_room = nil
 end
 -- 光标「出生后还没被玩家挪动过」：这个状态下**每帧**都把它贴回当前房间
 -- （跨层 / R 重开 / rewind 后地图重绘都能自愈，和隐藏房标记同一套做法）。
@@ -125,8 +126,6 @@ require("scripts.gtp_doors")(gt, {
     curse_bare_outside, curse_bare_inside, secret_pre_room_id = state.bare_out, state.bare_in, state.pre
   end,
 })
--- 房间邻接表与实际占格在 get_grid_room 中同步重建。
-local room_neighbours = {}
 
 gt.DebugMod = false
 gt.FastRestartEnable = false
@@ -200,8 +199,8 @@ end
 --
 -- ===== 以下准入与传送判定：忠实移植自 GoodTrip [Fixed]（scripts/rules.lua）=====
 --（floor.lua door_graph/sweep_doors/linked：门图，一格一格学出来）
-local function door_graph()
-  return gt:get_door_graph()
+local function door_graph(view)
+  return gt:get_door_graph(view)
 end
 
 -- 门扫描、隐藏房分类和门图读写：scripts/gtp_doors.lua。
@@ -228,10 +227,11 @@ end
 -- 读 RoomConfigRoom.Doors（官方文档：位掩码，由 DoorSlotFlag 构成），两面都要有门才算。
 -- ⚠️ 字段读不到（本 API 版本没暴露 / 返回非数字）时**一律返回 false** —— 宁可保守拦掉，
 -- 也不要凭猜测放行（这就是「隔墙也能传进去」那个洞的来源）。
-function gt:has_door_between(a, b)
-  local cell, step = gt:touching_cell(a, b)
+function gt:has_door_between(a, b, view)
+  local cell, step = gt:touching_cell(a, b, view)
   if not cell or not step then return false end
-  local ra, rb = grid_room[a], grid_room[b]
+  local rooms = layout:rooms(view)
+  local ra, rb = rooms[a], rooms[b]
   local da = ra and ra.Data and ra.Data.Doors
   local db = rb and rb.Data and rb.Data.Doors
   if type(da) ~= "number" or type(db) ~= "number" then return false end
@@ -240,45 +240,17 @@ function gt:has_door_between(a, b)
   return (da & m) ~= 0 and (db & opp) ~= 0
 end
 
-function gt:has_known_passage(a, b)
-  local link = door_graph()
+function gt:has_known_passage(a, b, view)
+  local link = door_graph(view)
   return link[a] ~= nil and link[a][b] ~= nil
 end
 
-function gt:rooms_linked(a, b)
-    local link, swept = door_graph()
+function gt:rooms_linked(a, b, view)
+    local link, swept = door_graph(view)
     if link[a] and link[a][b] ~= nil then
       return true
     end
     return not (swept[a] or swept[b])
-end
-
--- 从同一份实际占格生成邻接。每个格子只检查右、下两侧，再登记双向邻接；
--- 大房间和 L 形房共用边的情况以房间编号去重，邻接本身不表示有门。
-local function build_room_neighbours(cells)
-    local adjacent = {}
-    for _, desc in pairs(cells) do
-      adjacent[desc.SafeGridIndex] = {}
-    end
-    local function connect(a, other)
-      if not other then return end
-      local b = other.SafeGridIndex
-      if a ~= b then
-        adjacent[a][b], adjacent[b][a] = true, true
-      end
-    end
-    for gid, desc in pairs(cells) do
-      local a = desc.SafeGridIndex
-      if gid % 13 ~= 12 then connect(a, cells[gid + 1]) end
-      connect(a, cells[gid + 13])
-    end
-    local neighbours = {}
-    for gid, links in pairs(adjacent) do
-      local list = {}
-      for id in pairs(links) do list[#list + 1] = id end
-      neighbours[gid] = {Neighbors = list}
-    end
-    return neighbours
 end
 
 -- 注：这里原来有一份「已显示但未探索目标的类型白名单」（Fixed 原逻辑：
@@ -297,14 +269,11 @@ end
 --
 --may I go there: the predicates a trip is checked against, the reachable set,
 --the fair distance, the door a walk would have come in by.
-function gt:check_neigh_connected(trd, cond)
+function gt:check_neigh_connected(trd, cond, view)
     if (trd.DisplayFlags & 1) ~= 0 then
-      -- Use the same actual-cell adjacency as reachability. The old Fixed
-      -- Void branch required two eligible directions for a 2x2 boss room;
-      -- log evidence (79 -> 92) shows one known open door must suffice.
-      -- Door state and reachability remain the caller's predicates.
-      for _, id in ipairs(gt:travel_room_neighbors(trd.SafeGridIndex)) do
-        local rd = grid_room[id]
+      local rooms = layout:rooms(view)
+      for _, id in ipairs(gt:travel_room_neighbors(trd.SafeGridIndex, view)) do
+        local rd = rooms[id]
         if rd and cond(rd) then
           return true
         end
@@ -314,26 +283,21 @@ function gt:check_neigh_connected(trd, cond)
 end
 
 -- 门图生命周期与持久化适配：scripts/gtp_doors.lua。
-function gt:get_reachable_rooms()
-    --flood from the current room through visited+cleared rooms; each step needs
-    --a door too, else a secret room counts as a corridor on all four sides
-    local start = crd.SafeGridIndex
-    gt:sweep_doors() --a wall bombed since entering would still read as solid
+function gt:get_reachable_rooms(view)
+    local start = view and view.roomId or crd.SafeGridIndex
+    local rooms = layout:rooms(view)
     local reach = {[start] = true}
     local queue = {start}
     local head = 1
     while queue[head] do
       local cur = queue[head]
       head = head + 1
-      local node = room_neighbours[cur]
-      if node then
-        for _, adj in ipairs(node.Neighbors) do
-          local rd = grid_room[adj]
-          if rd and not reach[adj] and rd.VisitedCount > 0 and gt:room_is_clear(rd)
-              and gt:rooms_linked(cur, adj) then
-            reach[adj] = true
-            queue[#queue + 1] = adj
-          end
+      for _, adj in ipairs(gt:travel_room_neighbors(cur, view)) do
+        local rd = rooms[adj]
+        if rd and not reach[adj] and rd.VisitedCount > 0 and gt:room_is_clear(rd)
+            and gt:rooms_linked(cur, adj, view) then
+          reach[adj] = true
+          queue[#queue + 1] = adj
         end
       end
     end
@@ -346,23 +310,21 @@ end
 --secret room's included, and with no door on that wall the lowest slot. Right
 --only when the walk was straight; the landing below aims at the walk's door.
 --route_parent: the step before the target on the shortest walk through walked rooms
-function gt:route_parent(from, to)
+function gt:route_parent(from, to, view)
+    local rooms = layout:rooms(view)
     local parent = {[from] = from}
     local queue, head = {from}, 1
     while queue[head] do
       local cur = queue[head]
       head = head + 1
       if cur == to then break end
-      local node = room_neighbours[cur]
-      if node then
-        for _, adj in ipairs(node.Neighbors) do
-          local rd = grid_room[adj]
-          --the target may be an uncleared neighbour: a landing, not a pass-through
-          if rd and not parent[adj] and gt:rooms_linked(cur, adj)
-              and (adj == to or (rd.VisitedCount > 0 and gt:room_is_clear(rd))) then
-            parent[adj] = cur
-            queue[#queue + 1] = adj
-          end
+      for _, adj in ipairs(gt:travel_room_neighbors(cur, view)) do
+        local rd = rooms[adj]
+        --the target may be an uncleared neighbour: a landing, not a pass-through
+        if rd and not parent[adj] and gt:rooms_linked(cur, adj, view)
+            and (adj == to or (rd.VisitedCount > 0 and gt:room_is_clear(rd))) then
+          parent[adj] = cur
+          queue[#queue + 1] = adj
         end
       end
     end
@@ -373,15 +335,16 @@ end
 --the target cell a walk from `from` would step into, and the grid step taken
 --into it (-13 up, 13 down, -1 left, 1 right). Read off the grid, not the door
 --sweep, so a room nobody has been inside yet answers too
-function gt:touching_cell(from, to)
-    local src, dst = grid_room[from], grid_room[to]
+function gt:touching_cell(from, to, view)
+    local cells, rooms = layout:cells(view), layout:rooms(view)
+    local src, dst = rooms[from] or cells[from], rooms[to] or cells[to]
     if not (src and dst) then return nil end
-    for cell, d in pairs(grid_room) do
+    for cell, d in pairs(cells) do
       if d.ListIndex == src.ListIndex then
         local col = cell % 13
         for _, step in ipairs({ -13, 13, -1, 1 }) do
           if not ((step == -1 and col == 0) or (step == 1 and col == 12)) then --column guard
-            local nd = grid_room[cell + step]
+            local nd = cells[cell + step]
             if nd and nd.ListIndex == dst.ListIndex then return cell + step, step end
           end
         end
@@ -400,26 +363,26 @@ end
 --entered cell's row (left and right walls) or column (top and bottom) within
 --the room, which is how the game numbers them for every shape, L included.
 --No route to trace: no slot, and the game's own landing stands
-function gt:landing_route(from, to)
-    local cell, step = gt:touching_cell(from, to)
+function gt:landing_route(from, to, view)
+    local cell, step = gt:touching_cell(from, to, view)
     local walked = nil
     if not cell then
-      walked = gt:route_parent(from, to)
+      walked = gt:route_parent(from, to, view)
       if not walked then return nil, nil, -1 end
-      cell, step = gt:touching_cell(walked, to)
+      cell, step = gt:touching_cell(walked, to, view)
       if not cell then return nil, walked, -1 end
     end
     local wall = ({ [1] = 0, [13] = 1, [-1] = 2, [-13] = 3 })[step]
-    local top = grid_room[to].GridIndex
+    local top = (layout:rooms(view)[to] or layout:cells(view)[to]).GridIndex
     local second = wall % 2 == 0 and (cell - top) // 13 or (cell - top) % 13
     return cell, walked, wall + 4 * second
 end
 
 --BFS distance through cleared rooms; any room connected to the target is the last hop
-function gt:fair_trip(roomIndex, target)
-    local grid_room, room_neighbours = grid_room, room_neighbours
-    local startRoom = grid_room[roomIndex]
-    local targetRoom = grid_room[target]
+function gt:fair_trip(roomIndex, target, view)
+    local cells, rooms = layout:cells(view), layout:rooms(view)
+    local startRoom = rooms[roomIndex] or cells[roomIndex]
+    local targetRoom = cells[target]
     if not startRoom or not targetRoom then
         return 0
     end
@@ -436,17 +399,16 @@ function gt:fair_trip(roomIndex, target)
         end
         if gt:check_neigh_connected(targetRoom, function(rd)
             return rd.SafeGridIndex == safeIndex
-                and (not gt:get_config_bool("FairTripPath", true) or gt:rooms_linked(safeIndex, safeTarget))
-        end) then
+                and (not gt:get_config_bool("FairTripPath", true) or gt:rooms_linked(safeIndex, safeTarget, view))
+        end, view) then
             return cur.dist + 1
         end
         if gt:room_is_clear(cur.room) then
-            for _, adj in ipairs(room_neighbours[cur.room.SafeGridIndex].Neighbors) do
-                local adj_dsc = grid_room[adj]
-                local sid = adj_dsc.SafeGridIndex
-                if not visited[sid]
-                    and (not gt:get_config_bool("FairTripPath", true) or gt:rooms_linked(safeIndex, sid)) then
-                    visited[sid] = true
+            for _, adj in ipairs(gt:travel_room_neighbors(safeIndex, view)) do
+                local adj_dsc = rooms[adj]
+                if not visited[adj]
+                    and (not gt:get_config_bool("FairTripPath", true) or gt:rooms_linked(safeIndex, adj, view)) then
+                    visited[adj] = true
                     queue[#queue+1] = {room = adj_dsc, dist = cur.dist + 1}
                 end
             end
@@ -521,10 +483,9 @@ function gt:tele_failed()
   sfx:Play(187, 0.5, 0, false, 1)
 end
 --
-function gt:check_curse_room(gid)
-    -- 来源：原 gtrep.lua:566-583。按门路线统一结算，不能仅检查起点/终点类型。
-    gt:sweep_doors()
-    gt:apply_travel_door_penalties(crd.SafeGridIndex,gid)
+function gt:check_curse_room(gid, view)
+    view = view or gt:prepare_floor_read('door_penalties', false, gid)
+    if view then gt:apply_travel_door_penalties(view.roomId, gid, view) end
 end
 --
 --everyone a landing carries: players, familiars by type, and anything owned by
@@ -573,12 +534,14 @@ end
 -- 「这个目标不能去」，留在落地层会造成「光标高亮着、松手只响失败音」。
 -- 调用方进来之前已经保证 gt:can_travel_to(gid).ok，所以这里只负责「做什么」：
 -- 收代价（过路费）、摘迷宫诅咒、算落点、走过场。
-function gt:teleport_to_grid_index(gid)
+function gt:teleport_to_grid_index(gid, view)
     if tele_pending or gt._route_transit then return false end
-    local dist = gt:travel_time_distance(crd.SafeGridIndex, gid)
-    local trd = grid_room[gid]
-    local here = Game():GetLevel():GetCurrentRoomDesc().SafeGridIndex
-    local there = trd and trd.SafeGridIndex or gid
+    view = view or gt:prepare_floor_read('execution', false, gid)
+    if not view then return false end
+    local trd = gt:grid_room_desc(gid, view)
+    if not trd then return false end
+    local here, there, target_list = view.roomId, trd.SafeGridIndex, trd.ListIndex
+    local dist = gt:travel_time_distance(here, gid, view)
     tele_door_slot = -1
     local arrive = gid
     local events,route
@@ -586,9 +549,9 @@ function gt:teleport_to_grid_index(gid)
       -- 任意档直接免费传送，不规划付费路线或触发刺门兜底费用。
       events={}
     else
-      events,route=gt:plan_door_penalties(here,gid)
+      events,route=gt:plan_door_penalties(here,gid,view)
     end
-    local routing=gt:prepare_travel_route(route)
+    local routing=gt:prepare_travel_route(route, view)
     if routing and routing.failed then
       if routing.charge_partial and routing.completed>0 then
         local partial={}
@@ -608,12 +571,14 @@ function gt:teleport_to_grid_index(gid)
       if gt:get_config_bool("ArriveAtDoor",true) then tele_door_slot=routing.slot end
       tele_maze=routing.maze or false
     elseif gt:get_config_bool("ArriveAtDoor", true) then
-      local cell, _, slot = gt:landing_route(here, there)
+      local cell, _, slot = gt:landing_route(here, there, view)
       arrive = cell or gid
       tele_door_slot = slot
     end
     local tele_mode = gt:get_teleport_transition()
     local game = Game()
+    local pending = {target=target_list, frame=game:GetFrameCount(),floor=view.floorId,
+      dimension=view.dimension,hide_transit=routing and routing.transits>0 or false}
     if tele_mode == 1 then
       -- 立即传送：Game():ChangeRoom 同步换房，没有任何过场（Fixed 的 FastTransition）。
       -- ChangeRoom 会立即触发 new_room 并消费 tele_pending，落点门槽照常由 land_at_door
@@ -631,7 +596,7 @@ function gt:teleport_to_grid_index(gid)
         local addTime = math.floor((60.0*dist/speed)+0.5)
         Game().TimeCounter = Game().TimeCounter + addTime
       end
-      tele_pending = {target=trd.ListIndex, frame=game:GetFrameCount(),floor=gt:level_identity()}
+      tele_pending = pending
       tele_cd = 1
       if gt:is_debug() then
         pcall(function()
@@ -646,8 +611,7 @@ function gt:teleport_to_grid_index(gid)
     -- 仅保留原生淡入淡出。旧传送动画设置也回退为 FADE。
     -- nil player 避免原生出门费用与逐门费用重复结算。
     local anime = 1 -- FADE
-    tele_pending = {target=trd.ListIndex, frame=game:GetFrameCount(),floor=gt:level_identity(),
-      hide_transit=routing and routing.transits>0 or false}
+    tele_pending = pending
     tele_cd = 10
     if gt:is_debug() then
       pcall(function()
@@ -696,7 +660,18 @@ function gt:get_current_dimension()
     if MinimapAPI and MinimapAPI.CurrentDimension ~= nil then
       return MinimapAPI.CurrentDimension
     end
-    return gt:is_mirror_world() and 1 or 0
+    local game = Game()
+    local lvl, live = game:GetLevel(), game:GetRoom()
+    local d = lvl and lvl:GetCurrentRoomDesc()
+    if d and GetPtrHash then
+      local hash = GetPtrHash(d)
+      local index = lvl.GetCurrentRoomIndex and lvl:GetCurrentRoomIndex() or d.SafeGridIndex
+      for dim = 0, 2 do
+        local candidate = lvl:GetRoomByIdx(index, dim)
+        if candidate and GetPtrHash(candidate) == hash then return dim end
+      end
+    end
+    return live and live.IsMirrorWorld and live:IsMirrorWorld() and 1 or 0
 end
 --
 function gt:get_minapi_offset_vec()
@@ -986,7 +961,7 @@ function gt:dump_map_diagnostics()
     out("displayMode=" .. tostring(MinimapAPI:GetConfig("DisplayMode")) .. " large=" ..
       tostring(MinimapAPI:IsLarge()) .. " predicted cursor=" .. tostring(cursorPos.X) .. "," ..
       tostring(cursorPos.Y))
-    for gid, rd in pairs(grid_room) do
+    for gid, rd in pairs(layout:cells()) do
       if gt:is_grid_room_displayed(gid) then
         out("grid gid=" .. tostring(gid) .. " list=" .. tostring(rd.ListIndex) ..
           " safe=" .. tostring(rd.SafeGridIndex) .. " flags=" .. tostring(rd.DisplayFlags))
@@ -1036,7 +1011,7 @@ function gt:get_pos_grid_index(pos)
     if MinimapAPI then
       local project
       -- 与 gid_to_rtmap_pos 同一套投影（含同一锚点），直接复用
-      for gid, rd in pairs(grid_room) do
+      for gid, rd in pairs(layout:cells()) do
         if gt:is_grid_room_displayed(gid) then
           project = project or gt:make_rtmap_projector()
           local p = project(gid)
@@ -1114,81 +1089,167 @@ function gt:get_current_room_cursor_gid()
 
     -- The corner excluded by an L-shaped room should be inaccessible. Keep a
     -- safe fallback in case a custom room reports an unexpected position.
-    if grid_room[gid] then
+    if layout:cells()[gid] then
       return gid
     end
     return d.SafeGridIndex
 end
 --
-function gt:get_grid_room(all_room)
-    local cells = {}
-    local dim = gt:get_current_dimension()
-    all_room = all_room or level:GetRooms()
-    local count = all_room.Size
-    for i = 0, count do
-      local des = all_room:Get(i)
-      if des then
-        local gid = des.SafeGridIndex
-        -- A descriptor's SafeGridIndex is not always the top-left cell of a
-        -- large room.  ROOMSHAPE_LTL, for example, occupies (0, 0), (-1, 1)
-        -- and (0, 1).  Check the full two-row span around the anchor, then
-        -- keep only cells that resolve to this descriptor.
-        for jx=-1, 1 do
-          for jy=0, 1 do
-            local tgid = gid + jx + jy * 13
-            local tdes = level:GetRoomByIdx(tgid, dim)
-            if tdes and tdes.ListIndex == des.ListIndex then
-              cells[tgid] = tdes
-            end
+local function on_grid(gid)
+  return type(gid) == 'number' and gid >= 0 and gid < 169 and gid % 1 == 0
+end
+
+local function same_descriptor(a, b)
+  return a and b and a.ListIndex == b.ListIndex and a.SafeGridIndex == b.SafeGridIndex
+end
+
+local function same_room(a, b)
+  return a and b and a.floorId == b.floorId and a.dimension == b.dimension
+    and a.roomId == b.roomId and a.listIndex == b.listIndex
+end
+
+local function room_key(scene, target)
+  if not scene then return nil end
+  return {floorId = scene.floorId, dimension = scene.dimension, roomId = scene.roomId,
+    listIndex = scene.listIndex, targetList = target and target.ListIndex}
+end
+
+local function read_floor_scene()
+  local game = Game()
+  local lvl, live = game:GetLevel(), game:GetRoom()
+  local desc = lvl and lvl:GetCurrentRoomDesc()
+  if not (desc and desc.Data and live) then return nil end
+  local dim = gt:get_current_dimension()
+  if type(dim) ~= 'number' or dim < 0 or dim % 1 ~= 0 then return nil end
+  if lvl.GetCurrentRoomIndex then
+    local index = lvl:GetCurrentRoomIndex()
+    local function matches(mapped)
+      return same_descriptor(desc, mapped) and (not GetPtrHash or GetPtrHash(desc) == GetPtrHash(mapped))
+    end
+    -- 小地图的维度可以晚一拍；不能把当前房的门记到仍在显示的旧维度。
+    if not matches(lvl:GetRoomByIdx(index, dim)) and (index == desc.SafeGridIndex
+        or not matches(lvl:GetRoomByIdx(desc.SafeGridIndex, dim))) then return nil end
+  end
+  return {level = lvl, room = live, desc = desc, floorId = gt:level_identity(), dimension = dim,
+    roomId = desc.SafeGridIndex, listIndex = desc.ListIndex,
+    frame = game.GetFrameCount and game:GetFrameCount()}
+end
+
+local function collect_cells(scene, rooms)
+  local cells = {}
+  for i = 0, rooms.Size - 1 do
+    local desc = rooms:Get(i)
+    local gid = desc and desc.SafeGridIndex
+    if on_grid(gid) then
+      -- L 形锚点不一定在最左列，Shape 也不一定等于实际占格（如虚空 Boss 房）。
+      for dx = -1, 1 do
+        for dy = 0, 1 do
+          local cell = gid + dx + dy * 13
+          local col = gid % 13 + dx
+          if col >= 0 and col < 13 and on_grid(cell) then
+            local actual = scene.level:GetRoomByIdx(cell, scene.dimension)
+            if same_descriptor(desc, actual) then cells[cell] = actual end
           end
         end
       end
     end
-    grid_room, room_neighbours = cells, build_room_neighbours(cells)
-    layout_room_count = count
-end
--- ===== 判定层访问器（gtp_travel 专用，2026-10-06）=====
--- gtrep 的文件级 local 会被 get_grid_room() / new_room() / new_level() 整体重新赋值，
--- 外部模块捕获它们的引用会拿到**过时的那一层** → 一律走这些访问器。
-
--- ⚠️ grid_room 与 GetRoomByIdx **不可互换**：判定读目标用的就是这个表
--- （L 形房的锚点格语义与 GetRoomByIdx 不同），所以两个访问器都留着。
-function gt:grid_room_desc(gid)
-  return grid_room[gid]
+  end
+  return cells
 end
 
-function gt:travel_room_neighbors(gid)
-  local node=room_neighbours[gid]
-  return node and node.Neighbors or {}
+local function cell_conflict(scene, snapshot, gid)
+  if not on_grid(gid) then return false end
+  local actual = scene.level:GetRoomByIdx(gid, scene.dimension)
+  local cached = snapshot.cells[gid]
+  if cached then return not same_descriptor(actual, cached) end
+  local anchor = actual and actual.Data and actual.SafeGridIndex
+  if not on_grid(anchor) then return false end
+  local dx, dy = gid % 13 - anchor % 13, gid // 13 - anchor // 13
+  return dx >= -1 and dx <= 1 and dy >= 0 and dy <= 1
+end
+
+local function layout_conflict(scene, snapshot, gid, evidence)
+  if cell_conflict(scene, snapshot, gid) then return true end
+  if evidence then
+    for _, slot in pairs(evidence) do
+      if on_grid(slot.to) and (not snapshot.rooms[slot.to]
+          or cell_conflict(scene, snapshot, slot.target_cell)) then return true end
+    end
+  end
+  return false
+end
+
+local last_scene_frame
+function gt:prepare_floor_read(reason, force, gid, geometry_only)
+  local scene = read_floor_scene()
+  if not scene or (active_room and not same_room(active_room, scene)
+      and reason ~= 'new_room' and reason ~= 'new_level') then
+    layout:invalidate()
+    return nil
+  end
+  local rooms = scene.level:GetRooms()
+  local snapshot = layout.snapshot
+  local rewind = scene.frame and last_scene_frame and scene.frame < last_scene_frame
+  last_scene_frame = scene.frame
+  if force or rewind or not snapshot or snapshot.floorId ~= scene.floorId or snapshot.dimension ~= scene.dimension
+      or snapshot.count ~= rooms.Size then
+    snapshot = layout:publish(scene, rooms.Size, collect_cells(scene, rooms), rewind and 'rewind' or reason)
+  end
+  local evidence
+  if not geometry_only and scene.room.GetDoor then
+    scene.doorRev, evidence = gt:sweep_doors(scene)
+  end
+  if layout_conflict(scene, snapshot, gid, evidence) then
+    snapshot = layout:publish(scene, rooms.Size, collect_cells(scene, rooms), 'reconcile')
+    if layout_conflict(scene, snapshot, gid, evidence) then
+      layout:invalidate()
+      return nil
+    end
+  end
+  scene.layout = snapshot
+  return scene
+end
+
+function gt:get_grid_room()
+  return gt:prepare_floor_read('explicit', true, nil, true)
+end
+
+-- 占格查询与引擎直读不可互换，尤其是 L 形房锚点和空缺角。
+function gt:grid_room_desc(gid, view)
+  return layout:cells(view)[gid]
+end
+
+function gt:travel_room_neighbors(gid, view)
+  return layout:neighbors(gid, view)
 end
 
 -- Level:GetRoomByIdx 的薄包装（诅咒房判定沿用 gtp_curseblock 移植时的原口径）
-function gt:room_desc_at(gid)
-  local lvl = Game():GetLevel()
+function gt:room_desc_at(gid, view)
+  local lvl = view and view.level or Game():GetLevel()
   if not lvl then return nil end
-  return lvl:GetRoomByIdx(gid, gt:get_current_dimension())
+  return lvl:GetRoomByIdx(gid, view and view.dimension or gt:get_current_dimension())
 end
 --
 -- 当前房 / 层 / 房间 / 玩家的一份新鲜拷贝（判定上下文用）
-function gt:travel_cur_state()
-  local lvl = Game():GetLevel()
-  local d = lvl and lvl:GetCurrentRoomDesc() or nil
+function gt:travel_cur_state(view)
+  local lvl = view and view.level or Game():GetLevel()
+  local d = view and view.desc or (lvl and lvl:GetCurrentRoomDesc())
   return {
     cur = d,
     cur_gid = d and d.SafeGridIndex or nil,
     level = lvl,
-    room = Game():GetRoom(),
+    room = view and view.room or Game():GetRoom(),
     player = Isaac.GetPlayer(0),
   }
 end
 --
-function gt:is_grid_room_displayed(gid)
-    local rd = grid_room[gid]
+function gt:is_grid_room_displayed(gid, view)
+    local rd = layout:cells(view)[gid]
     if not rd then
       return false
     end
     if MinimapAPI then
-      local map = MinimapAPI:GetLevel(gt:get_current_dimension())
+      local map = MinimapAPI:GetLevel(view and view.dimension or gt:get_current_dimension())
       if map then
         for _, mapRoom in ipairs(map) do
           if mapRoom.Descriptor and mapRoom.Descriptor.ListIndex == rd.ListIndex then
@@ -1213,7 +1274,7 @@ function gt:get_corner_room(num)
     local foundX = false
     for i = xStart, xEnd, ffx do
       for j = 0, 12 do
-        if grid_room[i+j*13] then
+        if layout:cells()[i+j*13] then
           if gt:is_grid_room_displayed(i+j*13) then
             corner_room.X = i
             foundX = true
@@ -1228,7 +1289,7 @@ function gt:get_corner_room(num)
     local foundY = false
     for j = yStart, yEnd, ffy do
       for i = 0, 12 do
-        if grid_room[i+j*13] then
+        if layout:cells()[i+j*13] then
           if gt:is_grid_room_displayed(i+j*13) then
             corner_room.Y = j
             foundY = true
@@ -1250,7 +1311,7 @@ function gt:pre_secret_room()
     if door then
       local id = door.TargetRoomIndex
       if door.Desc.Variant == 8 then
-        local targetRoom = grid_room[id]
+        local targetRoom = layout:cells()[id]
         if door.TargetRoomType == 10 then
           if not secret_pre_room_id[crid] then
             secret_pre_room_id[crid] = id
@@ -1264,7 +1325,7 @@ function gt:pre_secret_room()
       end
     end
   end
-  door_state.dirty = true
+  gt:mark_door_aux_dirty()
 end
 --
 function gt:pre_secret_curse_room()
@@ -1285,7 +1346,7 @@ function gt:pre_secret_curse_room()
       end
     end
   end
-  door_state.dirty = true
+  gt:mark_door_aux_dirty()
 end
 --
 function gt:get_cursor_speed()
@@ -1404,7 +1465,7 @@ end
 --     图标所属的 descriptor 已经不是画在它下面的那一格；高亮必须仍画在它上面，
 --     否则会漂到对面那枚图标去（2026-10-21 2.6.13 修过一次的就是这个漂移）。
 -- 两者在没换位时完全一致；换位时用 position_gid 定目标、用命中图标定高亮。
-function gt:get_cursor_grid_index(pos)
+function gt:get_cursor_grid_index(pos, view)
     if not MinimapAPI then
       return gt:get_pos_grid_index(pos), nil
     end
@@ -1414,12 +1475,13 @@ function gt:get_cursor_grid_index(pos)
     local hit_list_index = rd and rd.ListIndex or nil
     -- 命中图标自己所在的格（大房间/L 形房的 descriptor 锚点未必是占据格，匹配同房间格）
     local hit_cell = -99
+    local cells = layout:cells(view)
     if rd then
       local anchor = rd.SafeGridIndex
-      if grid_room[anchor] and grid_room[anchor].ListIndex == rd.ListIndex then
+      if cells[anchor] and cells[anchor].ListIndex == rd.ListIndex then
         hit_cell = anchor
       else
-        for cell, descriptor in pairs(grid_room) do
+        for cell, descriptor in pairs(cells) do
           if descriptor.ListIndex == rd.ListIndex then
             hit_cell = cell
             break
@@ -1429,20 +1491,29 @@ function gt:get_cursor_grid_index(pos)
     end
     -- 目标格以命中占格的屏幕中心为准；图块边缘不能借用相邻格的准入。
     -- 只有投影落空时才退回命中图标所在的格，仍保留混乱诅咒换位后的分离语义。
-    return resolve_cursor_cell(gt:get_pos_grid_index(hit_center), hit_cell), hit_list_index
+    return resolve_cursor_cell(gt:get_pos_grid_index(hit_center), hit_cell), hit_list_index,
+      hit_cell == -99 and rd and rd.SafeGridIndex or nil
 end
 --
-function gt:update_cursor_room_highlight()
-    local gid, hit_list_index = gt:get_cursor_grid_index(mmp_ctrl_pos)
-    local res = gt:can_travel_to(gid)
+function gt:update_cursor_room_highlight(view)
+    view = view or gt:prepare_floor_read('preview')
+    if not view then clear_cursor_highlight(); return end
+    local gid, hit_list_index, hit_room = gt:get_cursor_grid_index(mmp_ctrl_pos, view)
+    if layout_conflict(view, view.layout, gid) or (hit_room and layout_conflict(view, view.layout, hit_room)) then
+      view = gt:prepare_floor_read('map_hit', true, gid)
+      if not view then clear_cursor_highlight(); return end
+      gid, hit_list_index = gt:get_cursor_grid_index(mmp_ctrl_pos, view)
+    end
+    local res = gt:can_travel_to(gid, view)
     -- 调试模式下免按键取证：光标扫到目标就把判定过程 + 门表写进 log.txt
     -- （被拒要记，挑战房被放行也要记 —— 放行同样可能判错）
     if gt.auto_log_travel then
-      gt:auto_log_travel(gid, res)
+      gt:auto_log_travel(gid, res, view)
     end
     if res.ok then
       mmp_highlight_gid = gid
       mmp_highlight_list_index = hit_list_index
+      mmp_highlight_room = room_key(view, gt:grid_room_desc(gid, view))
     else
       clear_cursor_highlight()
     end
@@ -1488,7 +1559,7 @@ function gt:render_cursor()
         gt:update_cursor_room_highlight()
         if gt:get_config_bool("HighlightCursorRoom", true) and mmp_highlight_gid then
           -- 画在鼠标命中的那枚图标上（换位后它可能不属于目标格，见 get_cursor_grid_index）
-          local desc = grid_room[mmp_highlight_gid]
+          local desc = layout:cells()[mmp_highlight_gid]
           local list_index = mmp_highlight_list_index or (desc and desc.ListIndex)
           if list_index then
             gt:draw_minapi_room_highlight(
@@ -1507,13 +1578,19 @@ function gt:render_cursor()
 end
 -- 键盘松开地图键与鼠标点击共用准入、冷却、诊断和隐藏/诅咒房前室准备。
 -- 来源：原 step() 松键传送分支。
-function gt:try_cursor_travel(gid, source)
+function gt:try_cursor_travel(gid, source, selected)
     if tele_pending or gt._route_transit then return false end
     if gt.adjacent_unlock_pending and gt:adjacent_unlock_pending() then return false end
     if gt:door_penalty_pending() then return false end
     if source == 'mouse' and not gt:get_config_bool('MouseTeleport', true) then return false end
-    gt:auto_log_secret_diag(gid)
-    local res = gt:can_travel_to(gid)
+    local view = gt:prepare_floor_read('commit', false, gid)
+    if not view then return false end
+    if selected and selected.targetList then
+      local target = gt:grid_room_desc(gid, view)
+      if not target or target.ListIndex ~= selected.targetList then return false end
+    end
+    gt:auto_log_secret_diag(gid, view)
+    local res = gt:can_travel_to(gid, view)
     if source == 'mouse' then
       -- 单击级取证：放行/拒绝都写，不依赖玩家打开调试或按 F4；日志失败不影响传送。
       pcall(function()
@@ -1522,10 +1599,10 @@ function gt:try_cursor_travel(gid, source)
           tostring(res.rule), tostring(tele_cd)))
       end)
     end
-    if gt.auto_log_travel then gt:auto_log_travel(gid, res) end
+    if gt.auto_log_travel then gt:auto_log_travel(gid, res, view) end
     if not res.ok or tele_cd >= 1 then return false end
     if gt:get_travel_mode()~=1 and gt.prepare_adjacent_unlock then
-      local prepared=gt:prepare_adjacent_unlock(gid,source)
+      local prepared=gt:prepare_adjacent_unlock(gid,source,view)
       if prepared=='failed' then return false end
       if prepared=='pending' then return true end
     end
@@ -1534,10 +1611,10 @@ function gt:try_cursor_travel(gid, source)
     elseif crd.Data.Type == 10 then
       gt:pre_secret_curse_room()
     end
-    return gt:teleport_to_grid_index(gid)~=false
+    return gt:teleport_to_grid_index(gid, view)~=false
 end
 --
-function gt:tab_action()
+function gt:tab_action(view)
     local cp = Isaac.WorldToRenderPosition(Vector(320,280))
     scpos = cp + cp
     --
@@ -1567,7 +1644,7 @@ function gt:tab_action()
       Isaac.ExecuteCommand("restart")
     end
     --
-    if gt:can_open_cursor().ok then
+    if gt:can_open_cursor(view).ok then
       if not mmp_ctrl then
         mmp_ctrl = true
         mmp_ctrl_moved = false
@@ -1601,7 +1678,7 @@ function gt:tab_action()
       elseif keyboard_pressed then
         gt:mmp_ctrl_move()
       end
-      gt:update_cursor_room_highlight()
+      gt:update_cursor_room_highlight(view)
       if clicked then
         gt:try_cursor_travel(gt:get_cursor_grid_index(mmp_ctrl_pos), 'mouse')
       end
@@ -1621,21 +1698,17 @@ function gt:step()
     -- 若开局刷新没有执行，或玩家尚未创建，让下一帧自行取得主玩家。
     player = Isaac.GetPlayer(0)
     if gt.update_map_input then gt:update_map_input() end
-    --a wall can open under the player's feet (bomb, red key), so sweep every
-    --tick; but not mid-transition, when the live room and the cached descriptor disagree
-    local layout_refreshed = false
-    if level:GetCurrentRoomDesc().SafeGridIndex == crid then
-      -- 红钥匙可在不换房的情况下新增占格；在处理光标前同步布局。
-      if layout_room_count ~= nil then
-        local all_room = level:GetRooms()
-        if all_room.Size ~= layout_room_count then
-          gt:get_grid_room(all_room)
-          layout_refreshed = true
-        end
-      end
-      gt:sweep_doors()
+    local paused = Game():IsPaused()
+    local controller = player and player.ControllerIndex
+    local force = false
+    if player and not paused then
+      local device = map_key_device.input_device(controller)
+      force = gt:is_map_key_triggered(controller)
+        or Input.IsActionTriggered(ButtonAction.ACTION_ITEM,device)
+        or Input.IsActionTriggered(ButtonAction.ACTION_PILLCARD,device)
     end
-    if not player or Game():IsPaused() then
+    local view = player and not paused and gt:prepare_floor_read('render', force)
+    if not view then
       if not player then tainted_shoot_latched = false end
       mmp_ctrl = false
       mmp_ctrl_fade = CURSOR_FADE_MIN
@@ -1645,25 +1718,19 @@ function gt:step()
         down=Input.IsMouseBtnPressed(0), active=false})
       return
     end
-    local controller = player.ControllerIndex
-    local device = map_key_device.input_device(controller)
-    if not layout_refreshed and (gt:is_map_key_triggered(controller)
-    or Input.IsActionTriggered(ButtonAction.ACTION_ITEM,device)
-    or Input.IsActionTriggered(ButtonAction.ACTION_PILLCARD,device)) then
-      gt:get_grid_room()
-    end
     if gt:is_map_key_pressed(controller) then
-      gt:tab_action()
+      gt:tab_action(view)
     else
-      if mmp_ctrl and gt:can_open_cursor().ok then
+      if mmp_ctrl and gt:can_open_cursor(view).ok then
         -- 松键后 IsLarge() 已切回小图，而 RenderOffset 仍是上一帧的大图坐标。
         -- 提交按住时命中的目标；try_cursor_travel 会重新验证实时准入和冷却。
         local selected_gid = mmp_highlight_gid
+        local selected_room = mmp_highlight_room
         mmp_ctrl = false
         clear_cursor_highlight()
         mmp_ctrl_fade = CURSOR_FADE_MIN
-        if mouse_cursor.mode == 'keyboard' and selected_gid then
-          gt:try_cursor_travel(selected_gid)
+        if mouse_cursor.mode == 'keyboard' and selected_gid and same_room(selected_room, view) then
+          gt:try_cursor_travel(selected_gid, nil, selected_room)
         end
       else
         mmp_ctrl = false
@@ -1683,14 +1750,23 @@ function gt:step()
 end
 --
 function gt:new_room()
-    last_crd = crd
-    gt:get_grid_room()
-    gt:sweep_doors()
-    room = Game():GetRoom()
+    local previous, previous_room = crd, active_room
+    local game = Game()
+    level, room = game:GetLevel(), game:GetRoom()
     crd = level:GetCurrentRoomDesc()
+    if not (crd and crd.Data and room) then
+      active_room = nil
+      layout:invalidate()
+      return
+    end
     crid = crd.SafeGridIndex
     stage = level:GetStage()
-    if tele_pending and (Game():GetFrameCount() < tele_pending.frame
+    local view = gt:prepare_floor_read('new_room', true)
+    active_room = room_key(view)
+    local last_crd = view and previous_room and previous_room.floorId == view.floorId
+      and previous_room.dimension == view.dimension and previous_room.listIndex ~= view.listIndex and previous
+    if tele_pending and (not view or view.floorId ~= tele_pending.floor
+        or view.dimension ~= tele_pending.dimension or view.frame < tele_pending.frame
         or crd.ListIndex ~= tele_pending.target) then
       -- rewind / 非预期换房不能消费旧落点；同层恢复为中转暂时摘下的迷宫诅咒。
       tele_door_slot = -1
@@ -1703,44 +1779,45 @@ function gt:new_room()
       level:AddCurse(LevelCurse.CURSE_OF_MAZE,false)
       tele_maze = false
     end
-    if last_crd.Data then
-      if last_crd.Data.Type == 7 or (last_crd.Data.Type == 8 and Game():IsGreedMode()) then
-        if not secret_pre_room_id[last_crd.SafeGridIndex] then
-          local dim = gt:get_current_dimension()
-          if (level:GetRoomByIdx(last_crd.SafeGridIndex + 1,dim)).ListIndex == crd.ListIndex then
-            secret_pre_room_id[last_crd.SafeGridIndex] = last_crd.SafeGridIndex + 1
-          elseif (level:GetRoomByIdx(last_crd.SafeGridIndex - 1,dim)).ListIndex == crd.ListIndex then
-            secret_pre_room_id[last_crd.SafeGridIndex] = last_crd.SafeGridIndex - 1
-          elseif (level:GetRoomByIdx(last_crd.SafeGridIndex + 13,dim)).ListIndex == crd.ListIndex then
-            secret_pre_room_id[last_crd.SafeGridIndex] = last_crd.SafeGridIndex + 13
-          elseif (level:GetRoomByIdx(last_crd.SafeGridIndex - 13,dim)).ListIndex == crd.ListIndex then
-            secret_pre_room_id[last_crd.SafeGridIndex] = last_crd.SafeGridIndex - 13
+    if last_crd and last_crd.Data then
+      local before = last_crd.SafeGridIndex
+      if not secret_pre_room_id[before]
+          and (last_crd.Data.Type == 7 or (last_crd.Data.Type == 8 and game:IsGreedMode())) then
+        for _, offset in ipairs({1, -1, 13, -13}) do
+          local candidate = view.level:GetRoomByIdx(before + offset, view.dimension)
+          if same_descriptor(candidate, crd) then
+            secret_pre_room_id[before] = before + offset
+            gt:mark_door_aux_dirty()
+            break
           end
         end
       end
     end
-    if crd.Data.Type == 7 or (crd.Data.Type == 8 and Game():IsGreedMode()) then
-      gt:pre_secret_room()
-    elseif crd.Data.Type == 10 then
-      gt:pre_secret_curse_room()
+    if view then
+      if crd.Data.Type == 7 or (crd.Data.Type == 8 and game:IsGreedMode()) then
+        gt:pre_secret_room()
+      elseif crd.Data.Type == 10 then
+        gt:pre_secret_curse_room()
+      end
+      gt:save_door_state()
     end
-    -- 门图一变就写（dirty 去重，不会每帧写）—— 不依赖退出路径是否触发，见 design §3.5
-    gt:save_door_state()
 end
 --
 function gt:new_level()
     tainted_shoot_latched = false
     tele_pending, tele_door_slot, tele_maze, tele_cd = nil, -1, false, 0
-    level = Game():GetLevel()
-    gt:get_grid_room()
-    secret_pre_room_id = {}
+    local game = Game()
+    level, room = game:GetLevel(), game:GetRoom()
+    crd = level:GetCurrentRoomDesc()
+    crid, stage = crd and crd.SafeGridIndex, level:GetStage()
+    local view = gt:prepare_floor_read('new_level', true, nil, true)
+    active_room = room_key(view)
+    if view then gt:ensure_door_floor(view.floorId) end
     secret_diag_logged = {}
     -- 免按键取证的去重表（gtp_travel 里）：每层清空，免得跨层误判为「已记过」
     if gt.travel_reset_probe_log then
       gt:travel_reset_probe_log()
     end
-    --a new floor: everything learned about the old one goes
-    gt:reset_door_floor()
     --
     -- 重开（长按 TAB + R）时光标必须重新定位（2026-10-05 用户报的 bug）：
     -- 那张局是「玩家一直按着 TAB」—— 光标在重开前就已经呼出（mmp_ctrl = true），
@@ -1770,10 +1847,10 @@ require("scripts.gtp_menu")(gt)
 gt:register_menu() -- MCM is available at mod load; the game-start callback retries if it loads later.
 require("scripts.gtp_doorpenalty_runtime")(gt)
 require("scripts.gtp_unlock_runtime")(gt)
-require("scripts.gtp_route_runtime")(gt,function() return grid_room end)
+require("scripts.gtp_route_runtime")(gt,function(view) return layout:cells(view) end)
 gt:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
-  gt:new_room()
   gt:new_level()
+  gt:new_room()
   gt:register_menu()
 end)
 -- 退出游戏时把门图落盘（「门图一变就写」已覆盖大部分情形，这条是多一层保险）。
@@ -1789,24 +1866,29 @@ gt:AddCallback(ModCallbacks.MC_POST_NEW_LEVEL, gt.new_level)
 -- 传送准入逐关卡诊断：gtpdiag [格子编号]（缺省 = 光标所在格子）。
 -- 站在当前房间、把光标移到传不进去的房间上，跑 gtpdiag，
 -- 输出会标出目标死在哪一道判定上。
-function gt:dump_tele_diag(gid)
+function gt:dump_tele_diag(gid, view)
   local L = {}
   local function p(s) L[#L + 1] = s end
-  if not gid or grid_room[gid] == nil then
-    gid = gt:get_cursor_grid_index(mmp_ctrl_pos)
+  if (not gid or gt:grid_room_desc(gid, view) == nil) and view then
+    gid = gt:get_cursor_grid_index(mmp_ctrl_pos, view)
   end
+  view = view or gt:prepare_floor_read('diagnostic', false, gid)
+  if not view then return 'teleDiag: floor.not_ready' end
+  if not gid then gid = gt:get_cursor_grid_index(mmp_ctrl_pos, view) end
   p("teleDiag: target gid=" .. tostring(gid))
+  p(string.format('  topology floor=%s dim=%s layoutRev=%s doorRev=%s reason=%s',
+    view.floorId, view.dimension, view.layout.layoutRev, tostring(view.doorRev), view.layout.reason))
   -- 判定结论与理由：由判定层逐段跑一遍规则表（含短路），不再在这里重抄一份判定。
   -- 下面各段是「现场证据」——它们不决定任何事，只是把状态下打出来供对照。
   if gt.travel_verdict_dump then
-    p(gt:travel_verdict_dump(gid, true))
+    p(gt:travel_verdict_dump(gid, true, view))
   end
-  local trd = grid_room[gid]
+  local trd = gt:grid_room_desc(gid, view)
   if not trd then
     p("  NOT in grid_room (cursor not on any displayed room cell)")
     return table.concat(L, "\n")
   end
-  local dlink, dswept = door_graph()
+  local dlink, dswept = door_graph(view)
   p(string.format(
     "  target: type=%d shape=%d visited=%d clear=%s dispFlags=0x%x bit1=%s sgi=%d gi=%d list=%d",
     trd.Data.Type, trd.Data.Shape, trd.VisitedCount, tostring(trd.Clear),
@@ -1873,12 +1955,12 @@ function gt:dump_tele_diag(gid)
     end
   end
   -- 奖励门（恶魔房 / 天使房 / Boss Rush / 死寂）：按两类开关拦截，见 gtp_bosswindow.lua
-  -- （模块在 gtrep 之后加载，这里运行时取，取不到就跳过）
+  -- （模块在 gtp 之后加载，这里运行时取，取不到就跳过）
   if gt.has_blocking_reward_door then
     p("  rewardDoorBlocked=" .. tostring(gt:has_blocking_reward_door()))
   end
   -- 本层全部隐藏房
-  for g, rd in pairs(grid_room) do
+  for g, rd in pairs(layout:cells()) do
     if gt:is_secret_room(rd) then
       p("  secret room gid=" .. tostring(g) ..
         " list=" .. tostring(rd.ListIndex) ..
@@ -1891,7 +1973,7 @@ function gt:dump_tele_diag(gid)
   end
   -- 可达岛：下面四邻证据要用它的 inReach 字段。
   -- 判定结论本身已由上面的 travel_verdict_dump 给出，这里不再重算一遍结论。
-  local reach = gt:get_config_bool("FairTripPath", true) and gt:get_reachable_rooms() or nil
+  local reach = gt:get_config_bool("FairTripPath", true) and gt:get_reachable_rooms(view) or nil
   -- 目标四邻逐个体检（widen 通道 C 的证据链）
   local tid = trd.SafeGridIndex
   local col = tid % 13
@@ -1899,7 +1981,7 @@ function gt:dump_tele_diag(gid)
   if col > 0 then offs[#offs + 1] = tid - 1 end
   if col < 12 then offs[#offs + 1] = tid + 1 end
   for _, nid in ipairs(offs) do
-    local rd = grid_room[nid]
+    local rd = layout:cells()[nid]
     if rd then
       p(string.format(
         "  neighbor gid=%d: type=%d visited=%d clear=%s dispBit1=%s inReach=%s linkedToTarget=%s",
@@ -1918,7 +2000,7 @@ end
 -- 本房间紧邻的隐藏房格子（光标落不到格子时用它当目标，报告才有内容）
 function gt:adjacent_secret_gid()
   local cells = {}
-  for cell, rd in pairs(grid_room) do
+  for cell, rd in pairs(layout:cells()) do
     if rd.ListIndex == crd.ListIndex then
       cells[cell] = true
     end
@@ -1927,7 +2009,7 @@ function gt:adjacent_secret_gid()
     local col = cell % 13
     for _, step in ipairs({ -13, 13, -1, 1 }) do
       if not ((step == -1 and col == 0) or (step == 1 and col == 12)) then
-        if gt:is_secret_room(grid_room[cell + step]) then
+        if gt:is_secret_room(layout:cells()[cell + step]) then
           return cell + step
         end
       end
@@ -1936,7 +2018,7 @@ function gt:adjacent_secret_gid()
   return nil
 end
 
-function gt:auto_log_secret_diag(gid)
+function gt:auto_log_secret_diag(gid, view)
   -- 只在调试模式下自动落盘（MCM 的 Debug Mode 开关，或 gtconfig.lua 的 gt.DebugMod = true）：
   -- 正式游玩时不往 log.txt 写这些行，免得每次瞄隐藏房都刷十几行；
   -- 「按住地图键 + 键盘 F4」的手动 dump 同样归这个开关管（2026-10-05 起）。
@@ -1947,7 +2029,7 @@ function gt:auto_log_secret_diag(gid)
     gid = gt:adjacent_secret_gid()
     if not gid then return end
   end
-  if not gt:is_secret_room(grid_room[gid]) then
+  if not gt:is_secret_room(layout:cells()[gid]) then
     return
   end
   local key = tostring(level:GetStage()) .. "_" .. tostring(crd.SafeGridIndex) ..
@@ -1957,7 +2039,7 @@ function gt:auto_log_secret_diag(gid)
   end
   secret_diag_logged[key] = true
   -- DebugMod 下：控制台 + log.txt 一次给全，连按键都不用（不再画屏幕浮层）
-  gt:console_dump_diag(gid, "secretDiag")
+  gt:console_dump_diag(gid, "secretDiag", view)
 end
 
 -- MinimapAPI 对某 ListIndex 房间的显示旗标（诊断用；查不到返回 nil）
@@ -2016,8 +2098,8 @@ end
 -- "Caught exception, writing minidump..."；同一环境里 MinimapAPI 的 mapitel
 -- 返回 nil 就能正常工作）。所以只走 ConsoleOutput（逐行直写，安全）+ DebugString，
 -- 不碰返回值。**不再画屏幕浮层**（黄色那条 2026-10-06 已删）。
-function gt:console_dump_diag(gid, tag)
-  local ok, result = pcall(gt.dump_tele_diag, gt, gid)
+function gt:console_dump_diag(gid, tag, view)
+  local ok, result = pcall(gt.dump_tele_diag, gt, gid, view)
   if not ok then
     result = "teleDiag ERROR: " .. tostring(result)
   end

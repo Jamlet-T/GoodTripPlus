@@ -1,6 +1,6 @@
 -- 单格移动的长按连续移动（纯状态机，可独立加载）。
 -- 每个方向单独计时：按下边沿立刻走一格，按住后每 interval 帧再走一格。
--- 只负责“本帧该不该走”，格距、边界和输入来源仍由 gtrep 处理。
+-- 只负责“本帧该不该走”，格距、边界和输入来源仍由 gtp 处理。
 local CursorRepeat = {}
 CursorRepeat.__index = CursorRepeat
 function CursorRepeat.new()

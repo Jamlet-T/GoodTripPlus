@@ -14,10 +14,10 @@ return function(gt)
   end
   function gt:adjacent_unlock_pending() return pending~=nil end
   function gt:clear_adjacent_unlock() pending=nil end
-  function gt:adjacent_unlock_state(gid)
+  function gt:adjacent_unlock_state(gid,view)
     if not gt:get_config_bool('AutoUnlockAdjacent',true) then return nil,'disabled' end
-    local target=gt:grid_room_desc(gid)
-    local st=gt:travel_cur_state()
+    local target=gt:grid_room_desc(gid,view)
+    local st=gt:travel_cur_state(view)
     local p=st.player
     if not target or not st.cur or not gt:room_is_clear(st.cur) or not st.room or
       not p or not p:Exists() or p:IsDead() then return nil,'invalid_context' end
@@ -26,7 +26,7 @@ return function(gt)
     for slot=0,7 do
       local door=st.room:GetDoor(slot)
       if door and type(door.TargetRoomIndex)=='number' and door.TargetRoomIndex>=0 then
-        local rd=gt:room_desc_at(door.TargetRoomIndex)
+        local rd=gt:room_desc_at(door.TargetRoomIndex,view)
         if rd and rd.Data and rd.ListIndex==target.ListIndex then
           local variant=door.Desc and door.Desc.Variant
           local cost=Policy.cost({variant=variant,state=door.State,open=door:IsOpen(),locked=door:IsLocked(),
@@ -36,7 +36,7 @@ return function(gt)
             blue_redirect=redirected(rd),
             pay_to_play=p.HasCollectible and p:HasCollectible(CollectibleType.COLLECTIBLE_PAY_TO_PLAY)})
           if cost then
-            return {door=door,slot=slot,cost=cost,affordable=Policy.affordable(cost,
+            return {door=door,slot=slot,targetList=target.ListIndex,cost=cost,affordable=Policy.affordable(cost,
               {keys=p:GetNumKeys(),coins=p:GetNumCoins(),golden=p:HasGoldenKey()}),player=p}
           end
           reason=string.format('unsupported slot=%s variant=%s open=%s locked=%s payToPlay=%s',
@@ -69,13 +69,13 @@ return function(gt)
     trace('native blue entry gid='..req.gid..' slot='..req.slot)
   end
   local function request(gid,source,s,remaining)
-    return {gid=gid,source=source,door=s.door,from=gt:travel_cur_state().cur.ListIndex,
+    return {gid=gid,source=source,targetList=s.targetList,door=s.door,from=gt:travel_cur_state().cur.ListIndex,
       identity=gt:level_identity(),frame=Game():GetFrameCount(),player=s.player,
       remaining=remaining,slot=s.slot,dimension=gt.get_current_dimension and gt:get_current_dimension()}
   end
-  function gt:prepare_adjacent_unlock(gid,source)
+  function gt:prepare_adjacent_unlock(gid,source,view)
     if pending then return 'pending' end
-    local s=gt:adjacent_unlock_state(gid)
+    local s=gt:adjacent_unlock_state(gid,view)
     if not s then return 'ready' end
     if not s.affordable then return 'failed' end
     local p,door=s.player,s.door
@@ -116,8 +116,10 @@ return function(gt)
       gid,s.slot,s.cost.kind,tostring(accepted),keys,p:GetNumKeys(),coins,p:GetNumCoins(),
       tostring(door:IsOpen()),tostring(door:IsLocked())))
     if not accepted and remaining==s.cost.amount then return 'failed' end
-    gt:sweep_doors(); gt:save_door_state()
-    if door:IsOpen() and not redirected(gt:room_desc_at(door.TargetRoomIndex)) then return 'ready' end
+    local doorRev=gt:sweep_doors(view)
+    if view then view.doorRev=doorRev end
+    gt:save_door_state()
+    if door:IsOpen() and not redirected(gt:room_desc_at(door.TargetRoomIndex,view)) then return 'ready' end
     pending=request(gid,source,s,remaining)
     if door:IsOpen() then enter_redirect(pending) end
     return 'pending'
@@ -133,6 +135,15 @@ return function(gt)
       pending=nil; trace('cancel gid='..req.gid); return
     end
     if req.native_exit then return end -- new_room clears it; never warp past the blue room.
+    if gt.prepare_floor_read then
+      local view=gt:prepare_floor_read('unlock_wait',false,req.gid,true)
+      local door=view and view.room:GetDoor(req.slot)
+      local target=door and gt:room_desc_at(door.TargetRoomIndex,view)
+      if not target or target.ListIndex~=req.targetList then
+        pending=nil; trace('cancel changed doorway gid='..req.gid); return
+      end
+      req.door=door
+    end
     if req.door:IsLocked() and req.remaining>0 then
       -- 第一锁动画可能暂时拒绝第二把；保留用户请求，逐更新帧尝试。
       local p,door=req.player,req.door
@@ -154,8 +165,9 @@ return function(gt)
     if req.door:IsLocked() or not req.door:IsOpen() then return end
     if redirected(gt:room_desc_at(req.door.TargetRoomIndex)) then enter_redirect(req); return end
     pending=nil
-    gt:sweep_doors(); gt:save_door_state()
-    gt:try_cursor_travel(req.gid,req.source)
+    if not gt.prepare_floor_read then gt:sweep_doors() end
+    gt:try_cursor_travel(req.gid,req.source,req)
+    gt:save_door_state()
   end)
   for _,cb in ipairs({ModCallbacks.MC_POST_NEW_ROOM,ModCallbacks.MC_POST_NEW_LEVEL,
     ModCallbacks.MC_POST_GAME_STARTED,ModCallbacks.MC_PRE_GAME_EXIT}) do

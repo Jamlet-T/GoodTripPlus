@@ -20,7 +20,7 @@
   结论：**目标格必须取 position_gid**。用 hit_cell 会出现「点自己站着的房间，
   却被传送到另一间」「点对面那间却判 same_room」——玩家 2026-10-24 反馈的
   就是这个（3.0.1 曾在判定层硬挡标记图标，3.0.3 起改用这里的口径）。
-  高亮不受影响：它画在命中的那枚图标上，见 gtrep 的 mmp_highlight_list_index。
+  高亮不受影响：它画在命中的那枚图标上，见 gtp 的 mmp_highlight_list_index。
 ]]--
 local function valid_gid(gid)
   return type(gid) == "number" and gid >= 0 and gid <= 168

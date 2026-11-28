@@ -286,9 +286,9 @@ gt:AddCallback(ModCallbacks.MC_POST_NEW_LEVEL, function()
   marked_key = nil
 end)
 
--- MCM 开关：不在本模块注册——2026-10-04 起全部 MCM 项集中在 gtrep.lua 的
+-- MCM 开关：不在本模块注册——2026-10-04 起全部 MCM 项集中在 gtp.lua 的
 -- 统一注册块里按用户指定顺序注册（本功能配置键 = MineButtonRoom，默认开；
--- 文案在 gtrep.lua 的 GT_STRINGS.minebutton_*）。
+-- 文案在 gtp.lua 的 GT_STRINGS.minebutton_*）。
 
 -- 把统计并入统一的 gtpdiag 输出（MC_EXECUTE_CMD 的返回串会自动拼接）
 gt:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, command)

@@ -15,11 +15,11 @@
     · BlockCurseRoom = false        → 不拦，诅咒房按普通房间处理（**含「相邻房间」档的
       未探索邻居豁免**：Fixed 的 check_neigh_connected 类型白名单本来把诅咒房(10)
       排除在外，导致关掉本开关也传不进「已显示但未探索」的诅咒房；该白名单在
-      gtrep.lua 里同样按本开关放行类型 10，见那边的注释）。
+      gtp.lua 里同样按本开关放行类型 10，见那边的注释）。
 
   ⚠️ 本模块只管「传送到诅咒房」这个**目标**的准入；上面第二条里「关掉后按普通房间
-  处理」要 gtrep.lua 的 check_neigh_connected 配合，两处都以 `gt:block_curse_room()`
-  为唯一开关（定义在 gtrep.lua，与 get_travel_mode 同类）。
+  处理」要 gtp.lua 的 check_neigh_connected 配合，两处都以 `gt:block_curse_room()`
+  为唯一开关（定义在 gtp.lua，与 get_travel_mode 同类）。
 
   语义 & 落点
   -----------
@@ -30,7 +30,7 @@
     `target.curse_blocked`。规则表按「段 → 段内登记顺序」跑，② 在 ③ range 之前，
     所以「全局禁止」对三个传送范围档位一视同仁 —— 不再依赖函数包装，
     也不再靠 `main.lua` 的 require 顺序决定谁在外面。
-  · 目标房间类型读 `Level:GetRoomByIdx(gid, dim)`：与 gtrep.lua 的 `grid_room`
+  · 目标房间类型读 `Level:GetRoomByIdx(gid, dim)`：与 gtp.lua 的 `grid_room`
     同源（`gt:get_grid_room()` 就是照这个建的），所以判定口径与准入本体完全一致。
     `gid` 非合法格号（例如只问「当前房能不能开光标」时）一律放行，不误伤。
   · 与 gtp_bosswindow 同一套写法（各登记一条规则），表现与其它准入拒绝一致：

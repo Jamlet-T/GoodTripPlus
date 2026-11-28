@@ -1,32 +1,67 @@
 -- 门扫描与门图生命周期的游戏 API 适配。
 -- 来源：gtrep.lua 的门图、扫门、层身份和落盘函数（2026-10-07）。
--- context 显式传入共享状态和辅助状态访问器，不捕获 gtrep 的可重赋值 local。
+-- context 显式传入共享状态和辅助状态访问器，不捕获 gtp 的可重赋值 local。
 return function(gt, context)
 local door_state = context.state
 local Penalty = require('scripts.gtp_doorpenalty')
-local function door_graph()
-    local d = Game():GetRoom():IsMirrorWorld() and 1 or 0
-    local link, swept = door_state:dimension(d)
-    return link, swept, d
-end
-function gt:get_door_graph()
-  return door_graph()
+local EMPTY = {}
+
+local function valid_dimension(dim)
+  return type(dim) == 'number' and dim >= 0
 end
 
-function gt:door_evidence_from(here)
-  local _,_,dim=door_graph()
-  return (door_state.evidence[dim] or {})[here] or {}
+local function current_dimension(live)
+  local dim = gt.get_current_dimension and gt:get_current_dimension()
+  if valid_dimension(dim) then return dim end
+  live = live or Game():GetRoom()
+  return live and live.IsMirrorWorld and live:IsMirrorWorld() and 1 or 0
 end
 
-function gt:reset_door_floor()
-  door_state:reset(gt:level_identity())
+local function read_dimension(observationContext)
+  -- 显式现场只读同层、同维度；不重复读 F3。旧无参调用沿用由调用方
+  -- 在读图前 ensure/sweep 的约定（例如一次准入或路线事务内的查询）。
+  if observationContext then
+    local dim = observationContext.dimension
+    if door_state.identity ~= nil and door_state.identity == observationContext.floorId
+        and valid_dimension(dim) then return dim end
+    return nil
+  end
+  return current_dimension()
+end
+
+function gt:get_door_graph(observationContext)
+  local dim = read_dimension(observationContext)
+  return door_state.link[dim] or EMPTY, door_state.swept[dim] or EMPTY, dim
+end
+
+function gt:door_evidence_from(here, observationContext)
+  local dim = read_dimension(observationContext)
+  local rooms = door_state.evidence[dim]
+  return rooms and rooms[here] or EMPTY
+end
+
+function gt:door_graph_revision()
+  return door_state.doorRev
+end
+
+function gt:mark_door_aux_dirty()
+  door_state:mark_aux_dirty()
+end
+
+function gt:reset_door_floor(floorId, force)
+  floorId = floorId or gt:level_identity()
+  if not door_state:reset(floorId, force) then return false end
   context.reset_aux()
-  gt:load_door_state()
+  if floorId ~= nil then gt:load_door_state(floorId) end
+  return true
 end
 
-function gt:ensure_door_floor()
-  if door_state.identity ~= gt:level_identity() then gt:reset_door_floor() end
+function gt:ensure_door_floor(floorId)
+  floorId = floorId or gt:level_identity()
+  if floorId ~= nil and door_state.identity ~= floorId then gt:reset_door_floor(floorId) end
+  return floorId
 end
+
 function gt:is_secret_room(rd)
     if not rd or not rd.Data then
       return false
@@ -35,8 +70,8 @@ function gt:is_secret_room(rd)
     return t == 7 or t == 8 or t == 29
 end
 
-function gt:door_links_of(sgi)
-  local link, swept = door_graph()
+function gt:door_links_of(sgi, observationContext)
+  local link, swept = gt:get_door_graph(observationContext)
   local out = {}
   local row = link[sgi]
   if row then
@@ -60,80 +95,78 @@ function gt:door_to(gid)
   return nil
 end
 
-function gt:sweep_doors()
-    gt:ensure_door_floor()
+-- 显式现场由调用方保证指向同一次稳定观测，不持有跨帧游戏对象。
+-- 返回 (doorRev, liveEvidence, changed)；现场无效时不提交，也没有 liveEvidence。
+function gt:sweep_doors(observationContext)
+    local lvl, live, desc, floorId, dim
+    if observationContext then
+      lvl, live, desc = observationContext.level, observationContext.room, observationContext.desc
+      floorId, dim = observationContext.floorId, observationContext.dimension
+    else
+      local game = Game()
+      lvl, live = game:GetLevel(), game:GetRoom()
+      desc = lvl and lvl:GetCurrentRoomDesc()
+      if live and desc and desc.Data then
+        floorId, dim = gt:level_identity(), current_dimension(live)
+      end
+    end
+    local here = desc and desc.Data and desc.SafeGridIndex
+    if not lvl or not live or type(here) ~= 'number' or floorId == nil or not valid_dimension(dim) then
+      return door_state.doorRev, nil, false
+    end
+    gt:ensure_door_floor(floorId)
     local aux = context.get_aux()
-    local live = Game():GetRoom()
-    local lvl = Game():GetLevel()
-    local here = lvl:GetCurrentRoomDesc().SafeGridIndex
-    local _, _, dim = door_graph()
-    door_state:mark_swept(dim, here)
-    door_state.evidence[dim]=door_state.evidence[dim] or {}
-    local previous=door_state.evidence[dim][here] or {}
-    local observed, passages = {}, {}
+    local current_type = live:GetType()
+    local slots = {}
     for i = 0, 7 do
       local door = live:GetDoor(i)
-      if door then
-        local tdes = lvl:GetRoomByIdx(door.TargetRoomIndex, -1)
-        if tdes then
+      if door == nil then
+        slots[i] = false -- 确认空槽，不等同于目标描述符暂时无法解析。
+      elseif type(door.TargetRoomIndex) == 'number' then
+        local tdes = lvl:GetRoomByIdx(door.TargetRoomIndex, dim)
+        if tdes and tdes.Data and type(tdes.SafeGridIndex) == 'number' then
           local there = tdes.SafeGridIndex
-          local passage = gt:door_is_passage(door)
-          -- 门槽是现场证据，图边是房间对：例如隐藏房占 L 形房的缺角，
-          -- 一个已开的洞口就足以连通两室。选第一个可通槽（包括 0），
-          -- 未打开的另一面墙不能覆盖它。
-          if passage and not passages[there] then
-            passages[there] = i
-          elseif passages[there] == nil then
-            passages[there] = false
-          end
-          local evidence=Penalty.describe(door,live:GetType(),tdes.Data and tdes.Data.Type,i)
-          evidence.from,evidence.to=here,there
-          observed[i]=evidence
-          local old=previous[i]
-          if not old or old.to~=there or old.variant~=evidence.variant
-              or old.var_data~=evidence.var_data or old.spikes~=evidence.spikes
-              or old.current_type~=evidence.current_type or old.target_type~=evidence.target_type
-              or old.open~=evidence.open or old.locked~=evidence.locked then
-            door_state.dirty=true
-            -- 门证据只在调试模式开启时写 [GTPdoor]；记录与存档照常。
-            if gt.is_debug and gt:is_debug() then
-              pcall(function()
-                Isaac.DebugString(string.format('[GTPdoor] dim=%s from=%s to=%s slot=%s variant=%s open=%s passage=%s varData=%s spikes=%s types=%s/%s sprite=%s',
-                  dim,here,there,i,evidence.variant,tostring(evidence.open),tostring(passage),
-                  evidence.var_data,tostring(evidence.spikes),evidence.current_type,evidence.target_type,evidence.sprite))
-              end)
-            end
-          end
-          --curse-room spikes are read off the door itself: Flat File strips them
-          --once and for good, so the trinket in hand says nothing about this door
+          local evidence = Penalty.describe(door, current_type, tdes.Data.Type, i)
+          evidence.from, evidence.to, evidence.passage = here, there, gt:door_is_passage(door)
+          evidence.target_cell = door.TargetRoomIndex
+          slots[i] = evidence
+          -- Flat File 永久去掉这扇门的刺；旧辅助字段仍照原口径落盘。
           if door.TargetRoomType == RoomType.ROOM_CURSE then
-            local value=door.VarData ~= 0
-            if aux.bare_out[there]~=value then aux.bare_out[there]=value; door_state.dirty=true end
-          elseif live:GetType() == RoomType.ROOM_CURSE then
-            local value=door.VarData ~= 0
-            if aux.bare_in[here]~=value then aux.bare_in[here]=value; door_state.dirty=true end
+            local value = door.VarData ~= 0
+            if aux.bare_out[there] ~= value then aux.bare_out[there] = value; door_state:mark_aux_dirty() end
+          elseif current_type == RoomType.ROOM_CURSE then
+            local value = door.VarData ~= 0
+            if aux.bare_in[here] ~= value then aux.bare_in[here] = value; door_state:mark_aux_dirty() end
           end
         end
       end
     end
-    -- 扫完所有槽后才提交房间对；只有这一对没有任何可通门才撤销双向边。
-    for there, slot in pairs(passages) do
-      door_state:observe(dim, here, there, slot, slot ~= false)
+    local changed, observed, changed_slots = door_state:applyRoomObservation(dim, here, slots)
+    if changed_slots and gt.is_debug and gt:is_debug() then
+      for _, i in ipairs(changed_slots) do
+        local evidence = observed[i]
+        pcall(function()
+          Isaac.DebugString(string.format('[GTPdoor] dim=%s from=%s to=%s slot=%s variant=%s open=%s passage=%s varData=%s spikes=%s types=%s/%s sprite=%s',
+            dim,here,evidence.to,i,evidence.variant,tostring(evidence.open),tostring(evidence.passage),
+            evidence.var_data,tostring(evidence.spikes),evidence.current_type,evidence.target_type,evidence.sprite))
+        end)
+      end
     end
-    for slot in pairs(previous) do if not observed[slot] then door_state.dirty=true end end
-    door_state.evidence[dim][here]=observed
+    return door_state.doorRev, observed, changed
 end
 
 function gt:level_identity()
-  local lvl = Game():GetLevel()
+  local game = Game()
+  local lvl = game:GetLevel()
   if not lvl then return nil end
-  local seeds = Game():GetSeeds()
+  local seeds = game:GetSeeds()
+  local stage = lvl:GetStage()
   return 'F3:' .. table.concat({
-    lvl:GetStage(),
+    stage,
     lvl:GetStageType(),
     lvl:GetAbsoluteStage(),
-    Game():GetSeeds():GetStartSeed(),
-    seeds.GetStageSeed and seeds:GetStageSeed(lvl:GetStage()) or 0,
+    seeds:GetStartSeed(),
+    seeds.GetStageSeed and seeds:GetStageSeed(stage) or 0,
     lvl.GetDungeonPlacementSeed and lvl:GetDungeonPlacementSeed() or 0,
     lvl:IsAscent() and 1 or 0,
   }, ":")
@@ -162,14 +195,15 @@ function gt:save_door_state()
     else gt:SaveData(gt.persist_serialize(state)) end
   end)
   if ok then
-    door_state.dirty = false
+    door_state:mark_saved()
   else
     Isaac.DebugString("[GoodTripPlus][persist] 门图落盘失败（不影响传送）：" .. tostring(err))
   end
 end
 
-function gt:load_door_state()
-  if not gt.persist_parse then return false end
+function gt:load_door_state(floorId)
+  floorId = floorId or gt:level_identity()
+  if not gt.persist_parse or floorId == nil or floorId ~= door_state.identity then return false end
   local ok, state = pcall(function()
     if gt.persist_read_record then return gt:persist_read_record() end
     if not gt:HasData() then return nil end
@@ -179,12 +213,8 @@ function gt:load_door_state()
     Isaac.DebugString("[GoodTripPlus][persist] 读档失败（不影响传送）：" .. tostring(state))
     return false
   end
-  if not state or state.identity ~= gt:level_identity() then return false end
-  door_state.link = state.link
-  door_state.swept = state.swept
-  door_state.evidence = state.evidence or {}
+  if not state or not door_state:restore(state) then return false end
   context.set_aux(state)
-  door_state.dirty = false
   return true
 end
 end

@@ -29,10 +29,10 @@ return function(gt)
   end
   local route_original=gt.prepare_travel_route
   if route_original then
-    function gt:prepare_travel_route(route)
+    function gt:prepare_travel_route(route, ...)
       local t,start
       probe(function() t=active; if t then start=now(); t.hops=route and #route or 0 end end)
-      local result=table.pack(route_original(self,route))
+      local result=table.pack(route_original(self,route,...))
       probe(function()
         if not t or t~=active then return end
         t.route_ms=elapsed(start)
@@ -43,12 +43,12 @@ return function(gt)
     end
   end
   local original=gt.teleport_to_grid_index
-  function gt:teleport_to_grid_index(gid)
+  function gt:teleport_to_grid_index(gid, view)
     local t
     probe(function()
       -- 中转期间或异步等待期间的重入不能覆盖正在测量的请求。
       if active then return end
-      local current,target=desc(),gt:grid_room_desc(gid)
+      local current,target=desc(),gt:grid_room_desc(gid,view)
       if not target then return end
       serial=serial+1
       local start=now()
@@ -59,7 +59,7 @@ return function(gt)
       active=t
     end)
     -- 仅诊断用 pcall 隔离，游戏操作保持原始异常和返回值。
-    local result=table.pack(original(self,gid))
+    local result=table.pack(original(self,gid,view))
     probe(function()
       if not t or t~=active then return end
       t.sync_ms=elapsed(t.start)

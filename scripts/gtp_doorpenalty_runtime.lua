@@ -38,28 +38,28 @@ return function(gt)
   function gt:door_penalty_pending() return executor:pending() end
   function gt:clear_door_penalties() executor:clear(); owner=nil; identity=nil end
 
-  local function descriptor(gid) return gt:grid_room_desc(gid) or gt:room_desc_at(gid) end
+  local function descriptor(gid, view) return gt:grid_room_desc(gid, view) or gt:room_desc_at(gid, view) end
   -- 离网房间（SafeGridIndex < 0：恶魔房 -1、Boss Rush -5、死寂 -8 …）**不是网格上的普通节点**：
   -- 门通向它们是「传送」而不是「走过去」，几何层（gtp_route.lua）按占格永远算不出落点。
   -- 让它们进过路费图，路线就会规划出注定落不了地的跳，整趟传送被判 ambiguous_geometry
   -- 取消（2026-10-25 真机日志：boss 房的门图里留着 156 -> -1，五次远程传送全部静默失败）。
   -- 判定层早就是这个口径（gtp_travel 的 travel_ctx 只接受 0..168），这里补齐执行侧的路线图。
   local function on_grid(gid) return type(gid)=='number' and gid>=0 end
-  local function fallback(a,b,slot)
-    local ra,rb=descriptor(a),descriptor(b)
+  local function fallback(a,b,slot,view)
+    local ra,rb=descriptor(a,view),descriptor(b,view)
     local ct=ra and ra.Data and ra.Data.Type or -1
     local tt=rb and rb.Data and rb.Data.Type or -1
     return {from=a,to=b,slot=slot,current_type=ct,target_type=tt,source='room_fallback',
       spikes=ct==10 or tt==10}
   end
-  local function edge_for(a,b,slot)
-    local record=gt:door_evidence_from(a)[slot]
+  local function edge_for(a,b,slot,view)
+    local record=gt:door_evidence_from(a,view)[slot]
     if record and record.to==b then
       local edge={}
       for k,v in pairs(record) do edge[k]=v end
       edge.source='door_snapshot'
       if edge.spikes==nil then
-        local inferred=fallback(a,b,slot)
+        local inferred=fallback(a,b,slot,view)
         edge.spikes=inferred.spikes
         edge.source='door_unknown_room_fallback'
         -- 只在没有已知门状态时，用当前去刺饰品补充推断。
@@ -67,22 +67,22 @@ return function(gt)
       end
       return edge
     end
-    local edge=fallback(a,b,slot)
+    local edge=fallback(a,b,slot,view)
     if owner:HasTrinket(151) then edge.spikes=false end
     return edge
   end
-  local function neighbors(a)
-    local link,swept=gt:get_door_graph()
+  local function neighbors(a,view)
+    local link,swept=gt:get_door_graph(view)
     local result,seen={},{}
     -- 出发点本身离网（玩家站在恶魔房里往外传）：网格上没有可规划的路线，
     -- 交回调用方按「无路线」直接传送，别去枚举注定落不了地的跳。
     if not on_grid(a) then return result end
     -- 一对房间可能有多扇门：先逐槽枚举，不能只读房间对的单一门槽。
-    for slot,e in pairs(gt:door_evidence_from(a)) do
+    for slot,e in pairs(gt:door_evidence_from(a,view)) do
       if on_grid(e.to) then
         if link[a] and link[a][e.to]~=nil
             and ((e.variant or -1)<1 or (e.variant or -1)>7 or e.open==true) then
-          result[#result+1]=edge_for(a,e.to,slot); seen[e.to]=true
+          result[#result+1]=edge_for(a,e.to,slot,view); seen[e.to]=true
         end
         -- 同一房间对存在多扇门时，关闭门的快照不能再经房间对兜底变成通路。
         seen[e.to]=true
@@ -90,13 +90,13 @@ return function(gt)
     end
     for b,slot in pairs(link[a] or {}) do
       if not seen[b] and on_grid(b) then
-        result[#result+1]=edge_for(a,b,type(slot)=='number' and slot or -1); seen[b]=true
+        result[#result+1]=edge_for(a,b,type(slot)=='number' and slot or -1,view); seen[b]=true
       end
     end
     -- 旧档中未重新扫过的房间，可用配置门位补通路；扫过无边的锁门/墙不能兜底。
-    for _,b in ipairs(gt:travel_room_neighbors(a)) do
-      if not seen[b] and on_grid(b) and not swept[a] and not swept[b] and gt:has_door_between(a,b) then
-        result[#result+1]=edge_for(a,b,-1)
+    for _,b in ipairs(gt:travel_room_neighbors(a,view)) do
+      if not seen[b] and on_grid(b) and not swept[a] and not swept[b] and gt:has_door_between(a,b,view) then
+        result[#result+1]=edge_for(a,b,-1,view)
       end
     end
     table.sort(result,function(x,y)
@@ -109,23 +109,24 @@ return function(gt)
   -- 规划一次门图路线，返回 (门事件, 路线)。路线同时是落点依据：执行层用它的
   -- 最后一条边决定入场门槽与过场出发房，费用与落点不再各算一套。
   -- 无路线时 route 为 nil（调用方自行回退），events 仍按诅咒房兜底。
-  function gt:plan_door_penalties(from,to)
+  function gt:plan_door_penalties(from,to,view)
     local p=Isaac.GetPlayer(0)
     owner=p -- 仅规划时使用当前角色；路线优先少惩罚，再比较距离。
-    local source,target=descriptor(from),descriptor(to)
+    local source,target=descriptor(from,view),descriptor(to,view)
     from=source and source.SafeGridIndex or from
     to=target and target.SafeGridIndex or to
     local actor={flying=p:IsFlying()}
-    local route=Policy.route(from,to,neighbors,descriptor,function(edge)
+    local route=Policy.route(from,to,function(a) return neighbors(a,view) end,
+      function(gid) return descriptor(gid,view) end,function(edge)
       return #gt:door_penalties(edge,actor)
     end, function(rd) return gt:room_is_clear(rd) end)
     local fallback=not route
     if fallback then
       route={}
-      local a,b=descriptor(from),descriptor(to)
-      if a and a.Data and a.Data.Type==10 then route[#route+1]=edge_for(from,to,-1) end
+      local a,b=descriptor(from,view),descriptor(to,view)
+      if a and a.Data and a.Data.Type==10 then route[#route+1]=edge_for(from,to,-1,view) end
       if b and b.Data and b.Data.Type==10 and not (a and a.Data and a.Data.Type==10) then
-        route[#route+1]=edge_for(from,to,-1)
+        route[#route+1]=edge_for(from,to,-1,view)
       end
       if #route==0 then route=nil end
     end
@@ -154,8 +155,8 @@ return function(gt)
     executor:add(events or {})
     executor:step(Game():GetFrameCount(),function() return true end)
   end
-  function gt:apply_travel_door_penalties(from,to)
-    local events=gt:plan_door_penalties(from,to)
+  function gt:apply_travel_door_penalties(from,to,view)
+    local events=gt:plan_door_penalties(from,to,view)
     gt:apply_door_penalty_events(events)
   end
   function gt:update_door_penalties()

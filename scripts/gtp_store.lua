@@ -58,10 +58,12 @@ return function(gt)
     return ok
   end
   function gt:persist_new_run()
-    cached=nil; identity=gt:level_identity()
+    identity=gt:level_identity()
     local text=gt.persist_serialize({identity=identity})
-    gt:SaveData(text)
     cached=gt.persist_parse(text)
-    if gt.reset_door_floor then gt:reset_door_floor() end
+    if gt.reset_door_floor then gt:reset_door_floor(identity, true) end
+    local ok,err=pcall(gt.SaveData,gt,text)
+    if not ok then pcall(Isaac.DebugString,'[GTPpersist] new run save failed: '..tostring(err)) end
+    return ok
   end
 end

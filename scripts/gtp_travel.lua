@@ -21,9 +21,7 @@
   设计文档：docs/superpowers/specs/2026-10-06-travel-judgment-refactor-design.md
   实现计划：docs/superpowers/plans/2026-10-06-travel-judgment-refactor-step1a.md
 
-  ⚠️ 本文件**绝不直接读** gtrep 的文件级 local（crd / crid / stage / room / level /
-     player / grid_room / room_neighbours）—— 它们会被 get_grid_room() / new_room()
-     整体重新赋值，捕获引用会拿到过时的那一层。一律走 gt: 访问器。
+  ⚠️ 传送的布局与门证据只在一次同步判定中使用，不跨帧保留读取视图。
 ]]--
 
 -- ===== 规则表 =====
@@ -68,7 +66,12 @@ function gt:travel_rule_enabled(rule, ctx)
     or rule.id == "target.same_room"
 end
 
+local function floor_not_ready()
+  return {ok = false, stage = 'departure', rule = 'floor.not_ready', text = '楼层现场正在切换'}
+end
+
 function gt:run_travel_stages(stage_names, ctx)
+  if ctx.floor_pending then return floor_not_ready() end
   for _, sname in ipairs(stage_names) do
     local bucket = gt.travel_rules[sname]
     for i = 1, #bucket do
@@ -84,8 +87,8 @@ function gt:run_travel_stages(stage_names, ctx)
 end
 
 -- ===== 门通路口径（哪扇门算「实际通路」）=====
--- 放在策略层而不是 gtrep：它是一条**口径**（门图与诊断共用），而且在这里能被 headless
--- 测到 —— gtrep 加载不了，那边一行引用错误只有进游戏才暴露。2026-10-06 实测教训：
+-- 放在策略层而不是 gtp：它是一条**口径**（门图与诊断共用），而且在这里能被 headless
+-- 测到 —— gtp 加载不了，那边一行引用错误只有进游戏才暴露。2026-10-06 实测教训：
 -- 我按行号替换时误删了本表，door_is_passage 引用成了 nil 全局 → 每帧
 -- "attempt to index a nil value (global 'LOCKED_DOOR_VARIANTS')" → 渲染链崩 → 传送光标瞬消。
 --
@@ -114,9 +117,14 @@ end
 -- （与旧实现里 `reach = FairTripPath and get_reachable_rooms() or nil` 同义）。
 -- 刻意不放 stage 字段：target.challenge_gate 用 ctx.level:GetStage() 取，
 -- 免得多个可能与 ctx.level 不同步的字段。
-function gt:travel_ctx(gid)
-  local st = gt:travel_cur_state()
+function gt:travel_ctx(gid, view)
+  if not view and gt.prepare_floor_read then
+    view = gt:prepare_floor_read('verdict', false, gid)
+    if not view then return {gid = gid, floor_pending = true} end
+  end
+  local st = gt:travel_cur_state(view)
   local ctx = {
+    view = view,
     gid = gid,
     cur = st.cur,
     cur_gid = st.cur_gid,
@@ -129,13 +137,13 @@ function gt:travel_ctx(gid)
     fair_time = gt:get_config_bool("FairTripTime", false),
   }
   if type(gid) == "number" and gid >= 0 and gid <= 168 then
-    ctx.target = gt:grid_room_desc(gid)
+    ctx.target = gt:grid_room_desc(gid, view)
   end
   local reach_cache = nil
   ctx.reachable = function()
     if not ctx.fair_path then return nil end
     if reach_cache == nil then
-      reach_cache = gt:get_reachable_rooms()
+      reach_cache = gt:get_reachable_rooms(view)
     end
     return reach_cache
   end
@@ -146,14 +154,14 @@ end
 
 -- 呼出光标：只跑 ①。它必须能在没有目标时回答 —— 所以 ① 段规则不得访问
 -- ctx.gid / ctx.target。这条不变量正是「能否呼出光标」的定义。
-function gt:can_open_cursor()
+function gt:can_open_cursor(view)
   if gt:get_travel_mode() == 1 then return { ok = true } end
-  return gt:run_travel_stages({ "departure" }, gt:travel_ctx(nil))
+  return gt:run_travel_stages({ "departure" }, gt:travel_ctx(nil, view))
 end
 
 -- 传送到某格：跑全部四段。① 必须重跑 —— 否则直接调它会漏掉当前房那一侧。
-function gt:can_travel_to(gid)
-  return gt:run_travel_stages(gt.travel_stages, gt:travel_ctx(gid))
+function gt:can_travel_to(gid, view)
+  return gt:run_travel_stages(gt.travel_stages, gt:travel_ctx(gid, view))
 end
 
 -- ===== ① departure：只看当前房与玩家 =====
@@ -182,7 +190,7 @@ gt:add_travel_rule({
   id = "departure.cur_uncleared", stage = "departure", order = 30,
   text = "当前房间还没清怪",
   test = function(ctx)
-    if gt:grid_room_desc(ctx.cur_gid) ~= nil and gt:room_is_clear(ctx.cur) then return nil end
+    if gt:grid_room_desc(ctx.cur_gid, ctx.view) ~= nil and gt:room_is_clear(ctx.cur) then return nil end
     return { cur_gid = ctx.cur_gid, clear = ctx.cur.Clear }
   end,
 })
@@ -238,7 +246,7 @@ gt:add_travel_rule({
   id = "target.unknown_cell", stage = "target_entry", order = 20,
   text = "这个格子不在本层的房间表里",
   test = function(ctx)
-    if ctx.mode == 1 and ctx.target ~= nil and not gt:is_grid_room_displayed(ctx.gid) then
+    if ctx.mode == 1 and ctx.target ~= nil and not gt:is_grid_room_displayed(ctx.gid, ctx.view) then
       return { gid = ctx.gid, selectable = false }
     end
     if ctx.target ~= nil then return nil end
@@ -257,8 +265,8 @@ gt:add_travel_rule({
 
 -- 挑战房的「进入条件现状」：规则本体与诊断探针都读这一份，避免两处漂移。
 -- 非挑战房 / 玩家不可用 时返回 nil。
-function gt:challenge_entry_state(gid)
-  local rd = gt:grid_room_desc(gid)
+function gt:challenge_entry_state(gid, view)
+  local rd = gt:grid_room_desc(gid, view)
   if not (rd and rd.Data and rd.Data.Type == 11) then return nil end
   local p = Isaac.GetPlayer(0)
   if not p or not p:Exists() then return nil end
@@ -288,7 +296,7 @@ gt:add_travel_rule({
   id = "target.challenge_gate", stage = "target_entry", order = 60,
   text = "目标是挑战房，而当前血量不满足它的进入条件",
   test = function(ctx)
-    local s = gt:challenge_entry_state(ctx.gid)
+    local s = gt:challenge_entry_state(ctx.gid, ctx.view)
     if not s then return nil end                -- 非挑战房 / 玩家不可用
     if s.done then return nil end               -- 打完了的挑战房不再查条件（Fixed 原语义）
     -- 血量总和 = **红心 + 魂心**（两者都是半心单位）。
@@ -324,7 +332,7 @@ gt:add_travel_rule({
   id="target.unlock_resources",stage="target_entry",order=70,
   text="自动解锁相邻房门需要的钥匙或金币不足",
   test=function(ctx)
-    local unlock=gt.adjacent_unlock_state and gt:adjacent_unlock_state(ctx.gid)
+    local unlock=gt.adjacent_unlock_state and gt:adjacent_unlock_state(ctx.gid, ctx.view)
     if not unlock or unlock.affordable then return nil end
     return {unlock=unlock.cost.kind,need=unlock.cost.amount}
   end,
@@ -341,7 +349,7 @@ gt:add_travel_rule({
     -- 仅当前房间真实锁门可付费成为最后一跳；不扩展远处门图/可达岛。
     -- 已探索档仍拒绝未探索目标，所有前置 departure/target 规则已执行。
     if ctx.mode==2 or (ctx.target.VisitedCount>0 and gt:room_is_clear(ctx.target)) then
-      local unlock=gt.adjacent_unlock_state and gt:adjacent_unlock_state(ctx.gid)
+      local unlock=gt.adjacent_unlock_state and gt:adjacent_unlock_state(ctx.gid, ctx.view)
       if unlock and unlock.affordable then return nil end
     end
     local reach = ctx.reachable()
@@ -367,23 +375,23 @@ gt:add_travel_rule({
       --      边没学到不代表不通 ✗。必须**放**。
       -- 区别就在「这一侧配置上有没有门」→ 读 RoomConfigRoom.Doors（位掩码）。
       local a, b = rd.SafeGridIndex, t.SafeGridIndex
-      if gt:has_known_passage(a, b) then return true end
-      local _, sa = gt:door_links_of(a)
-      local _, sb = gt:door_links_of(b)
+      if gt:has_known_passage(a, b, ctx.view) then return true end
+      local _, sa = gt:door_links_of(a, ctx.view)
+      local _, sb = gt:door_links_of(b, ctx.view)
       if sa or sb then return false end          -- 有一边扫过 → 没学到边就是真没有通路
-      return gt:has_door_between(a, b) == true    -- 都没扫过 → 只在配置上真有门时才认
-    end)
+      return gt:has_door_between(a, b, ctx.view) == true
+    end, ctx.view)
     if near then return nil end
     return { branch = "channel_c", mode = ctx.mode }
   end,
 })
 
 -- ===== 计时代价：执行层调用，不参与准入 =====
-function gt:travel_time_distance(from, to)
+function gt:travel_time_distance(from, to, view)
   if gt:get_travel_mode() == 1 or not gt:get_config_bool("FairTripTime", false) then
     return 0
   end
-  local dist = gt:fair_trip(from, to)
+  local dist = gt:fair_trip(from, to, view)
   if dist == 999 then return 0 end -- BFS 的无路线哨兵，不是实际距离
   return dist
 end
@@ -411,8 +419,9 @@ end
 -- （2026-10-06 实测：屏幕上只剩 "[拒绝 gid=35]" 里的 ASCII 部分，理由那截是空的）。
 -- 所以 ascii 模式印**规则 id**而不是中文散文；控制台也只用 ASCII，中文说明仅供日志使用。
 -- 第二个返回值 = 是否可传送（浮层要靠它决定画不画）。
-function gt:travel_verdict_dump(gid, ascii)
-  local ctx = gt:travel_ctx(gid)
+function gt:travel_verdict_dump(gid, ascii, view)
+  local ctx = gt:travel_ctx(gid, view)
+  if ctx.floor_pending then return "  verdict: NOT teleportable (floor.not_ready)", false end
   local L = { string.format("travelDiag: target gid=%s mode=%d fairPath=%s fairTime=%s",
     tostring(gid), ctx.mode, tostring(ctx.fair_path), tostring(ctx.fair_time)) }
   if ctx.mode == 1 then
@@ -561,7 +570,7 @@ function gt:travel_links_dump(gid)
     tostring(swept), #parts > 0 and table.concat(parts, " ") or "none")
 end
 
-local function auto_log_travel_body(gid, res)
+local function auto_log_travel_body(gid, res, view)
   if not gt:is_debug() then return end
   local probe = gt:challenge_probe(gid)
   -- 放过谁也要记：**非普通房**的放行都记（ROOM_DEFAULT 放行是常态，记了会刷屏）。
@@ -580,7 +589,7 @@ local function auto_log_travel_body(gid, res)
   travel_probe_logged[key] = true
   local lines = { "[GTPtrip] " .. (res.ok and "allowed" or "rejected") ..
     " target (auto, no keypress needed)  rule=" .. tostring(res.rule or "-") }
-  lines[#lines + 1] = gt:travel_verdict_dump(gid, true)
+  lines[#lines + 1] = gt:travel_verdict_dump(gid, true, view)
   lines[#lines + 1] = gt:travel_target_dump(gid)
   lines[#lines + 1] = gt:travel_links_dump(gid)
   if probe then lines[#lines + 1] = probe end
@@ -592,9 +601,9 @@ end
 -- 取证是**诊断**：绝不能因为诊断自身的 bug 把渲染链带崩（2026-10-06 实测教训 ——
 -- 影子对照一次 nil 调用就让光标 / 地图边界 / 未探索目标全废）。整段 pcall，
 -- 出错只留一行告警，绝不弄坏它要排查的功能。
-function gt:auto_log_travel(gid, res)
+function gt:auto_log_travel(gid, res, view)
   if not gt:is_debug() then return end
-  local okc, err = pcall(auto_log_travel_body, gid, res)
+  local okc, err = pcall(auto_log_travel_body, gid, res, view)
   if not okc then
     Isaac.DebugString("[GTPtrip] auto-log 抛错，本条取证已跳过：" .. tostring(err))
   end

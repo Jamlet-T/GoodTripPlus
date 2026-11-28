@@ -163,9 +163,9 @@ function M.render()
   end
 end
 
--- MCM 开关：不在本模块注册——2026-10-04 起全部 MCM 项集中在 gtrep.lua 的
+-- MCM 开关：不在本模块注册——2026-10-04 起全部 MCM 项集中在 gtp.lua 的
 -- 统一注册块里按用户指定顺序注册（本功能配置键 = ShowMapBounds，默认开；
--- 文案在 gtrep.lua 的 GT_STRINGS.map_bounds_*）。
+-- 文案在 gtp.lua 的 GT_STRINGS.map_bounds_*）。
 
 -- 绘制层：与隐藏房标记同一个回调，但优先级再早 1，让标记与光标压在线之上
 do

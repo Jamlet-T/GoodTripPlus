@@ -60,7 +60,7 @@ return function(gt)
     gt:AddCallback(ModCallbacks.MC_USE_PILL, pocket_callback('pill'))
   end
   local original = gt.teleport_to_grid_index
-  function gt:teleport_to_grid_index(gid)
+  function gt:teleport_to_grid_index(gid, ...)
     probe(function()
       local origin, detail, frame = context()
       serial = serial + 1
@@ -70,7 +70,7 @@ return function(gt)
         serial, tostring(gid), tostring(gt:get_teleport_transition()), detail) .. pocket_detail())
     end)
     -- 不用 pcall 包住游戏操作，保留原始异常与所有返回值。
-    local result = table.pack(original(self, gid))
+    local result = table.pack(original(self, gid, ...))
     probe(function()
       if not trip then return end
       trip.dispatching = false

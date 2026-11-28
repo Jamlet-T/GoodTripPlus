@@ -92,7 +92,7 @@ end
 -- 用一组在「同一层」内稳定的字段拼出层身份。
 -- 换层时 stage / absoluteStage / 种子 / 房间数 至少有一个会变，
 -- 而 rewind 回滚到同一层时这组值完全一致。
--- 层身份的定义已收进 gtrep（gt:level_identity）—— 门图持久化也要用它判「是不是同一层」，
+-- 层身份的定义已收进 gtp（gt:level_identity）—— 门图持久化也要用它判「是不是同一层」，
 -- 一处实现、两处使用（2026-10-06）。
 local function level_identity()
   return gt:level_identity()

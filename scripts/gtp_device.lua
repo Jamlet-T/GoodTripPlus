@@ -49,7 +49,7 @@ function M.gamepad_device(controller)
   return controller
 end
 -- 玩家自己设备的查询槽位（键盘或手柄都适用）。
--- gtrep 里查「这个玩家的动作/按钮」一律用它，不要直接传 ControllerIndex。
+-- gtp 里查「这个玩家的动作/按钮」一律用它，不要直接传 ControllerIndex。
 function M.input_device(controller)
   local s = signed(controller)
   if slot_api() then
