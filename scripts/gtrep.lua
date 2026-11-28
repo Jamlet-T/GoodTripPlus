@@ -5,7 +5,7 @@ local console_output = require("scripts.gtp_console").write
 local map_key_device = require("scripts.gtp_device")
 -- 版本号：与 metadata.xml 保持一致。log.txt 里靠这一行确认「实际加载的是哪一版」，
 -- 排查「改了没生效 / 没重启」时是第一手证据。
-gt.VERSION = "3.0.26"
+gt.VERSION = "3.0.27"
 -- 部署工具生成的源码指纹；开发源码本身无需维护第二个版本号。
 local build_ok, build = pcall(require, "scripts.gtp_build")
 gt.BUILD = build_ok and type(build) == "string" and build or "source"
@@ -46,7 +46,7 @@ local tele_pending = nil -- 原生异步传送落地前禁止覆盖 pending tran
 local secret_pre_room_id = {}
 local prep_alarm = false
 local testnum = 0
-local n_room_num = 0
+local layout_room_count
 local mmp_ctrl = false
 local mmp_ctrl_pos = Vector(0, 0)
 local mmp_highlight_gid = nil
@@ -125,7 +125,7 @@ require("scripts.gtp_doors")(gt, {
     curse_bare_outside, curse_bare_inside, secret_pre_room_id = state.bare_out, state.bare_in, state.pre
   end,
 })
---每个房间的邻居列表（floor.lua get_room_neighbours；get_grid_room 之后重建）
+-- 房间邻接表与实际占格在 get_grid_room 中同步重建。
 local room_neighbours = {}
 
 gt.DebugMod = false
@@ -253,43 +253,32 @@ function gt:rooms_linked(a, b)
     return not (swept[a] or swept[b])
 end
 
---（floor.lua get_room_neighbours：由格子邻接推导房间级邻接，大房间/L 形天然覆盖）
-function gt:get_room_neighbours()
-    room_neighbours = {}
-    local all_room = level:GetRooms()
-    for i = 0, all_room.Size do
-      local des = all_room:Get(i)
-      if des then
-        room_neighbours[des.SafeGridIndex] = {
-          Descriptor = des,
-          Neighbors = {}
-        }
+-- 从同一份实际占格生成邻接。每个格子只检查右、下两侧，再登记双向邻接；
+-- 大房间和 L 形房共用边的情况以房间编号去重，邻接本身不表示有门。
+local function build_room_neighbours(cells)
+    local adjacent = {}
+    for _, desc in pairs(cells) do
+      adjacent[desc.SafeGridIndex] = {}
+    end
+    local function connect(a, other)
+      if not other then return end
+      local b = other.SafeGridIndex
+      if a ~= b then
+        adjacent[a][b], adjacent[b][a] = true, true
       end
     end
-    local offsets = {-13, 13, -1, 1}
-    for _, r in pairs(room_neighbours) do
-      local safeIndex = r.Descriptor.SafeGridIndex
-      for gridIndex, cellRoom in pairs(grid_room) do
-        if cellRoom.SafeGridIndex == safeIndex then
-          for _, offset in ipairs(offsets) do
-              --column guard, as in check_neigh_connected
-              local wrapped = (offset == -1 and gridIndex % 13 == 0)
-                           or (offset == 1 and gridIndex % 13 == 12)
-              local other = not wrapped and grid_room[gridIndex + offset] or nil
-              if other and other.SafeGridIndex ~= safeIndex then
-                  r.Neighbors[other.SafeGridIndex] = true
-              end
-          end
-        end
-      end
+    for gid, desc in pairs(cells) do
+      local a = desc.SafeGridIndex
+      if gid % 13 ~= 12 then connect(a, cells[gid + 1]) end
+      connect(a, cells[gid + 13])
     end
-    for _, r in pairs(room_neighbours) do
+    local neighbours = {}
+    for gid, links in pairs(adjacent) do
       local list = {}
-      for id in pairs(r.Neighbors) do
-        list[#list + 1] = id
-      end
-      r.Neighbors = list
+      for id in pairs(links) do list[#list + 1] = id end
+      neighbours[gid] = {Neighbors = list}
     end
+    return neighbours
 end
 
 -- 注：这里原来有一份「已显示但未探索目标的类型白名单」（Fixed 原逻辑：
@@ -1131,11 +1120,12 @@ function gt:get_current_room_cursor_gid()
     return d.SafeGridIndex
 end
 --
-function gt:get_grid_room()
-    grid_room = {}
+function gt:get_grid_room(all_room)
+    local cells = {}
     local dim = gt:get_current_dimension()
-    local all_room = level:GetRooms()
-    for i = 0, all_room.Size do
+    all_room = all_room or level:GetRooms()
+    local count = all_room.Size
+    for i = 0, count do
       local des = all_room:Get(i)
       if des then
         local gid = des.SafeGridIndex
@@ -1148,12 +1138,14 @@ function gt:get_grid_room()
             local tgid = gid + jx + jy * 13
             local tdes = level:GetRoomByIdx(tgid, dim)
             if tdes and tdes.ListIndex == des.ListIndex then
-              grid_room[tgid] = tdes
+              cells[tgid] = tdes
             end
           end
         end
       end
     end
+    grid_room, room_neighbours = cells, build_room_neighbours(cells)
+    layout_room_count = count
 end
 -- ===== 判定层访问器（gtp_travel 专用，2026-10-06）=====
 -- gtrep 的文件级 local 会被 get_grid_room() / new_room() / new_level() 整体重新赋值，
@@ -1631,7 +1623,16 @@ function gt:step()
     if gt.update_map_input then gt:update_map_input() end
     --a wall can open under the player's feet (bomb, red key), so sweep every
     --tick; but not mid-transition, when the live room and the cached descriptor disagree
+    local layout_refreshed = false
     if level:GetCurrentRoomDesc().SafeGridIndex == crid then
+      -- 红钥匙可在不换房的情况下新增占格；在处理光标前同步布局。
+      if layout_room_count ~= nil then
+        local all_room = level:GetRooms()
+        if all_room.Size ~= layout_room_count then
+          gt:get_grid_room(all_room)
+          layout_refreshed = true
+        end
+      end
       gt:sweep_doors()
     end
     if not player or Game():IsPaused() then
@@ -1646,9 +1647,9 @@ function gt:step()
     end
     local controller = player.ControllerIndex
     local device = map_key_device.input_device(controller)
-    if gt:is_map_key_triggered(controller)
+    if not layout_refreshed and (gt:is_map_key_triggered(controller)
     or Input.IsActionTriggered(ButtonAction.ACTION_ITEM,device)
-    or Input.IsActionTriggered(ButtonAction.ACTION_PILLCARD,device) then
+    or Input.IsActionTriggered(ButtonAction.ACTION_PILLCARD,device)) then
       gt:get_grid_room()
     end
     if gt:is_map_key_pressed(controller) then
@@ -1684,7 +1685,6 @@ end
 function gt:new_room()
     last_crd = crd
     gt:get_grid_room()
-    gt:get_room_neighbours()
     gt:sweep_doors()
     room = Game():GetRoom()
     crd = level:GetCurrentRoomDesc()
@@ -1733,8 +1733,6 @@ function gt:new_level()
     tele_pending, tele_door_slot, tele_maze, tele_cd = nil, -1, false, 0
     level = Game():GetLevel()
     gt:get_grid_room()
-    gt:get_room_neighbours()
-    n_room_num = (level:GetRooms()).Size
     secret_pre_room_id = {}
     secret_diag_logged = {}
     -- 免按键取证的去重表（gtp_travel 里）：每层清空，免得跨层误判为「已记过」
