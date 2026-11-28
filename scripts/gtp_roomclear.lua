@@ -33,8 +33,10 @@ return function(gt, api)
       cleared[desc.ListIndex] = true
     end
 
-    if api then
-      local map = api:GetLevel(gt:get_current_dimension())
+    -- 主模组可能先于 MiniMAPI 加载；刷新时才取实际 API。
+    local minimap = api or MinimapAPI
+    if minimap and type(minimap.GetLevel) == 'function' then
+      local map = minimap:GetLevel(gt:get_current_dimension())
       for _, map_room in ipairs(map or {}) do
         local mapped_desc = map_room.Descriptor
         if mapped_desc and cleared[mapped_desc.ListIndex] then

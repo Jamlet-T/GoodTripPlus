@@ -3,7 +3,8 @@ local get_strings = require("scripts.gtp_locale")
 return function(gt)
   local mcm_registered = false
   function gt:register_menu()
-  if not mcm_registered and ModConfigMenu then
+  -- 子页按注册顺序追加；等两个依赖都就绪再一次性注册，避免漏掉代理项。
+  if not mcm_registered and ModConfigMenu and MinimapAPI and MinimapAPI.Config then
     mcm_registered = true
     local L = get_strings(Options.Language)
     -- 保留 1（立即传送）/ 2（淡入淡出）；已删除的 3、4 迁移为 2。
@@ -388,5 +389,6 @@ return function(gt)
       L.debug_desc
     )
   end
+  return mcm_registered
   end
 end

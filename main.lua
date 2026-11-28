@@ -28,15 +28,11 @@
 --  11. 隐藏房候选门框（scripts/gtp_secretoutlines.lua）：白／金／红门框、狗牙与踩踏线索、
 --      迷失诅咒下继续显示。
 
-require("scripts.gtp_minimapdefaults")(MinimapAPI)
 require("scripts.gtp")
-require("scripts.gtp_mapinput")(gt, MinimapAPI)
-require("scripts.gtp_combatmap")(gt, MinimapAPI)
-require("scripts.gtp_distancefix")(MinimapAPI)
-require("scripts.gtp_boundedshadow")(MinimapAPI)
+require("scripts.gtp_minimapattach")(gt)
 -- 传送判定策略层（2026-10-06 起）：四段规则表 + check 入口 + 调试浮层。
 -- 必须在 gtp 之后 —— 它要拿 gtp 定义的 gt 表与访问器。
-require("scripts.gtp_roomclear")(gt, MinimapAPI)
+require("scripts.gtp_roomclear")(gt)
 require("scripts.gtp_travel")
 -- 门图状态的序列化（纯函数；存档读写与时机在 gtp 里）
 require("scripts.gtp_persist")
