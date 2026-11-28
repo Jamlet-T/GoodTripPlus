@@ -1,4 +1,4 @@
--- 来源：gtrep.lua:1782-1978；只负责菜单注册，不挂游戏生命周期回调。
+-- 来源：gtrep.lua:1782-1978；负责菜单注册与「依赖其它开关」的可选状态（一个 POST_UPDATE 同步）。
 local get_strings = require("scripts.gtp_locale")
 return function(gt)
   local mcm_registered = false
@@ -102,10 +102,10 @@ return function(gt)
     end
     -- 保留 MCM 原生清空行为；未绑定时跟随对应设备的游戏地图动作。
     add_map_key_setting("MapKeyboardKey", ModConfigMenu.OptionType.KEYBIND_KEYBOARD,
-      L.map_keyboard_key_name, L.map_keyboard_key_desc,
+      L.map_keyboard_key_name, nil,
       InputHelper and InputHelper.KeyboardToString or {})
     add_map_key_setting("MapControllerKey", ModConfigMenu.OptionType.KEYBIND_CONTROLLER,
-      L.map_controller_key_name, L.map_controller_key_desc,
+      L.map_controller_key_name, nil,
       InputHelper and InputHelper.ControllerToString or {})
     begin_tab(L.tabs.cursor)
     section(L.sections.movement, true)
@@ -388,6 +388,76 @@ return function(gt)
       L.debug_name,
       L.debug_desc
     )
+    -- 依赖其它开关的选项：MCM 没有条件隐藏行的 API，用 NoCursorHere ——
+    -- 条件不满足时变灰且光标不能停上去，满足后恢复普通颜色。
+    -- ⚠️ MCM 只在字段**存在**时变灰（不调用它判断），用函数会让可选行也一直灰；
+    -- 所以按条件增删字段：可选时清成 nil。MCM 的 Add* 不返回选项表，按 Attribute
+    -- 从 MenuData 取回；结构不确定时保持可选。
+    local function find_option(attribute)
+      local data = ModConfigMenu.MenuData
+      if type(data) ~= 'table' then return nil end
+      for _, category in pairs(data) do
+        if type(category) == 'table' and category.Name == 'GoodTripPlus'
+            and type(category.Subcategories) == 'table' then
+          for _, sub in pairs(category.Subcategories) do
+            if type(sub.Options) == 'table' then
+              for _, option in ipairs(sub.Options) do
+                if option.Attribute == attribute then return option end
+              end
+            end
+          end
+        end
+      end
+    end
+    local gates = {}
+    local function gate(attribute, selectable)
+      local option = find_option(attribute)
+      if option then gates[#gates + 1] = {option = option, selectable = selectable} end
+    end
+    gate('GridStepRepeat', function()
+      return gt:get_config_bool('CursorGridStep', false)
+    end)
+    gate('GridStepRepeatInterval', function()
+      return gt:get_config_bool('CursorGridStep', false)
+    end)
+    gate('FairTripPath', function()
+      return gt:get_travel_mode() ~= 1 -- 任意房间档不查连通
+    end)
+    gate('CombatKeepLargeMap', function()
+      local api = MinimapAPI
+      return api ~= nil and api.Config ~= nil and (api.Config.HideInCombat or 1) ~= 1
+    end)
+    gate('ShowSingleSecretCandidates', function()
+      return gt:get_config_bool('ShowSecretMarkers', false)
+    end)
+    gate('SecretDoorOutlineOpacity', function()
+      return gt:get_config_bool('ShowSecretDoorOutlines', false)
+    end)
+    gate('DoorOutlinesDuringCurse', function()
+      return gt:get_config_bool('ShowSecretDoorOutlines', false)
+    end)
+    local function sync_gates(force)
+      -- 只有菜单打开时才可能改这些开关；关着时不同步，省掉逐帧探测。
+      -- （force 用严格 true 判断：冒号调用会把 gt 自己传进来。）
+      if force ~= true and not (ModConfigMenu and ModConfigMenu.IsVisible) then return end
+      for _, entry in ipairs(gates) do
+        -- 判定失败（例如宿主缺少访问器）时保持可选，宁可多一行也不要卡住菜单。
+        local ok, selectable = pcall(entry.selectable)
+        if ok and not selectable then
+          entry.option.NoCursorHere = true
+        else
+          entry.option.NoCursorHere = nil
+        end
+      end
+    end
+    gt.sync_menu_gates = sync_gates
+    sync_gates(true) -- 注册时先按当前配置设定初值；之后随菜单打开逐帧同步
+    -- 上游开关（含 MinimapAPI 自己的菜单）可能在别处被改，菜单打开期间逐帧同步。
+    if ModCallbacks and ModCallbacks.MC_POST_UPDATE and gt.AddCallback
+        and not gt._menuGatesHooked then
+      gt._menuGatesHooked = true
+      gt:AddCallback(ModCallbacks.MC_POST_UPDATE, sync_gates)
+    end
   end
   return mcm_registered
   end
