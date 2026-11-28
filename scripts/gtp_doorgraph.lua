@@ -26,6 +26,7 @@ function Graph:mark_swept(dim, here)
   swept[here] = true
 end
 
+-- 调用方汇总当前房所有门槽后，每个目标房只提交一次。
 -- 通路双向记录；另一端尚未扫门时只记 true，保留已知门槽（包括 0）。
 function Graph:observe(dim, here, there, slot, passage)
   if here == there then return end

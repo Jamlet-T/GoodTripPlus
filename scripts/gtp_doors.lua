@@ -70,17 +70,22 @@ function gt:sweep_doors()
     door_state:mark_swept(dim, here)
     door_state.evidence[dim]=door_state.evidence[dim] or {}
     local previous=door_state.evidence[dim][here] or {}
-    local observed={}
+    local observed, passages = {}, {}
     for i = 0, 7 do
       local door = live:GetDoor(i)
-      --DOOR_HIDDEN is an unbombed wall, so no passage; a door that is closed right now
-      --is no passage either (see gt:door_is_passage in gtp_travel).
-      --All read live so nothing is from different moments.
-      --（实测：炸开之后 variant 会变成 8，所以这条判据本身就够用，别再加「已炸开」判据）
       if door then
         local tdes = lvl:GetRoomByIdx(door.TargetRoomIndex, -1)
         if tdes then
           local there = tdes.SafeGridIndex
+          local passage = gt:door_is_passage(door)
+          -- 门槽是现场证据，图边是房间对：例如隐藏房占 L 形房的缺角，
+          -- 一个已开的洞口就足以连通两室。选第一个可通槽（包括 0），
+          -- 未打开的另一面墙不能覆盖它。
+          if passage and not passages[there] then
+            passages[there] = i
+          elseif passages[there] == nil then
+            passages[there] = false
+          end
           local evidence=Penalty.describe(door,live:GetType(),tdes.Data and tdes.Data.Type,i)
           evidence.from,evidence.to=here,there
           observed[i]=evidence
@@ -93,9 +98,9 @@ function gt:sweep_doors()
             -- 门证据只在调试模式开启时写 [GTPdoor]；记录与存档照常。
             if gt.is_debug and gt:is_debug() then
               pcall(function()
-                Isaac.DebugString(string.format('[GTPdoor] dim=%s from=%s to=%s slot=%s variant=%s varData=%s spikes=%s types=%s/%s sprite=%s',
-                  dim,here,there,i,evidence.variant,evidence.var_data,tostring(evidence.spikes),
-                  evidence.current_type,evidence.target_type,evidence.sprite))
+                Isaac.DebugString(string.format('[GTPdoor] dim=%s from=%s to=%s slot=%s variant=%s open=%s passage=%s varData=%s spikes=%s types=%s/%s sprite=%s',
+                  dim,here,there,i,evidence.variant,tostring(evidence.open),tostring(passage),
+                  evidence.var_data,tostring(evidence.spikes),evidence.current_type,evidence.target_type,evidence.sprite))
               end)
             end
           end
@@ -108,9 +113,12 @@ function gt:sweep_doors()
             local value=door.VarData ~= 0
             if aux.bare_in[here]~=value then aux.bare_in[here]=value; door_state.dirty=true end
           end
-          door_state:observe(dim, here, there, i, gt:door_is_passage(door))
         end
       end
+    end
+    -- 扫完所有槽后才提交房间对；只有这一对没有任何可通门才撤销双向边。
+    for there, slot in pairs(passages) do
+      door_state:observe(dim, here, there, slot, slot ~= false)
     end
     for slot in pairs(previous) do if not observed[slot] then door_state.dirty=true end end
     door_state.evidence[dim][here]=observed
