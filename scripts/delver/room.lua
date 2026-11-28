@@ -94,19 +94,16 @@ function M.door_check()
   local visited = visit(room_obj)
 
   for cid, cand in pairs(map.candidates) do
+    -- 究极的两步入口在 map.lua 逐条校验；一条入口不可用不能否定整个位置。
+    if cand.secret_type == C.SECRET_TYPE.ULTRA then goto next_candidate end
     for _, entry in ipairs(cand.entries) do
       if entry.source_lid ~= lid or entry.checked then
         goto next_entry
       end
 
       local valid = false
-      -- Ordinary/super guesses use player-visible wall accessibility. Hidden
-      -- STB/XML door permissions are not observable evidence against a wall.
-      if entry.doorslot == nil then
-        valid = false
-      elseif cand.secret_type == C.SECRET_TYPE.ULTRA then
-        valid = room_obj:IsDoorSlotAllowed(entry.doorslot)
-      else
+      -- 普通／超级候选依赖可见的墙前路径，不读模板的隐藏门槽许可。
+      if entry.doorslot ~= nil then
         local door = room_obj:GetDoor(entry.doorslot)
         local has_door = door
                      and door.TargetRoomType ~= RoomType.ROOM_SECRET
@@ -134,6 +131,7 @@ function M.door_check()
 
       ::next_entry::
     end
+    ::next_candidate::
   end
 
   -- Real rooms are never candidates for this exclusion pass.

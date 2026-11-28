@@ -27,10 +27,10 @@ return function(gt)
   local mama_state_sampled_map, mama_state_sampled_room, mama_mega_active
   local selected_entrances, selected_map, selected_room, selected_revision
   local selected_frame, selected_yo_listen, markers_visible
-  local selected_regular_fallback, selected_ultra_fallback
-  local selected_show_single
+  local selected_regular_fallback, selected_show_single
   local last_red_outline_scan_frame, last_red_outline_scan_room
   local red_outline_slots = {}
+  local last_red_trace, red_trace_disabled
   local yo_listen_frame, yo_listen_owned
   local stomp_variants = {
     [EffectVariant.MONSTROS_TOOTH] = true,
@@ -169,18 +169,13 @@ return function(gt)
     return not enabled() or candidate_allowed(candidate, has_yo_listen())
   end)
 
-  local function permitted_entrance(room, slot, secret_type)
-    -- White/gold guesses follow visible walls, matching room.door_check.
-    -- Keep the existing red-room doorway constraint for ultra entrances.
-    if secret_type == C.SECRET_TYPE.ULTRA
-      and not room:IsDoorSlotAllowed(slot) then return false end
+  local function permitted_entrance(room, slot)
+    -- 普通／超级按可见墙检查；红门只跟随原版特效，不进入这条绘制路径。
     local door = room:GetDoor(slot)
     if not door then return true end
     if door:IsOpen() then return false end
     local kind = door.TargetRoomType
-    return kind == C.SECRET_TYPE.REGULAR
-      or kind == C.SECRET_TYPE.SUPER
-      or kind == C.SECRET_TYPE.ULTRA
+    return kind == C.SECRET_TYPE.REGULAR or kind == C.SECRET_TYPE.SUPER
   end
 
   local function preference(kind, verified)
@@ -208,10 +203,9 @@ return function(gt)
       local display_kind, ambiguous = candidate_view.select(candidate, show_single,
         clue_reveals and map.truth_type(candidate.cid) or nil, fallback)
       local color = C.MARKER.COLORS[display_kind]
-      local ultra_hidden = kind == C.SECRET_TYPE.ULTRA
-        and not state.can_see_red()
       local real = candidate.lid ~= nil or clue_reveals
-      if color and not ultra_hidden
+      -- 究极猜测留在小地图；即使已知目标，也不能把推测入口画成原版红钥匙提示。
+      if color and kind ~= C.SECRET_TYPE.ULTRA and display_kind ~= C.SECRET_TYPE.ULTRA
         and candidate_allowed(candidate, yo_listen)
         and (real or candidate.marker_status ~= C.MARKER.STATUS.FOUND) then
         local verified = fully_checked(candidate) or clue_reveals
@@ -221,11 +215,10 @@ return function(gt)
         for _, entry in ipairs(candidate.entries) do
           local slot = entry.doorslot
           if entry.source_lid == current.lid and slot ~= nil
-            and permitted_entrance(room, slot, kind)
+            and permitted_entrance(room, slot)
             and (not result[slot] or rank > result[slot].rank) then
             result[slot] = {
-              rgb = color, verified = verified, rank = rank, secret_type = kind,
-              ambiguous = ambiguous,
+              rgb = color, rank = rank, ambiguous = ambiguous,
             }
           end
         end
@@ -247,6 +240,37 @@ return function(gt)
       shift = Vector(0, -24)
     end
     return room:GetDoorSlotPosition(slot) + shift, side * 90 - 90
+  end
+
+  local function trace_red_routes(current, slots)
+    if red_trace_disabled or not gt.is_debug then return end
+    local ok = pcall(function()
+      if not gt:is_debug() then return end
+      local native, routes = {}, {}
+      for slot in pairs(slots) do native[#native + 1] = tostring(slot) end
+      for cid, candidate in pairs(map.candidates) do
+        if candidate.secret_type == C.SECRET_TYPE.ULTRA then
+          for _, entry in ipairs(candidate.entries) do
+            if entry.source_lid == current.lid then
+              routes[#routes + 1] = string.format('%d:%d>%d(%s)', entry.doorslot,
+                entry.via_cid, cid, slots[entry.doorslot] and 'native' or 'map-only')
+            end
+          end
+        end
+      end
+      table.sort(native)
+      table.sort(routes)
+      local msg = '[GTPdelver] red-outline floor=' .. map.floor_revision
+        .. ' dim=' .. state.get_dimension() .. ' room=' .. current.safe_cid
+        .. ' native=' .. table.concat(native, ',') .. ' routes=' .. table.concat(routes, ',')
+      if msg == last_red_trace then return end
+      Isaac.DebugString(msg)
+      last_red_trace = msg
+    end)
+    if not ok then
+      red_trace_disabled = true
+      pcall(function() Isaac.DebugString('[GTPdelver] red-outline diagnostics disabled after failure') end)
+    end
   end
 
   local function observe_red_key_outlines(level, room, room_index, frame)
@@ -282,7 +306,6 @@ return function(gt)
       end
     end
     red_outline_slots = slots
-    if not next(slots) then return end
 
     -- Ascent/Home has no Delver candidate map. Keep the native red outlines
     -- available for drawing without touching stale candidate data.
@@ -290,6 +313,8 @@ return function(gt)
 
     local current = descriptor and map.rooms[descriptor.ListIndex]
     if not current then return end
+    trace_red_routes(current, slots)
+    if not next(slots) then return end
 
     local changed = false
     for cid, candidate in pairs(map.candidates) do
@@ -373,11 +398,10 @@ return function(gt)
       or selected_yo_listen ~= yo_listen
       or selected_show_single ~= show_single
       or selected_regular_fallback ~= fallback[C.SECRET_TYPE.REGULAR]
-      or selected_ultra_fallback ~= fallback[C.SECRET_TYPE.ULTRA]
       or frame - (selected_frame or 0) >= 30
     if not rebuild then
-      for slot, data in pairs(selected_entrances) do
-        if not permitted_entrance(room, slot, data.secret_type) then
+      for slot in pairs(selected_entrances) do
+        if not permitted_entrance(room, slot) then
           rebuild = true
           break
         end
@@ -390,7 +414,6 @@ return function(gt)
       selected_yo_listen = yo_listen
       selected_show_single = show_single
       selected_regular_fallback = fallback[C.SECRET_TYPE.REGULAR]
-      selected_ultra_fallback = fallback[C.SECRET_TYPE.ULTRA]
     end
     markers_visible = true
   end
@@ -436,7 +459,7 @@ return function(gt)
     if draw_candidates then
       for slot, data in pairs(selected_entrances) do
         if not red_outline_slots[slot]
-          and permitted_entrance(room, slot, data.secret_type) then
+          and permitted_entrance(room, slot) then
           local rgb = data.rgb
           local ambiguous_opacity
           if data.ambiguous then
@@ -790,6 +813,7 @@ return function(gt)
   end
 
   gt:AddCallback(ModCallbacks.MC_POST_NEW_ROOM, function()
+    last_red_trace = nil
     pending_suplex = {}
     room_blast_pending = nil
     pending_stomps = {}

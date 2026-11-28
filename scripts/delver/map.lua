@@ -31,6 +31,7 @@ M.cells = {}
 ---@field dir LD_Dir  -- source room -> neighbor direction
 ---@field source_lid LD_Lid
 ---@field doorslot DoorSlot
+---@field via_cid LD_Cid?  -- 究极候选两步路线的中间红房格
 ---@field checked boolean
 
 ---@class LD_Candidate
@@ -105,32 +106,52 @@ local function generation_layout_cell(cid)
   if cell and not M.rooms[cell.lid].is_red then return cell end
 end
 
+-- 原始占格不能当作中间红房。真实和推测的究极房共用这套两步入口几何；
+-- 已开启的红房仍可作为中间格，但不能充当原始入口来源。
+local function ultra_entries_via(mid_cid, observed_door_masks)
+  if generation_layout_cell(mid_cid) then return {}, false end
+  local entries, has_source, blocked = {}, false, false
+  for dir, src_cid in pairs(geo.get_neighbors(mid_cid)) do
+    local src = generation_layout_cell(src_cid)
+    if src and src.category ~= C.CELL.CATEGORY.SECRET then
+      local room = M.rooms[src.lid]
+      if src.category == C.CELL.CATEGORY.BOSS or
+        (src.category ~= C.CELL.CATEGORY.UNKNOWN and room.type == RoomType.ROOM_CURSE) then
+        blocked = true
+      else
+        has_source = true
+        local door_dir = (dir + 2) % 4
+        local slot = geo.get_doorslot(door_dir, mid_cid - room.tl_cid, room.shape)
+        if slot == nil then
+          blocked = true
+        else
+          -- Doors 是模板的门槽位掩码，不表示原版当前一定能在此开红门。
+          local mask = observed_door_masks and observed_door_masks[src.lid]
+          if mask == nil or (mask & (1 << slot)) ~= 0 then
+            entries[#entries + 1] = {
+              dir = door_dir, source_lid = src.lid, doorslot = slot,
+              via_cid = mid_cid, checked = mask ~= nil,
+            }
+          end
+        end
+      end
+    end
+  end
+  if blocked then return {}, has_source end
+  return entries, false
+end
+
 ---@param cid LD_Cid
-local function build_entries(cid)
+local function build_entries(cid, observed_door_masks)
   local result = {}
   local cell = M.cells[cid]
   local neighbors = geo.get_neighbors(cid)
 
   if cell and cell.category == C.CELL.CATEGORY.SECRET and
      M.rooms[cell.lid].type == C.SECRET_TYPE.ULTRA then
-    for _, mid_cid in pairs(geo.get_neighbors(cid)) do
-      for dir, src_cid in pairs(geo.get_neighbors(mid_cid)) do
-        local src = generation_layout_cell(src_cid)
-        if src and src.category ~= C.CELL.CATEGORY.SECRET then
-          local room = M.rooms[src.lid]
-          local door_dir = (dir + 2) % 4
-          local slot = geo.get_doorslot(door_dir, mid_cid - room.tl_cid, room.shape)
-          if not slot then
-            log.error("get doorslot failed, dir: " .. door_dir .. " room: " .. room.lid)
-          end
-          result[#result + 1] = {
-            dir = door_dir,
-            source_lid = src.lid,
-            doorslot = slot,
-            checked = false,
-          }
-        end
-      end
+    for _, mid_cid in pairs(neighbors) do
+      local entries = ultra_entries_via(mid_cid, observed_door_masks)
+      for _, entry in ipairs(entries) do result[#result + 1] = entry end
     end
     return result
   end
@@ -433,6 +454,19 @@ function M.update_knowledge(force)
     .. "|room-icon:" .. table.concat(public_typed_ids, ",")
   if not force and signature == knowledge_signature then return false end
 
+  -- 非隐藏、非红房进入后才在 known_ids 中；未进房的门槽不参与剪枝。
+  local observed_door_masks = {}
+  local mirrored = state.get_dimension() == C.DIMENSION.MIRROR
+  for _, lid in ipairs(known_ids) do
+    local room = M.rooms[lid]
+    if not room.is_red and C.CELL.ROOM_TYPE_TO_CATEGORY[room.type] ~= C.CELL.CATEGORY.SECRET
+      and (not mirrored or room.mirror_lid) then
+      local desc = descriptors:Get(mirrored and room.mirror_lid or lid)
+      local mask = desc and desc.Data and desc.Data.Doors
+      if math.type(mask) == 'integer' then observed_door_masks[lid] = mask end
+    end
+  end
+
   local full_cells, previous = M.cells, M.candidates
   M.cells, M.candidates = known_cells, {}
   classification_cells, classification_visible_lids = full_cells, visible_lids
@@ -440,13 +474,13 @@ function M.update_knowledge(force)
     if cell.category == C.CELL.CATEGORY.SECRET then
       M.candidates[cid] = {
         cid = cid, secret_type = M.rooms[cell.lid].type, lid = cell.lid,
-        marker_status = C.MARKER.STATUS.HIDDEN, entries = build_entries(cid),
+        marker_status = C.MARKER.STATUS.HIDDEN, entries = build_entries(cid, observed_door_masks),
       }
     end
   end
   find_fakes()
   classification_cells, classification_visible_lids = nil, nil
-  find_ultra_fakes()
+  find_ultra_fakes(observed_door_masks)
   for cid, candidate in pairs(M.candidates) do
     if candidate.lid == nil then
       if candidate.ambiguous then
@@ -481,7 +515,7 @@ function M.update_knowledge(force)
       M.candidates[cid] = nil
     else
       local old = previous[cid]
-      if old then
+      if old and candidate.secret_type ~= C.SECRET_TYPE.ULTRA then
         for _, entry in ipairs(candidate.entries) do
           for _, prior in ipairs(old.entries) do
             if entry.source_lid == prior.source_lid
@@ -501,105 +535,50 @@ function M.update_knowledge(force)
   return true
 end
 
-find_ultra_fakes = function()
-  local blocked = {}
+find_ultra_fakes = function(observed_door_masks)
+  local blocked, approaches = {}, {}
 
   for cid, cell in pairs(M.cells) do
-    if M.rooms[cell.lid].is_red then goto next_cell end
-    blocked[cid] = true
-    if cell.category ~= C.CELL.CATEGORY.SECRET then
-      for _, n_cid in pairs(geo.get_neighbors(cid)) do
-        blocked[n_cid] = true
-      end
-    end
-    ::next_cell::
-  end
-
-  for cid = 0, C.MAP.SIZE - 1 do
-    local cell = generation_layout_cell(cid)
-    if cell then
+    if not M.rooms[cell.lid].is_red then
       blocked[cid] = true
-      goto continue
-    end
-
-    local empty_n_cids = {}
-    local non_empties = {}
-    local block_empties = false
-    for dir, n_cid in pairs(geo.get_neighbors(cid)) do
-      local n_cell = generation_layout_cell(n_cid)
-      if not n_cell or n_cell.category == C.CELL.CATEGORY.SECRET then
-        empty_n_cids[#empty_n_cids + 1] = n_cid
-      elseif n_cell.category == C.CELL.CATEGORY.BOSS or
-             (n_cell.category ~= C.CELL.CATEGORY.UNKNOWN
-               and M.rooms[n_cell.lid].type == RoomType.ROOM_CURSE) then
-        block_empties = true
-      else
-        non_empties[#non_empties + 1] = {
-          dir = dir, cid = n_cid
-        }
+      if cell.category ~= C.CELL.CATEGORY.SECRET then
+        for _, n_cid in pairs(geo.get_neighbors(cid)) do blocked[n_cid] = true end
       end
     end
-
-    if #non_empties == 0 then
-      goto continue
-    end
-
-    blocked[cid] = true
-    local existing = M.candidates[cid]
-    if existing and existing.secret_type == C.SECRET_TYPE.ULTRA and existing.lid == nil then
-      M.candidates[cid] = nil
-    end
-
-    for _, e_cid in ipairs(empty_n_cids) do
-      if block_empties then break end
-
-      if not blocked[e_cid] and not M.cells[e_cid]
-        and (not M.candidates[e_cid]
-          or M.candidates[e_cid].secret_type == C.SECRET_TYPE.ULTRA) then
-        -- Partial knowledge must not replace a regular/super possibility
-        -- with an ultra-secret guess.
-        if not M.candidates[e_cid] then
-          M.candidates[e_cid] = {
-            cid = e_cid,
-            secret_type = C.SECRET_TYPE.ULTRA,
-            marker_status = C.MARKER.STATUS.HIDDEN,
-            lid = nil,
-            entries = {},
-          }
-        end
-
-        local cand = M.candidates[e_cid]
-        for _, ne in ipairs(non_empties) do
-          local ne_room = M.rooms[M.cells[ne.cid].lid]
-          local dir = (ne.dir + 2) % 4
-          local slot = geo.get_doorslot(dir, cid - ne_room.tl_cid, ne_room.shape)
-          if not slot then block_empties = true break end
-          cand.entries[#cand.entries + 1] = {
-            dir = dir,
-            source_lid = ne_room.lid,
-            doorslot = slot,
-            checked = false,
-          }
-        end
-      end
-    end
-
-    if block_empties then
-      for _, e_cid in ipairs(empty_n_cids) do
-        blocked[e_cid] = true
-        local cand = M.candidates[e_cid]
-        if cand and cand.secret_type == C.SECRET_TYPE.ULTRA and cand.lid == nil then
-          M.candidates[e_cid] = nil
-        end
-      end
-    end
-    ::continue::
   end
 
-  for cid, cand in pairs(M.candidates) do
-    if cand.secret_type == C.SECRET_TYPE.ULTRA and
-       not cand.lid and #cand.entries == 0 then
-      M.candidates[cid] = nil
+  -- 先收齐所有可用中间格和形状限制，再生成候选；不依赖格子遍历顺序。
+  for cid = 0, C.MAP.SIZE - 1 do
+    local entries, invalid = ultra_entries_via(cid, observed_door_masks)
+    if invalid then
+      for _, n_cid in pairs(geo.get_neighbors(cid)) do blocked[n_cid] = true end
+    elseif #entries > 0 then
+      approaches[cid] = entries
+    end
+  end
+
+  for mid_cid, entries in pairs(approaches) do
+    for _, cid in pairs(geo.get_neighbors(mid_cid)) do
+      if not blocked[cid] and not M.cells[cid] then
+        local cand = M.candidates[cid]
+        -- 信息不足时，不用究极猜测覆盖已有的普通／超级可能性。
+        if not cand then
+          cand = {
+            cid = cid, secret_type = C.SECRET_TYPE.ULTRA,
+            marker_status = C.MARKER.STATUS.HIDDEN, entries = {},
+          }
+          M.candidates[cid] = cand
+        end
+        if cand.secret_type == C.SECRET_TYPE.ULTRA then
+          for _, entry in ipairs(entries) do
+            -- 存档恢复会写 checked，不能让不同候选共用可变入口对象。
+            cand.entries[#cand.entries + 1] = {
+              dir = entry.dir, source_lid = entry.source_lid, doorslot = entry.doorslot,
+              via_cid = entry.via_cid, checked = entry.checked,
+            }
+          end
+        end
+      end
     end
   end
 end
